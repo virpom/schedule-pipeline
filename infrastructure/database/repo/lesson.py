@@ -1,0 +1,125 @@
+from datetime import datetime, timedelta
+
+from sqlalchemy import and_, or_, select, delete
+from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from infrastructure.database.models import Lesson, StudentGroup, Stream
+from infrastructure.database.repo.base import BaseRepo
+from parsers.data_processor import LessonInfo, StreamInfo
+
+
+class LessonRepo(BaseRepo):
+    def __init__(self, session: AsyncSession):
+        super().__init__(session)
+
+    async def add_lesson(
+            self,
+            lesson: LessonInfo,
+            stream_id: int,
+    ) -> int:
+        insert_stmt = (
+            insert(Lesson)
+            .values(
+                session_type=lesson.session_type,
+                title=lesson.title,
+                start_time=lesson.start_time,
+                end_time=lesson.end_time,
+                group_code=lesson.group_code,
+                stream_id=stream_id,
+            )
+            .on_conflict_do_nothing(
+                index_elements=['title', 'start_time', 'group_code', 'stream_id']
+            )
+            .returning(Lesson.id)
+        )
+
+        result = await self.session.execute(insert_stmt)
+        await self.session.commit()
+        lesson_id = result.scalar_one()
+        return lesson_id
+
+    async def bulk_add_lessons(self, lessons: list[LessonInfo], stream_id: int) -> list[int]:
+        if not lessons:
+            return []
+
+        insert_stmt = (
+            insert(Lesson)
+            .values(
+                [
+                    {
+                        "session_type": lesson.session_type,
+                        "title": lesson.title,
+                        "start_time": lesson.start_time,
+                        "end_time": lesson.end_time,
+                        "group_code": lesson.group_code,
+                        "stream_id": stream_id,
+                    }
+                    for lesson in lessons
+                ]
+            )
+            .on_conflict_do_nothing(
+                index_elements=['title', 'start_time', 'group_code', 'stream_id']
+            )
+            .returning(Lesson.id)
+        )
+
+        result = await self.session.execute(insert_stmt)
+        await self.session.commit()
+        lessons_id = list(result.scalars().all())
+        return lessons_id
+
+    async def delete_all(self):
+        await self.session.execute(delete(Lesson))
+        await self.session.commit()
+
+    async def get_classes_by_time(self, group_code: str, start: datetime, end: datetime):
+        subquery = select(StudentGroup.stream_id).where(StudentGroup.code == group_code).scalar_subquery()
+
+        result = await self.session.execute(
+            select(Lesson)
+            .where(
+                and_(
+                    or_(
+                        Lesson.group_code == group_code,
+                        and_(
+                            Lesson.group_code == 0,
+                            Lesson.stream_id == subquery
+                        )
+                    ),
+                    Lesson.start_time >= start,
+                    Lesson.end_time <= end
+                )
+            )
+            .order_by(Lesson.start_time)
+        )
+        return result.scalars().all()
+
+    async def get_classes_for_current_week(self, group_code: str):
+        today = datetime.now().date()
+        start_of_week = today - timedelta(days=today.weekday())
+        end_of_week = start_of_week + timedelta(days=6)
+        return await self.get_classes_by_time(group_code, start_of_week, end_of_week)
+
+    async def get_or_create_stream_id(
+            self, stream: StreamInfo
+    ) -> int:
+        insert_stmt = (
+            insert(Stream)
+            .values(
+                code=stream.code,
+                course=stream.course,
+                specialization_code=stream.specialization_code,
+                specialization_title=stream.specialization_title,
+            )
+            .on_conflict_do_update(
+                index_elements=["code", "course", "specialization_code"],
+                set_=dict(specialization_title=stream.specialization_title),
+            )
+            .returning(Stream.id)
+        )
+
+        result = await self.session.execute(insert_stmt)
+        await self.session.commit()
+        stream_id = result.scalar_one()
+        return stream_id

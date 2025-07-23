@@ -1,0 +1,5 @@
+__pycache__/
+schedule_data/
+.idea/
+.env
+*.db
