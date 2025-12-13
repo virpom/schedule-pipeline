@@ -1,4 +1,3 @@
-from typing import Optional
 
 from sqlalchemy.dialects.sqlite import insert
 
@@ -12,7 +11,7 @@ class UserRepo(BaseRepo):
             user_id: int,
             full_name: str,
             language: str,
-            username: Optional[str] = None,
+            username: str | None = None,
     ):
         insert_stmt = (
             insert(User)
@@ -24,10 +23,10 @@ class UserRepo(BaseRepo):
             )
             .on_conflict_do_update(
                 index_elements=[User.id],
-                set_=dict(
-                    username=username,
-                    full_name=full_name,
-                ),
+                set_={
+                    "username": username,
+                    "full_name": full_name,
+                },
             )
             .returning(User)
         )

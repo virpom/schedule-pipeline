@@ -1,4 +1,4 @@
-from typing import Sequence
+from collections.abc import Sequence
 
 from aiogram import Router
 from aiogram.filters import CommandStart
@@ -27,19 +27,19 @@ MONTHS = {
 
 
 @user_router.message(CommandStart())
-async def user_start(message: Message):
+async def user_start(message: Message) -> None:
     await message.reply("Привет! Я бот расписания. Напиши номер группы, чтобы узнать расписание.")
 
 
 @user_router.message()
-async def get_classes(message: Message, repo: RequestsRepo):
+async def get_classes(message: Message, repo: RequestsRepo) -> None:
     class_lessons: Sequence[Lesson] = await repo.lessons.get_classes_for_current_week(message.text)
     if not class_lessons:
         await message.reply("Нет информации о занятиях данной группы")
         return
 
     last_date = (0, 0)
-    response = ''
+    response = ""
     for class_lesson in class_lessons:
         start_time, end_time = class_lesson.start_time, class_lesson.end_time
         class_type = class_lesson.session_type.value.capitalize()[0]

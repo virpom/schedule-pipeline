@@ -1,7 +1,7 @@
 import datetime
 import re
 from dataclasses import dataclass
-from typing import Generator
+from collections.abc import Generator
 
 import pandas as pd
 
@@ -34,7 +34,7 @@ class StreamLessonsInfo:
 
 
 class ScheduleParser:
-    def __init__(self, metadata: ScheduleMetadata, schedule_data: pd.DataFrame):
+    def __init__(self, metadata: ScheduleMetadata, schedule_data: pd.DataFrame) -> None:
         self.metadata = metadata
         self.schedule_data = schedule_data
 
@@ -45,7 +45,7 @@ class ScheduleParser:
             time_intervals = row["Время"].split()
 
             for time_str in time_intervals:
-                start_time, end_time = time_str.split('-')
+                start_time, end_time = time_str.split("-")
                 if self.metadata.session_type == SessionType.PRACTICE:
                     lessons.extend(self._parse_practice(row, day_of_week_code, start_time, end_time))
                 elif self.metadata.session_type == SessionType.LECTURE:
@@ -59,7 +59,7 @@ class ScheduleParser:
             day_of_week_code: str,
             start_time: str,
             end_time: str,
-    ) -> Generator[LessonInfo, None, None]:
+    ) -> Generator[LessonInfo]:
         for group_code in self.schedule_data.columns[2:]:
             lesson_string = row[group_code]
             if pd.isna(lesson_string):
@@ -73,7 +73,7 @@ class ScheduleParser:
             day_of_week_code: str,
             start_time: str,
             end_time: str,
-    ) -> Generator[LessonInfo, None, None]:
+    ) -> Generator[LessonInfo]:
         lesson_title = row["Предмет"]
         weeks_raw = row["Недели"]
         weeks = self._parse_week_nums(weeks_raw)
@@ -81,7 +81,7 @@ class ScheduleParser:
 
     def _create_lessons(
             self, lessons_data, day_of_week_code, start_time, end_time, group_code
-    ) -> Generator[LessonInfo, None, None]:
+    ) -> Generator[LessonInfo]:
         for title, week_nums in lessons_data:
             for week_num in week_nums:
                 yield LessonInfo(
@@ -96,7 +96,7 @@ class ScheduleParser:
         if not lesson_str:
             return []
         pattern = r"\b(.+?):\s?(\d[\d\s,-]+)\s?(?:нед|н)?\.?"
-        matches = re.findall(pattern, lesson_str, re.I)
+        matches = re.findall(pattern, lesson_str, re.IGNORECASE)
         return [(match[0].strip(), self._parse_week_nums(match[1])) for match in matches]
 
     def _parse_week_nums(self, weeks_raw: str) -> list[int]:
@@ -150,8 +150,8 @@ if __name__ == "__main__":
         ]
     )
     parser = ScheduleParser(metadata, data)
-    for lesson in parser.parse_schedule().lessons:
-        print(lesson)
+    for _lesson in parser.parse_schedule().lessons:
+        pass
 
     metadata = ScheduleMetadata(
         session_type=SessionType.PRACTICE,
@@ -168,5 +168,5 @@ if __name__ == "__main__":
         ]
     )
     parser = ScheduleParser(metadata, data)
-    for lesson in parser.parse_schedule().lessons:
-        print(lesson)
+    for _lesson in parser.parse_schedule().lessons:
+        pass

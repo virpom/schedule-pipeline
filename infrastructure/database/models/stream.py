@@ -6,7 +6,7 @@ from .base import Base, TableNameMixin
 
 class Stream(Base, TableNameMixin):
     __table_args__ = (
-        UniqueConstraint('code', 'course', 'specialization_code', name='uc_stream'),
+        UniqueConstraint("code", "course", "specialization_code", name="uc_stream"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -18,5 +18,5 @@ class Stream(Base, TableNameMixin):
 
     lessons: Mapped[list["Lesson"]] = relationship("Lesson", back_populates="stream")
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Stream ({self.specialization_code}, {self.course} course, {self.code})>"

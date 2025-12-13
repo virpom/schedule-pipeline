@@ -1,4 +1,5 @@
-from typing import Callable, Dict, Any, Awaitable
+from typing import Any
+from collections.abc import Callable, Awaitable
 
 from aiogram import BaseMiddleware
 from aiogram.types import Message
@@ -12,9 +13,9 @@ class DatabaseMiddleware(BaseMiddleware):
 
     async def __call__(
             self,
-            handler: Callable[[Message, Dict[str, Any]], Awaitable[Any]],
+            handler: Callable[[Message, dict[str, Any]], Awaitable[Any]],
             event: Message,
-            data: Dict[str, Any],
+            data: dict[str, Any],
     ) -> Any:
         async with self.session_pool() as session:
             repo = RequestsRepo(session)
@@ -30,5 +31,4 @@ class DatabaseMiddleware(BaseMiddleware):
             data["repo"] = repo
             data["user"] = user
 
-            result = await handler(event, data)
-        return result
+            return await handler(event, data)

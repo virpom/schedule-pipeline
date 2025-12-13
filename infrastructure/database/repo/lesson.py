@@ -10,7 +10,7 @@ from parsers.data_processor import LessonInfo, StreamInfo
 
 
 class LessonRepo(BaseRepo):
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession) -> None:
         super().__init__(session)
 
     async def add_lesson(
@@ -29,15 +29,14 @@ class LessonRepo(BaseRepo):
                 stream_id=stream_id,
             )
             .on_conflict_do_nothing(
-                index_elements=['title', 'start_time', 'group_code', 'stream_id']
+                index_elements=["title", "start_time", "group_code", "stream_id"]
             )
             .returning(Lesson.id)
         )
 
         result = await self.session.execute(insert_stmt)
         await self.session.commit()
-        lesson_id = result.scalar_one()
-        return lesson_id
+        return result.scalar_one()
 
     async def bulk_add_lessons(self, lessons: list[LessonInfo], stream_id: int) -> list[int]:
         if not lessons:
@@ -59,17 +58,16 @@ class LessonRepo(BaseRepo):
                 ]
             )
             .on_conflict_do_nothing(
-                index_elements=['title', 'start_time', 'group_code', 'stream_id']
+                index_elements=["title", "start_time", "group_code", "stream_id"]
             )
             .returning(Lesson.id)
         )
 
         result = await self.session.execute(insert_stmt)
         await self.session.commit()
-        lessons_id = list(result.scalars().all())
-        return lessons_id
+        return list(result.scalars().all())
 
-    async def delete_all(self):
+    async def delete_all(self) -> None:
         await self.session.execute(delete(Lesson))
         await self.session.commit()
 
@@ -114,12 +112,11 @@ class LessonRepo(BaseRepo):
             )
             .on_conflict_do_update(
                 index_elements=["code", "course", "specialization_code"],
-                set_=dict(specialization_title=stream.specialization_title),
+                set_={"specialization_title": stream.specialization_title},
             )
             .returning(Stream.id)
         )
 
         result = await self.session.execute(insert_stmt)
         await self.session.commit()
-        stream_id = result.scalar_one()
-        return stream_id
+        return result.scalar_one()

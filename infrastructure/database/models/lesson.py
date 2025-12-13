@@ -15,8 +15,8 @@ class SessionType(enum.Enum):
 
 class Lesson(Base, TableNameMixin):
     __table_args__ = (
-        UniqueConstraint('title', 'start_time', 'group_code', 'stream_id',
-                         name='uc_class_session'),
+        UniqueConstraint("title", "start_time", "group_code", "stream_id",
+                         name="uc_class_session"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -33,5 +33,5 @@ class Lesson(Base, TableNameMixin):
     student_group: Mapped["StudentGroup"] = relationship("StudentGroup", back_populates="lessons")
     stream: Mapped["Stream"] = relationship("Stream", back_populates="lessons")
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Lesson {self.student_group}:{self.title} [{self.start_time} - {self.end_time}]>"

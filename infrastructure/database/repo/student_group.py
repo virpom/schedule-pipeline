@@ -14,7 +14,7 @@ class StudentGroupRepo(BaseRepo):
             )
             .on_conflict_do_update(
                 index_elements=["code"],
-                set_=dict(stream_id=stream_id),
+                set_={"stream_id": stream_id},
             ).returning(StudentGroup.code)
         )
         result = await self.session.execute(insert_stmt)

@@ -11,5 +11,5 @@ class StudentGroup(Base, TableNameMixin):
     stream: Mapped["Stream"] = relationship("Stream")
     lessons: Mapped[list["Lesson"]] = relationship("Lesson", back_populates="student_group")
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<StudentGroup ({self.code}, {self.stream.stream})>"

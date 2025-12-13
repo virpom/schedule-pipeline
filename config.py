@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Optional
 
 from environs import Env
 from sqlalchemy.engine.url import URL
@@ -57,15 +56,14 @@ class TgBot:
 
 @dataclass
 class RedisConfig:
-    redis_pass: Optional[str]
-    redis_port: Optional[int]
-    redis_host: Optional[str]
+    redis_pass: str | None
+    redis_port: int | None
+    redis_host: str | None
 
     def dsn(self) -> str:
         if self.redis_pass:
             return f"redis://:{self.redis_pass}@{self.redis_host}:{self.redis_port}/0"
-        else:
-            return f"redis://{self.redis_host}:{self.redis_port}/0"
+        return f"redis://{self.redis_host}:{self.redis_port}/0"
 
     @staticmethod
     def from_env(env: Env):
@@ -87,11 +85,11 @@ class Miscellaneous:
 class Config:
     tg_bot: TgBot
     misc: Miscellaneous
-    db: Optional[DbConfig] = None
-    redis: Optional[RedisConfig] = None
+    db: DbConfig | None = None
+    redis: RedisConfig | None = None
 
 
-def load_config(path: str = None) -> Config:
+def load_config(path: str | None = None) -> Config:
     env = Env()
     env.read_env(path)
 

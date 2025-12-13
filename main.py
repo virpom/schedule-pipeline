@@ -17,11 +17,11 @@ from tgbot.middlewares.database import DatabaseMiddleware
 from tgbot.services import broadcaster
 
 
-async def on_startup(bot: Bot, admin_ids: list[int]):
+async def on_startup(bot: Bot, admin_ids: list[int]) -> None:
     await broadcaster.broadcast(bot, admin_ids, "Бот запущен")
 
 
-def register_global_middlewares(dp: Dispatcher, session_pool=None):
+def register_global_middlewares(dp: Dispatcher, session_pool=None) -> None:
     middleware_types = [
         DatabaseMiddleware(session_pool=session_pool)
     ]
@@ -31,7 +31,7 @@ def register_global_middlewares(dp: Dispatcher, session_pool=None):
         dp.callback_query.outer_middleware(middleware_type)
 
 
-def setup_logging():
+def setup_logging() -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(filename)s:%(lineno)d #%(levelname)-8s [%(asctime)s] - %(name)s - %(message)s",
@@ -46,11 +46,10 @@ def get_storage(config: Config):
             config.redis.dsn(),
             key_builder=DefaultKeyBuilder(with_bot_id=True, with_destiny=True),
         )
-    else:
-        return MemoryStorage()
+    return MemoryStorage()
 
 
-async def load_classes_data(repo: RequestsRepo, path: str):
+async def load_classes_data(repo: RequestsRepo, path: str) -> None:
     info, df = PDFScheduleExtractor(path).extract_schedule()
     stream_lessons = ScheduleParser(info, df).parse_schedule()
     stream_id = await repo.lessons.get_or_create_stream_id(stream_lessons.stream)
@@ -61,7 +60,7 @@ async def load_classes_data(repo: RequestsRepo, path: str):
         await repo.student_group.get_or_create_group(group_code, stream_id)
 
 
-async def main():
+async def main() -> None:
     setup_logging()
 
     config = load_config(".env")
@@ -86,7 +85,7 @@ async def main():
                 logging.info(f"Parsing '{filename.path}'")
                 await load_classes_data(repo, filename.path)
             except (AttributeError, ValueError) as e:
-                logging.error(f"{filename.path:50}: {e}")
+                logging.exception(f"{filename.path:50}: {e}")
             else:
                 count += 1
         logging.info(f"{count} files successful parsed")
@@ -98,4 +97,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        logging.error("Bot is stopped!")
+        logging.exception("Bot is stopped!")

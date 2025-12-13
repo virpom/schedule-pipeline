@@ -2,7 +2,7 @@ import datetime
 from dataclasses import dataclass
 from enum import IntEnum
 
-DAYS_OF_WEEK = ('ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ', 'ВС')
+DAYS_OF_WEEK = ("ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС")
 
 
 class WeekDay(IntEnum):
@@ -44,17 +44,3 @@ class Period:
         if start_date.weekday() == WeekDay.SUNDAY:
             start_date += datetime.timedelta(days=1)
         return start_date
-
-
-if __name__ == '__main__':
-    period1 = Period(2024, 2025, Semester.FALL)
-    print(f"Осенний семестр начинается: {period1.get_start_date()}")
-
-    period2 = Period(2024, 2025, Semester.SPRING)
-    print(f"Весенний семестр начинается: {period2.get_start_date()}")
-
-    weekday = WeekDay.from_short_name('ПН')
-    print(f"WeekDay index: {weekday}, short_name: {weekday.short_name}")
-
-    weekday = WeekDay(1)
-    print(f"WeekDay index: {weekday}, short_name: {weekday.short_name}")
