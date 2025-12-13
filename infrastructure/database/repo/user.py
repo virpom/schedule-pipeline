@@ -1,5 +1,5 @@
 
-from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.dialects.postgresql import insert
 
 from infrastructure.database.models import User
 from infrastructure.database.repo.base import BaseRepo

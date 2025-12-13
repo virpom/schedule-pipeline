@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 
 from sqlalchemy import and_, or_, select, delete
-from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from infrastructure.database.models import Lesson, StudentGroup, Stream

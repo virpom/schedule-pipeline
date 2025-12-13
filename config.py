@@ -12,12 +12,11 @@ class DbConfig:
     database: str
     port: int = 5432
 
-    def construct_sqlalchemy_url(self, driver="asyncpg", host=None, port=None) -> str:
+    def construct_sqlalchemy_url(self, driver="psycopg", host=None, port=None) -> str:
         if not host:
             host = self.host
         if not port:
             port = self.port
-        return "sqlite+aiosqlite:///database.db"  # TEMP
         uri = URL.create(
             drivername=f"postgresql+{driver}",
             username=self.user,
@@ -31,10 +30,10 @@ class DbConfig:
     @staticmethod
     def from_env(env: Env):
         host = env.str("DB_HOST")
+        port = env.int("DB_PORT", 5432)
         password = env.str("POSTGRES_PASSWORD")
         user = env.str("POSTGRES_USER")
         database = env.str("POSTGRES_DB")
-        port = env.int("DB_PORT", 5432)
         return DbConfig(
             host=host, password=password, user=user, database=database, port=port
         )

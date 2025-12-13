@@ -1,4 +1,4 @@
-from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.dialects.postgresql import insert
 
 from infrastructure.database.models import StudentGroup
 from infrastructure.database.repo.base import BaseRepo
