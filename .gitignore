@@ -1,5 +1,8 @@
-__pycache__/
 schedule_data/
-.idea/
-.env
+*.pyc
 *.db
+.env
+/.idea/
+/.venv/
+__pycache__/
+**/*.log

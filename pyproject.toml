@@ -1,0 +1,116 @@
+[project]
+name = "schedule-bot"
+version = "0.1.0"
+description = "A Telegram bot for parsing, storing, and providing university class schedules"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "aiogram>=3.23.0",
+    "aiohttp>=3.13.2",
+    "aiosqlite>=0.21.0",
+    "alembic>=1.17.2",
+    "beautifulsoup4>=4.14.3",
+    "environs>=14.5.0",
+    "pandas>=2.3.3",
+    "pdfplumber>=0.11.8",
+    "redis>=7.1.0",
+    "sqlalchemy>=2.0.45",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit==4.5.0",
+]
+lint = [
+    "ruff==0.14.9",
+    "mypy==1.19.0",
+]
+
+[tool.ruff]
+line-length = 79
+exclude = [
+    ".git",
+    ".mypy_cache",
+    ".ruff_cache",
+    "__pypackages__",
+    "__pycache__",
+    "venv",
+    ".venv",
+    "migrations",
+]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "A003",
+    "ANN002", "ANN003", "ANN401",
+    "C901",
+    "COM812",
+    "CPY001",
+    "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107", "D203", "D205", "D212",
+    "DOC201", "DOC501",
+    "ERA001",
+    "UP037",
+    "F821",
+    "FA100", "FA102",
+    "FBT001", "FBT002",
+    "FIX002",
+    "I001",
+    "PLC2801",
+    "PLR0911", "PLR0912", "PLR0913", "PLR0914", "PLR0915", "PLR0917", "PLR1702", "PLR5501", "PLR6301",
+    "PLW0120",
+    "RUF001", "RUF029",
+    "TC006",
+    "TD002", "TD003",
+    "TCH",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.mypy]
+python_version = "3.14"
+plugins = [
+    "pydantic.mypy",
+    "sqlalchemy.ext.mypy.plugin",
+]
+allow_redefinition = true
+check_untyped_defs = true
+disallow_any_generics = true
+disallow_incomplete_defs = true
+disallow_untyped_calls = true
+disallow_untyped_defs = true
+extra_checks = true
+follow_imports = "normal"
+follow_imports_for_stubs = true
+ignore_missing_imports = false
+no_implicit_optional = true
+no_implicit_reexport = true
+pretty = true
+show_absolute_path = true
+show_error_codes = true
+show_error_context = true
+warn_redundant_casts = true
+warn_unused_configs = true
+warn_unused_ignores = true
+
+disable_error_code = [
+    "assignment",
+    "attr-defined",
+    "no-redef",
+    "union-attr",
+]
+
+exclude = [
+    "\\.?venv",
+    "\\.idea",
+    "\\.tests?",
+]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
