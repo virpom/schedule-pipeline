@@ -73,6 +73,6 @@ if __name__ == "__main__":
     parser = SZGMUParser(
         base_url="https://szgmu.ru",
         schedule_url="https://szgmu.ru/rus/m/518/",
-        output_dir="..\schedule_data"
+        output_dir=r"..\schedule_data"
     )
     asyncio.run(parser.run())

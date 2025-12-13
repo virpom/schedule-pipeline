@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -76,19 +77,19 @@ async def main():
 
     register_global_middlewares(dp, session_pool)
 
-    # async with session_pool() as session:
-    #     repo = RequestsRepo(session)
-    #     await repo.lessons.delete_all()
-    #     count = 0
-    #     for filename in os.scandir("schedule_data_full"):
-    #         try:
-    #             logging.info(f"Parsing '{filename.path}'")
-    #             await load_classes_data(repo, filename.path)
-    #         except (AttributeError, ValueError) as e:
-    #             logging.error(f"{filename.path:50}: {e}")
-    #         else:
-    #             count += 1
-    #     logging.info(f"{count} files successful parsed")
+    async with session_pool() as session:
+        repo = RequestsRepo(session)
+        await repo.lessons.delete_all()
+        count = 0
+        for filename in os.scandir("schedule_data"):
+            try:
+                logging.info(f"Parsing '{filename.path}'")
+                await load_classes_data(repo, filename.path)
+            except (AttributeError, ValueError) as e:
+                logging.error(f"{filename.path:50}: {e}")
+            else:
+                count += 1
+        logging.info(f"{count} files successful parsed")
     await on_startup(bot, config.tg_bot.admin_ids)
     await dp.start_polling(bot)
 
