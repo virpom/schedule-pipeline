@@ -50,14 +50,17 @@ def get_storage(config: Config):
 
 
 async def load_classes_data(repo: RequestsRepo, path: str) -> None:
-    info, df = PDFScheduleExtractor(path).extract_schedule()
-    stream_lessons = ScheduleParser(info, df).parse_schedule()
-    stream_id = await repo.lessons.get_or_create_stream_id(stream_lessons.stream)
-    await repo.lessons.bulk_add_lessons(stream_lessons.lessons, stream_id)
-
-    group_codes = {lesson.group_code for lesson in stream_lessons.lessons}
-    for group_code in group_codes:
-        await repo.student_group.get_or_create_group(group_code, stream_id)
+    try:
+        info, df = PDFScheduleExtractor(path).extract_schedule()
+        stream_lessons = ScheduleParser(info, df).parse_schedule()
+        stream_id = await repo.lessons.get_or_create_stream_id(stream_lessons.stream)
+        group_codes = {lesson.group_code for lesson in stream_lessons.lessons}
+        for group_code in group_codes:
+            await repo.student_group.get_or_create_group(group_code, stream_id)
+        await repo.lessons.bulk_add_lessons(stream_lessons.lessons, stream_id)
+    except Exception as e:
+        await repo.session.rollback()
+        raise e
 
 
 async def main() -> None:
@@ -79,21 +82,26 @@ async def main() -> None:
     async with session_pool() as session:
         repo = RequestsRepo(session)
         await repo.lessons.delete_all()
+        await session.commit()
         count = 0
         for filename in os.scandir("schedule_data"):
             try:
                 logging.info(f"Parsing '{filename.path}'")
                 await load_classes_data(repo, filename.path)
-            except (AttributeError, ValueError) as e:
-                logging.exception(f"{filename.path:50}: {e}")
-            else:
+                await session.commit()
                 count += 1
+            except Exception as e:
+                await session.rollback()
+                logging.exception(f"{filename.path:50}: {e}")
         logging.info(f"{count} files successful parsed")
     await on_startup(bot, config.tg_bot.admin_ids)
     await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
+    import sys
+    if sys.platform == "win32": 
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):

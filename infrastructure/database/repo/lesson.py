@@ -35,7 +35,6 @@ class LessonRepo(BaseRepo):
         )
 
         result = await self.session.execute(insert_stmt)
-        await self.session.commit()
         return result.scalar_one()
 
     async def bulk_add_lessons(self, lessons: list[LessonInfo], stream_id: int) -> list[int]:
@@ -48,7 +47,7 @@ class LessonRepo(BaseRepo):
                 [
                     {
                         "session_type": lesson.session_type,
-                        "title": lesson.title,
+                        "title": lesson.title[:128] if len(lesson.title) > 128 else lesson.title,
                         "start_time": lesson.start_time,
                         "end_time": lesson.end_time,
                         "group_code": lesson.group_code,
@@ -64,12 +63,10 @@ class LessonRepo(BaseRepo):
         )
 
         result = await self.session.execute(insert_stmt)
-        await self.session.commit()
         return list(result.scalars().all())
 
     async def delete_all(self) -> None:
         await self.session.execute(delete(Lesson))
-        await self.session.commit()
 
     async def get_classes_by_time(self, group_code: str, start: datetime, end: datetime):
         subquery = select(StudentGroup.stream_id).where(StudentGroup.code == group_code).scalar_subquery()
@@ -81,7 +78,7 @@ class LessonRepo(BaseRepo):
                     or_(
                         Lesson.group_code == group_code,
                         and_(
-                            Lesson.group_code == 0,
+                            Lesson.group_code == str(0),
                             Lesson.stream_id == subquery
                         )
                     ),
@@ -118,5 +115,4 @@ class LessonRepo(BaseRepo):
         )
 
         result = await self.session.execute(insert_stmt)
-        await self.session.commit()
         return result.scalar_one()

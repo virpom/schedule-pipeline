@@ -18,6 +18,4 @@ class StudentGroupRepo(BaseRepo):
             ).returning(StudentGroup.code)
         )
         result = await self.session.execute(insert_stmt)
-
-        await self.session.commit()
         return result.scalar_one()

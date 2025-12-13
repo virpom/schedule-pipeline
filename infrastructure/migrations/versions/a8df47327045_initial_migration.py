@@ -1,8 +1,8 @@
-"""Create tables
+"""Initial migration
 
-Revision ID: d422e31bdf96
+Revision ID: a8df47327045
 Revises: 
-Create Date: 2025-12-12 17:08:17.100606
+Create Date: 2025-12-13 19:57:33.851396
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'd422e31bdf96'
+revision: str = 'a8df47327045'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -42,7 +42,7 @@ def upgrade() -> None:
     sa.Column('start_time', sa.DateTime(), nullable=False),
     sa.Column('end_time', sa.DateTime(), nullable=False),
     sa.Column('group_code', sa.String(length=8), nullable=False),
-    sa.Column('stream_id', sa.String(length=3), nullable=False),
+    sa.Column('stream_id', sa.Integer(), nullable=False),
     sa.ForeignKeyConstraint(['group_code'], ['student_group.code'], ),
     sa.ForeignKeyConstraint(['stream_id'], ['stream.id'], ),
     sa.PrimaryKeyConstraint('id'),
@@ -52,10 +52,10 @@ def upgrade() -> None:
     sa.Column('id', sa.BigInteger(), autoincrement=False, nullable=False),
     sa.Column('username', sa.String(length=128), nullable=True),
     sa.Column('full_name', sa.String(length=128), nullable=False),
-    sa.Column('is_active', sa.Boolean(), server_default=sa.text('1'), nullable=False),
+    sa.Column('is_active', sa.Boolean(), server_default=sa.text('true'), nullable=False),
     sa.Column('language', sa.String(length=10), server_default=sa.text("'ru'"), nullable=False),
     sa.Column('group_code', sa.String(length=8), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
     sa.ForeignKeyConstraint(['group_code'], ['student_group.code'], ),
     sa.PrimaryKeyConstraint('id')
     )

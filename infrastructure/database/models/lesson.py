@@ -28,7 +28,7 @@ class Lesson(Base, TableNameMixin):
     start_time: Mapped[datetime.datetime] = mapped_column(DateTime)
     end_time: Mapped[datetime.datetime] = mapped_column(DateTime)
     group_code: Mapped[str] = mapped_column(String(8), ForeignKey("student_group.code"))
-    stream_id: Mapped[str] = mapped_column(String(3), ForeignKey("stream.id"))
+    stream_id: Mapped[int] = mapped_column(Integer, ForeignKey("stream.id"))
 
     student_group: Mapped["StudentGroup"] = relationship("StudentGroup", back_populates="lessons")
     stream: Mapped["Stream"] = relationship("Stream", back_populates="lessons")
