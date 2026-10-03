@@ -41,6 +41,13 @@ def _split_subject(raw: str) -> tuple[str, str]:
     return raw, ""
 
 
+def _parse_para(raw: str) -> tuple[int, int] | None:
+    nums = [int(x) for x in re.findall(r"\d+", raw)]
+    if not nums:
+        return None
+    return nums[0], nums[-1]
+
+
 def parse_docx(data: bytes, date: datetime.date) -> list[dict]:
     doc = Document(BytesIO(data))
     if not doc.tables:
@@ -52,13 +59,15 @@ def parse_docx(data: bytes, date: datetime.date) -> list[dict]:
         cells = [c.text.strip() for c in row.cells]
         if len(cells) < 4:
             continue
-        group, para, subject_raw, room = cells[0], cells[1], cells[2], cells[3]
+        group, para_raw, subject_raw, room = cells[0], cells[1], cells[2], cells[3]
 
         if group and group.lower().startswith("группа"):
             continue
         if group:
             current_group = group
-        if not para.isdigit():
+
+        paras = _parse_para(para_raw)
+        if paras is None:
             continue
 
         subject, teacher = _split_subject(subject_raw)
@@ -68,7 +77,8 @@ def parse_docx(data: bytes, date: datetime.date) -> list[dict]:
         lessons.append({
             "date": date,
             "group": current_group,
-            "para": int(para),
+            "para": paras[0],
+            "para_end": paras[1],
             "subject": subject,
             "teacher": teacher,
             "room": room,

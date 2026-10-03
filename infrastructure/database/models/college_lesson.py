@@ -15,6 +15,7 @@ class CollegeLesson(Base, TableNameMixin):
     date: Mapped[datetime.date] = mapped_column(Date, index=True)
     group: Mapped[str] = mapped_column(String(32), index=True)
     para: Mapped[int] = mapped_column(Integer)
+    para_end: Mapped[int] = mapped_column(Integer)
     subject: Mapped[str] = mapped_column(String(128))
     teacher: Mapped[str] = mapped_column(String(128), default="")
     room: Mapped[str] = mapped_column(String(64), default="")
