@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import select, func
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert
 
 from infrastructure.database.models import CollegeLesson
@@ -23,6 +23,11 @@ class CollegeLessonRepo(BaseRepo):
             .on_conflict_do_nothing(index_elements=["date", "group", "para"])
         )
         await self.session.commit()
+
+    async def replace_date(self, date: datetime.date, lessons: list[dict]) -> None:
+        await self.session.execute(delete(CollegeLesson).where(CollegeLesson.date == date))
+        await self.session.commit()
+        await self.bulk_upsert(lessons)
 
     async def get_for_group_date(
             self, group: str, date: datetime.date

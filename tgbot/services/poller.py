@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import hashlib
 import logging
 
 from aiohttp import ClientSession
@@ -17,17 +18,29 @@ async def poll_once(session_pool, config: Config) -> list[datetime.date]:
         html = await polar.fetch_html(session, config.schedule_url)
         links = polar.extract_daily_links(html, config.base_url)
         for date, url in links:
+            try:
+                async with session.get(url, raise_for_status=True) as resp:
+                    data = await resp.read()
+            except Exception as e:
+                logging.warning("download failed %s: %s", url, e)
+                continue
+
+            digest = hashlib.md5(data).hexdigest()
             async with session_pool() as db:
                 repo = RequestsRepo(db)
-                if await repo.college_lessons.has_source(url):
+                prev = await repo.schedule_files.get_hash(date)
+                if prev == digest:
                     continue
-                async with session.get(url, raise_for_status=True) as resp:
-                    lessons = polar.parse_docx(await resp.read(), date)
+
+                lessons = polar.parse_docx(data, date)
                 for lesson in lessons:
                     lesson["source_url"] = url
-                await repo.college_lessons.bulk_upsert(lessons)
-                logging.info("parsed %s -> %d lessons", url, len(lessons))
-                new_dates.append(date)
+                await repo.college_lessons.replace_date(date, lessons)
+                await repo.schedule_files.set_hash(date, digest)
+                logging.info("parsed %s (%s) -> %d lessons", url, date, len(lessons))
+
+                if prev is None:
+                    new_dates.append(date)
     return new_dates
 
 
