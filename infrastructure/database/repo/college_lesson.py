@@ -34,6 +34,16 @@ class CollegeLessonRepo(BaseRepo):
         )
         return list(result.scalars().all())
 
+    async def get_for_group_range(
+            self, group: str, start: datetime.date, end: datetime.date
+    ) -> list[CollegeLesson]:
+        result = await self.session.execute(
+            select(CollegeLesson)
+            .where(CollegeLesson.group == group, CollegeLesson.date >= start, CollegeLesson.date <= end)
+            .order_by(CollegeLesson.date, CollegeLesson.para)
+        )
+        return list(result.scalars().all())
+
     async def get_groups(self) -> list[str]:
         result = await self.session.execute(
             select(CollegeLesson.group).distinct().order_by(CollegeLesson.group)
