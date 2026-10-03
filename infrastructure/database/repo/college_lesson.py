@@ -49,3 +49,12 @@ class CollegeLessonRepo(BaseRepo):
             select(CollegeLesson.group).distinct().order_by(CollegeLesson.group)
         )
         return list(result.scalars().all())
+
+    async def get_dates_for_group(self, group: str) -> list[datetime.date]:
+        result = await self.session.execute(
+            select(CollegeLesson.date)
+            .where(CollegeLesson.group == group)
+            .distinct()
+            .order_by(CollegeLesson.date.desc())
+        )
+        return list(result.scalars().all())

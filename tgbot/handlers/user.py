@@ -21,7 +21,8 @@ def menu_kb(subscribed: bool) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📅 Сегодня", callback_data="day:today"),
          InlineKeyboardButton(text="📅 Завтра", callback_data="day:tomorrow")],
         [InlineKeyboardButton(text="🗓 Вся неделя", callback_data="week"),
-         InlineKeyboardButton(text="⏰ Звонки", callback_data="bell")],
+         InlineKeyboardButton(text="📜 История", callback_data="hist")],
+        [InlineKeyboardButton(text="⏰ Звонки", callback_data="bell")],
         [InlineKeyboardButton(text=sub_text, callback_data="sub:toggle")],
         [InlineKeyboardButton(text="🎯 Сменить группу", callback_data="pick")],
     ])
@@ -140,6 +141,44 @@ async def cb_week(cb: CallbackQuery, repo: RequestsRepo, user: User):
 async def cb_bell(cb: CallbackQuery, repo: RequestsRepo):
     items = await repo.bell_schedule.get_all()
     await cb.message.edit_text(format_bell(items), reply_markup=BACK_KB)
+    await cb.answer()
+
+
+@user_router.callback_query(F.data == "hist")
+async def cb_hist(cb: CallbackQuery, repo: RequestsRepo, user: User):
+    if not await _require_group(cb, user):
+        return
+    dates = await repo.college_lessons.get_dates_for_group(user.group)
+    past = [d for d in dates if d < datetime.date.today()]
+    if not past:
+        await cb.message.edit_text("📜 Истории расписания пока нет", reply_markup=BACK_KB)
+        await cb.answer()
+        return
+    buttons = [
+        InlineKeyboardButton(text=f"{d.day:02d}.{d.month:02d}", callback_data=f"hist:{d.isoformat()}")
+        for d in past[:28]
+    ]
+    rows = [buttons[i:i + 4] for i in range(0, len(buttons), 4)]
+    rows.append([InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")])
+    await cb.message.edit_text(
+        "📜 История расписания\n\nВыбери дату 👇",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+    await cb.answer()
+
+
+@user_router.callback_query(F.data.startswith("hist:"))
+async def cb_hist_date(cb: CallbackQuery, repo: RequestsRepo, user: User):
+    if not await _require_group(cb, user):
+        return
+    date = datetime.date.fromisoformat(cb.data.split(":", 1)[1])
+    bell = await repo.bell_schedule.as_dict()
+    lessons = await repo.college_lessons.get_for_group_date(user.group, date)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ К истории", callback_data="hist")],
+        [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
+    ])
+    await cb.message.edit_text(format_day(date, lessons, bell), reply_markup=kb)
     await cb.answer()
 
 
