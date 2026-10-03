@@ -1,5 +1,6 @@
 from .base import Base
-from .lesson import Lesson
-from .stream import Stream
-from .student_group import StudentGroup
+from .bell_schedule import BellSchedule
+from .college_lesson import CollegeLesson
 from .user import User
+
+__all__ = ["Base", "BellSchedule", "CollegeLesson", "User"]

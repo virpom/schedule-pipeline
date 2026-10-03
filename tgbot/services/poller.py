@@ -1,0 +1,57 @@
+import asyncio
+import datetime
+import logging
+
+from aiohttp import ClientSession
+
+from common.schedule import format_day
+from config import Config
+from infrastructure.database.repo.requests import RequestsRepo
+from parsers import polar
+from tgbot.services.broadcaster import send_message
+
+
+async def poll_once(session_pool, config: Config) -> list[datetime.date]:
+    new_dates: list[datetime.date] = []
+    async with ClientSession() as session:
+        html = await polar.fetch_html(session, config.schedule_url)
+        links = polar.extract_daily_links(html, config.base_url)
+        for date, url in links:
+            async with session_pool() as db:
+                repo = RequestsRepo(db)
+                if await repo.college_lessons.has_source(url):
+                    continue
+                async with session.get(url, raise_for_status=True) as resp:
+                    lessons = polar.parse_docx(await resp.read(), date)
+                for lesson in lessons:
+                    lesson["source_url"] = url
+                await repo.college_lessons.bulk_upsert(lessons)
+                logging.info("parsed %s -> %d lessons", url, len(lessons))
+                new_dates.append(date)
+    return new_dates
+
+
+async def notify_new_schedule(bot, session_pool, dates: list[datetime.date]) -> None:
+    async with session_pool() as db:
+        repo = RequestsRepo(db)
+        bell = await repo.bell_schedule.as_dict()
+        subscribers = await repo.users.get_subscribed()
+    for date in sorted(dates):
+        for user in subscribers:
+            async with session_pool() as db:
+                repo = RequestsRepo(db)
+                lessons = await repo.college_lessons.get_for_group_date(user.group, date)
+            text = format_day(date, lessons, bell)
+            await send_message(bot, user.id, text)
+
+
+async def poller_loop(bot, session_pool, config: Config) -> None:
+    logging.info("poller started, interval=%ss", config.poll_interval)
+    while True:
+        try:
+            new_dates = await poll_once(session_pool, config)
+            if new_dates:
+                await notify_new_schedule(bot, session_pool, new_dates)
+        except Exception:
+            logging.exception("poll failed")
+        await asyncio.sleep(config.poll_interval)

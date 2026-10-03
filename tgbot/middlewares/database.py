@@ -1,14 +1,16 @@
-from typing import Callable, Dict, Any, Awaitable
+from typing import Any, Awaitable, Callable, Dict
 
 from aiogram import BaseMiddleware
 from aiogram.types import Message
 
+from config import Config
 from infrastructure.database.repo.requests import RequestsRepo
 
 
 class DatabaseMiddleware(BaseMiddleware):
-    def __init__(self, session_pool) -> None:
+    def __init__(self, session_pool, config: Config) -> None:
         self.session_pool = session_pool
+        self.config = config
 
     async def __call__(
             self,
@@ -23,12 +25,12 @@ class DatabaseMiddleware(BaseMiddleware):
                 event.from_user.id,
                 event.from_user.full_name,
                 event.from_user.language_code,
-                event.from_user.username
+                event.from_user.username,
             )
 
             data["session"] = session
             data["repo"] = repo
             data["user"] = user
+            data["config"] = self.config
 
-            result = await handler(event, data)
-        return result
+            return await handler(event, data)

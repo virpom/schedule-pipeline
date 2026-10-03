@@ -3,3 +3,5 @@ schedule_data/
 .idea/
 .env
 *.db
+data/
+.venv/

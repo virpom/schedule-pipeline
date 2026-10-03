@@ -1,92 +1,66 @@
-# Schedule Pipeline Telegram Bot
+# Schedule Pipeline — Telegram bot расписания Политехнического колледжа ЗГУ
 
-A Telegram bot for parsing, storing, and providing university class schedules. The bot allows users to request their group schedule and provides an admin interface for broadcasting messages. It supports schedule extraction from PDF files, database storage, and user-friendly Telegram interactions.
+Бот парсит ежедневное расписание с сайта ЗГУ, хранит в SQLite и отдаёт по запросу или рассылкой подписчикам.
 
-## Features
-- **Telegram Bot**: Users can request their group schedule by sending their group number.
-- **PDF Schedule Parsing**: Extracts schedule data from university PDF files.
-- **Database Storage**: Stores lessons, streams, student groups, and users in a relational database (SQLite by default).
-- **Admin Broadcast**: Sends startup and broadcast messages to admin users.
-- **Schedule Downloader**: Downloads and parses schedules from university websites.
-- **Async & Modern Python**: Built with `aiogram`, `SQLAlchemy`, and async best practices.
+## Режимы
 
-## Project Structure
-```
-main.py                      # Entry point for the bot
-config.py                    # Configuration and environment variables
-requirements.txt             # Python dependencies
-alembic.ini                  # Alembic migration config
-infrastructure/              # Database models, migrations, and setup
-parsers/                     # PDF and data parsers, schedule downloader
-common/                      # Shared utilities (e.g., academic calendar)
-tgbot/                       # Telegram bot handlers, middlewares, services
-```
+- **daily** (сейчас): сайт выкладывает ежедневное расписание `.docx` («Расписание на DD.MM.YYYY»). Бот раз в `POLL_INTERVAL` секунд проверяет страницу, скачивает новые файлы, парсит и сразу рассылает подписчикам.
+- **permanent** (позже): основное расписание на семестр. Парсер под него не написан — формат файла ещё не выложен (см. ниже «Как добавить постоянное расписание»).
 
-## Setup Instructions
+## Команды
 
-### 1. Clone the Repository
+- `/start` — справка
+- `/group ТЭ-26ФП` — задать свою группу
+- `/today`, `/tomorrow` — расписание на сегодня/завтра
+- `/subscribe` / `/unsubscribe` — рассылка при появлении нового расписания
+- текст с номером группы — сегодня + завтра
+- админ: `/bell` (показать звонки), `/setbell MONDAY I_IV 1 09:25-10:10` (поменять звонок)
+
+## Запуск (Docker)
+
 ```bash
-git clone https://github.com/gurumbay/schedule-pipeline
-cd schedule-pipeline
+cp .env.example .env   # вписать BOT_TOKEN и ADMINS
+docker compose up -d --build
 ```
 
-### 2. Install Dependencies
+SQLite лежит в `./data/database.db` (volume). Звонки сидятся автоматически и правятся через `/setbell`.
+
+## Локально
+
 ```bash
-pip install -r requirements.txt
+python -m venv .venv && .venv/bin/pip install -r requirements.txt
+BOT_TOKEN=... ADMINS=... .venv/bin/python main.py
 ```
 
-### 3. Configure Environment Variables
-Create a `.env` file in the project root with the following variables:
-```
-BOT_TOKEN=<your-telegram-bot-token>
-ADMINS=<list-of-admin-ids>
-USE_REDIS=False
-DB_HOST=localhost
-POSTGRES_PASSWORD=yourpassword
-POSTGRES_USER=youruser
-POSTGRES_DB=yourdb
-DB_PORT=5432
-REDIS_PASSWORD=yourredispassword
-REDIS_PORT=6379
-REDIS_HOST=localhost
-```
-*Note: By default, the project uses SQLite for local development. For production, configure PostgreSQL and Redis as needed.*
+## Как добавить постоянное расписание (режим `permanent`)
 
-### 4. Run Database Migrations
-```bash
-alembic upgrade head
-```
+Когда в разделе «Колледж» вместо заглушек `href="#"` появятся реальные ссылки
+(«Расписание занятий (очная форма обучения)» и т.д.), делаем так:
 
-### 5. Run the Bot
-```bash
-python main.py
-```
+1. **Смотрим формат файла.** Скорее всего `.xls` (как у бакалавриата на сайте)
+   или `.docx` (как сейчас у ежедневного). Скачай файл и определи структуру таблицы:
+   строки/колонки, где группы, где пары, есть ли «недели» (чётная/нечётная, «1-я/2-я»).
 
-## Usage
-- **Start the bot**: Send `/start` in Telegram to the bot.
-- **Get schedule**: Send your group number (e.g., `153 А`) to receive the current week's schedule.
-- **Admin broadcast**: Admins receive a startup notification when the bot launches.
+2. **Пишем парсер** — новый модуль рядом с `parsers/polar.py`, например
+   `parsers/permanent.py`:
+   - `.xls` → `pandas.read_excel` (добавь `pandas` + `xlrd`/`openpyxl` в `requirements.txt`);
+   - `.docx` → `python-docx` уже стоит, переиспользуй `polar.parse_docx`.
+   - На выходе — те же записи `{group, para, subject, teacher, room}` + неделя/день недели.
 
-## Schedule Parsing & Downloading
-- **PDF Parsing**: Place schedule PDF files in a directory and use the provided parsers to extract and load data into the database.
-- **Automated Download**: Use `parsers/schedules_downloader.py` to fetch schedules from the university website.
+3. **Решаем, как хранить недели.** Постоянное расписание повторяется по неделям,
+   а не по конкретным датам. Два варианта:
+   - отдельная таблица `PermanentLesson(week_num, weekday, group, para, …)` — дату
+     считаем на лету (аналог `CollegeLesson`, но без `date`);
+   - проще для старта: при импорте раскладывать недели в конкретные даты в
+     существующую `CollegeLesson` (та же схема, меньше нового кода).
 
-## Project Dependencies
-- `aiogram` - Telegram bot framework
-- `alembic` - Database migrations
-- `aiosqlite` - Async SQLite driver
-- `aiohttp` - Async HTTP client
-- `beautifulsoup4` - HTML parsing
-- `environs` - Environment variable management
-- `pandas` - Data processing
-- `pdfplumber` - PDF table extraction
-- `redis` - Redis support (optional)
-- `SQLAlchemy` - ORM
+4. **Переключаем режим.** `MODE=permanent` в `.env` + админ-команда `/mode daily|permanent`.
+   В `tgbot/services/poller.py` в `poller_loop` добавить ветку:
+   `permanent` → парсим основной файл, `daily` → текущее поведение.
 
-## Development & Contribution
-- Follow PEP8 and best async practices.
-- Use Alembic for database migrations.
-- PRs and issues are welcome!
+5. **Миграция.** При переходе ежедневные `.docx` с сайта исчезнут. Бот продолжит
+   отдавать «сегодня/завтра», но уже из постоянной таблицы. Историю можно сохранить —
+   БД живёт в `./data/database.db`.
 
-## License
-MIT License 
+Куда смотреть: `parsers/polar.py`, `parsers/permanent.py` (новый),
+`tgbot/services/poller.py`, `config.py`, `infrastructure/database/models/college_lesson.py`.

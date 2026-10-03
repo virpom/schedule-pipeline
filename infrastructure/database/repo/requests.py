@@ -2,8 +2,8 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from infrastructure.database.repo.lesson import LessonRepo
-from infrastructure.database.repo.student_group import StudentGroupRepo
+from infrastructure.database.repo.bell_schedule import BellScheduleRepo
+from infrastructure.database.repo.college_lesson import CollegeLessonRepo
 from infrastructure.database.repo.user import UserRepo
 
 
@@ -16,9 +16,9 @@ class RequestsRepo:
         return UserRepo(self.session)
 
     @property
-    def lessons(self) -> LessonRepo:
-        return LessonRepo(self.session)
+    def college_lessons(self) -> CollegeLessonRepo:
+        return CollegeLessonRepo(self.session)
 
     @property
-    def student_group(self) -> StudentGroupRepo:
-        return StudentGroupRepo(self.session)
+    def bell_schedule(self) -> BellScheduleRepo:
+        return BellScheduleRepo(self.session)
