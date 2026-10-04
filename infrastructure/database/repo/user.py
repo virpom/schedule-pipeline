@@ -2,7 +2,7 @@ from typing import Optional
 
 import datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.dialects.sqlite import insert
 
 from infrastructure.database.models import User
@@ -60,18 +60,6 @@ class UserRepo(BaseRepo):
         )
         return list(result.scalars().all())
 
-    async def count_total(self) -> int:
-        result = await self.session.execute(select(func.count()).select_from(User))
-        return result.scalar_one()
-
-    async def count_subscribed(self) -> int:
-        result = await self.session.execute(
-            select(func.count()).select_from(User).where(User.subscribed == True)  # noqa: E712
-        )
-        return result.scalar_one()
-
-    async def count_active(self, since: datetime.datetime) -> int:
-        result = await self.session.execute(
-            select(func.count()).select_from(User).where(User.last_seen >= since)
-        )
-        return result.scalar_one()
+    async def get_all(self) -> list[User]:
+        result = await self.session.execute(select(User))
+        return list(result.scalars().all())

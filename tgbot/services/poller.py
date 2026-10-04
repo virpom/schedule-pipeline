@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import hashlib
 import logging
+import time
 
 from aiohttp import ClientSession
 
@@ -62,13 +63,41 @@ async def notify_new_schedule(bot, session_pool, dates: list[datetime.date], rat
     await broadcast_many(bot, items, rate=rate)
 
 
+def _in_night(now: datetime.datetime, start_str: str, end_str: str) -> bool:
+    if not start_str or not end_str:
+        return False
+    try:
+        start = datetime.time.fromisoformat(start_str)
+        end = datetime.time.fromisoformat(end_str)
+    except ValueError:
+        return False
+    if start == end:
+        return False
+    t = now.time()
+    if start < end:
+        return start <= t < end
+    return t >= start or t < end
+
+
 async def poller_loop(bot, session_pool, config: Config) -> None:
-    logging.info("poller started, interval=%ss", config.poll_interval)
+    logging.info("poller started")
+    last_poll = 0.0
     while True:
         try:
-            new_dates = await poll_once(session_pool, config)
-            if new_dates:
-                await notify_new_schedule(bot, session_pool, new_dates, config.notify_rate)
+            async with session_pool() as db:
+                repo = RequestsRepo(db)
+                settings = await repo.settings.get_all()
+
+            interval = int(settings["poll_interval"])
+            rate = float(settings["notify_rate"])
+            now = datetime.datetime.now()
+
+            if not _in_night(now, settings["night_start"], settings["night_end"]):
+                if time.monotonic() - last_poll >= interval:
+                    new_dates = await poll_once(session_pool, config)
+                    if new_dates:
+                        await notify_new_schedule(bot, session_pool, new_dates, rate)
+                    last_poll = time.monotonic()
         except Exception:
             logging.exception("poll failed")
-        await asyncio.sleep(config.poll_interval)
+        await asyncio.sleep(10)

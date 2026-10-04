@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.sqlite import insert
 
 from infrastructure.database.models import CollegeLesson
@@ -77,3 +77,11 @@ class CollegeLessonRepo(BaseRepo):
             select(CollegeLesson).order_by(CollegeLesson.date, CollegeLesson.para)
         )
         return list(result.scalars().all())
+
+    async def count_lessons(self) -> int:
+        result = await self.session.execute(select(func.count()).select_from(CollegeLesson))
+        return result.scalar_one()
+
+    async def count_dates(self) -> int:
+        result = await self.session.execute(select(func.count(func.distinct(CollegeLesson.date))))
+        return result.scalar_one()
