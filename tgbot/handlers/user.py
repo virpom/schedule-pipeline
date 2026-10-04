@@ -2,9 +2,17 @@ import datetime
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from common.schedule import format_bell, format_day, format_week
+from common.schedule import (
+    DETAIL_LABELS,
+    DETAIL_ORDER,
+    format_bell,
+    format_day,
+    format_week,
+)
 from infrastructure.database.models import User
 from infrastructure.database.repo.requests import RequestsRepo
 
@@ -15,14 +23,21 @@ BACK_KB = InlineKeyboardMarkup(
 )
 
 
-def menu_kb(subscribed: bool) -> InlineKeyboardMarkup:
+class SubjectSearch(StatesGroup):
+    waiting = State()
+
+
+def menu_kb(subscribed: bool, bell_detail: str = "brief") -> InlineKeyboardMarkup:
     sub_text = "🔕 Отписаться" if subscribed else "🔔 Подписаться"
+    detail_label = DETAIL_LABELS.get(bell_detail, "кратко")
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📅 Сегодня", callback_data="day:today"),
          InlineKeyboardButton(text="📅 Завтра", callback_data="day:tomorrow")],
         [InlineKeyboardButton(text="🗓 Вся неделя", callback_data="week"),
          InlineKeyboardButton(text="📜 История", callback_data="hist")],
-        [InlineKeyboardButton(text="⏰ Звонки", callback_data="bell")],
+        [InlineKeyboardButton(text="⏰ Звонки", callback_data="bell"),
+         InlineKeyboardButton(text="🔎 Предмет", callback_data="find")],
+        [InlineKeyboardButton(text=f"🕒 Детализация: {detail_label}", callback_data="detail")],
         [InlineKeyboardButton(text=sub_text, callback_data="sub:toggle")],
         [InlineKeyboardButton(text="🎯 Сменить группу", callback_data="pick")],
     ])
@@ -49,9 +64,10 @@ async def _require_group(cb: CallbackQuery, user: User) -> bool:
 
 
 @user_router.message(CommandStart())
-async def start(message: Message, user: User, repo: RequestsRepo):
+async def start(message: Message, user: User, repo: RequestsRepo, state: FSMContext):
+    await state.clear()
     if user.group:
-        await message.answer(menu_text(user), reply_markup=menu_kb(user.subscribed))
+        await message.answer(menu_text(user), reply_markup=menu_kb(user.subscribed, user.bell_detail))
     else:
         await message.answer(
             "🎓 Привет! Я бот расписания Политехнического колледжа ЗГУ.\n\nВыбери свою группу 👇",
@@ -67,7 +83,7 @@ async def set_group_cmd(message: Message, repo: RequestsRepo, user: User):
         return
     group = parts[1].strip().upper()
     await repo.users.set_group(user.id, group)
-    await message.answer(f"Твоя группа: <b>{group}</b>", reply_markup=menu_kb(user.subscribed))
+    await message.answer(f"Твоя группа: <b>{group}</b>", reply_markup=menu_kb(user.subscribed, user.bell_detail))
 
 
 @user_router.callback_query(F.data == "pick")
@@ -80,28 +96,29 @@ async def cb_pick(cb: CallbackQuery, repo: RequestsRepo):
 async def cb_group(cb: CallbackQuery, repo: RequestsRepo, user: User):
     group = cb.data.split(":", 1)[1]
     await repo.users.set_group(user.id, group)
-    await cb.message.edit_text(f"Твоя группа: <b>{group}</b>", reply_markup=menu_kb(user.subscribed))
+    await cb.message.edit_text(f"Твоя группа: <b>{group}</b>", reply_markup=menu_kb(user.subscribed, user.bell_detail))
     await cb.answer(f"Группа {group}")
 
 
 @user_router.callback_query(F.data == "menu")
-async def cb_menu(cb: CallbackQuery, user: User):
-    await cb.message.edit_text(menu_text(user), reply_markup=menu_kb(user.subscribed))
+async def cb_menu(cb: CallbackQuery, user: User, state: FSMContext):
+    await state.clear()
+    await cb.message.edit_text(menu_text(user), reply_markup=menu_kb(user.subscribed, user.bell_detail))
     await cb.answer()
 
 
 async def _show_day(cb: CallbackQuery, repo: RequestsRepo, user: User, date: datetime.date):
-    bell = await repo.bell_schedule.as_dict()
+    bell, lunches = await repo.bell_schedule.get_context()
     lessons = await repo.college_lessons.get_for_group_date(user.group, date)
     if lessons:
-        text = format_day(date, lessons, bell)
+        text = format_day(date, lessons, bell, lunches, user.bell_detail)
     else:
-        text = format_day(date, [], bell)
+        text = format_day(date, [], bell, lunches, user.bell_detail)
         for i in range(1, 8):
             d = date + datetime.timedelta(days=i)
             nxt = await repo.college_lessons.get_for_group_date(user.group, d)
             if nxt:
-                text += "\n\nБлижайшее —\n" + format_day(d, nxt, bell)
+                text += "\n\nБлижайшее —\n" + format_day(d, nxt, bell, lunches, user.bell_detail)
                 break
     await cb.message.edit_text(text, reply_markup=BACK_KB)
     await cb.answer()
@@ -125,7 +142,7 @@ async def cb_tomorrow(cb: CallbackQuery, repo: RequestsRepo, user: User):
 async def cb_week(cb: CallbackQuery, repo: RequestsRepo, user: User):
     if not await _require_group(cb, user):
         return
-    bell = await repo.bell_schedule.as_dict()
+    bell, lunches = await repo.bell_schedule.get_context()
     start = datetime.date.today()
     end = start + datetime.timedelta(days=6)
     lessons = await repo.college_lessons.get_for_group_range(user.group, start, end)
@@ -133,14 +150,14 @@ async def cb_week(cb: CallbackQuery, repo: RequestsRepo, user: User):
     for l in lessons:
         by_date.setdefault(l.date, []).append(l)
     entries = [(d, by_date[d]) for d in sorted(by_date)]
-    await cb.message.edit_text(format_week(entries, bell), reply_markup=BACK_KB)
+    await cb.message.edit_text(format_week(entries, bell, lunches, user.bell_detail), reply_markup=BACK_KB)
     await cb.answer()
 
 
 @user_router.callback_query(F.data == "bell")
 async def cb_bell(cb: CallbackQuery, repo: RequestsRepo):
-    items = await repo.bell_schedule.get_all()
-    await cb.message.edit_text(format_bell(items), reply_markup=BACK_KB)
+    bell, lunches = await repo.bell_schedule.get_context()
+    await cb.message.edit_text(format_bell(bell, lunches), reply_markup=BACK_KB)
     await cb.answer()
 
 
@@ -172,13 +189,13 @@ async def cb_hist_date(cb: CallbackQuery, repo: RequestsRepo, user: User):
     if not await _require_group(cb, user):
         return
     date = datetime.date.fromisoformat(cb.data.split(":", 1)[1])
-    bell = await repo.bell_schedule.as_dict()
+    bell, lunches = await repo.bell_schedule.get_context()
     lessons = await repo.college_lessons.get_for_group_date(user.group, date)
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ К истории", callback_data="hist")],
         [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
     ])
-    await cb.message.edit_text(format_day(date, lessons, bell), reply_markup=kb)
+    await cb.message.edit_text(format_day(date, lessons, bell, lunches, user.bell_detail), reply_markup=kb)
     await cb.answer()
 
 
@@ -188,8 +205,57 @@ async def cb_sub(cb: CallbackQuery, repo: RequestsRepo, user: User):
         return
     new = not user.subscribed
     await repo.users.set_subscribed(user.id, new)
-    await cb.message.edit_text(menu_text(user), reply_markup=menu_kb(new))
+    await cb.message.edit_text(menu_text(user), reply_markup=menu_kb(new, user.bell_detail))
     await cb.answer("Подписка включена 🔔" if new else "Подписка отключена 🔕")
+
+
+@user_router.callback_query(F.data == "detail")
+async def cb_detail(cb: CallbackQuery, repo: RequestsRepo, user: User):
+    cur = user.bell_detail if user.bell_detail in DETAIL_ORDER else DETAIL_ORDER[0]
+    nxt = DETAIL_ORDER[(DETAIL_ORDER.index(cur) + 1) % len(DETAIL_ORDER)]
+    await repo.users.set_bell_detail(user.id, nxt)
+    await cb.message.edit_text(menu_text(user), reply_markup=menu_kb(user.subscribed, nxt))
+    await cb.answer(f"Детализация: {DETAIL_LABELS[nxt]}")
+
+
+@user_router.callback_query(F.data == "find")
+async def cb_find(cb: CallbackQuery, user: User, state: FSMContext):
+    if not await _require_group(cb, user):
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Отмена", callback_data="find:cancel")],
+    ])
+    await cb.message.edit_text("🔎 Напиши название предмета (например, «химия»):", reply_markup=kb)
+    await state.set_state(SubjectSearch.waiting)
+    await cb.answer()
+
+
+@user_router.callback_query(F.data == "find:cancel")
+async def cb_find_cancel(cb: CallbackQuery, user: User, state: FSMContext):
+    await state.clear()
+    await cb.message.edit_text(menu_text(user), reply_markup=menu_kb(user.subscribed, user.bell_detail))
+    await cb.answer()
+
+
+@user_router.message(SubjectSearch.waiting)
+async def subject_answer(message: Message, repo: RequestsRepo, user: User, state: FSMContext):
+    await state.clear()
+    subj = message.text.strip()
+    lessons = await repo.college_lessons.get_all_for_group(user.group)
+    matched = [l for l in lessons if subj.casefold() in l.subject.casefold()]
+    if not matched:
+        await message.answer(f"По «{subj}» ничего не нашлось 🙈", reply_markup=BACK_KB)
+        return
+    results = matched[:5]
+    bell, lunches = await repo.bell_schedule.get_context()
+    by_date: dict[datetime.date, list] = {}
+    for l in results:
+        by_date.setdefault(l.date, []).append(l)
+    parts = [
+        format_day(d, by_date[d], bell, lunches, user.bell_detail)
+        for d in sorted(by_date, reverse=True)
+    ]
+    await message.answer(f"🔎 «{subj}» — последние занятия:\n\n" + "\n\n".join(parts), reply_markup=BACK_KB)
 
 
 @user_router.message(F.text)
@@ -198,6 +264,6 @@ async def any_text(message: Message, repo: RequestsRepo, user: User):
     known = await repo.college_lessons.get_groups()
     if group in known:
         await repo.users.set_group(user.id, group)
-        await message.answer(f"Твоя группа: <b>{group}</b>", reply_markup=menu_kb(user.subscribed))
+        await message.answer(f"Твоя группа: <b>{group}</b>", reply_markup=menu_kb(user.subscribed, user.bell_detail))
     else:
-        await message.answer(menu_text(user), reply_markup=menu_kb(user.subscribed))
+        await message.answer(menu_text(user), reply_markup=menu_kb(user.subscribed, user.bell_detail))

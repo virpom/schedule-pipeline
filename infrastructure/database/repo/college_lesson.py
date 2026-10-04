@@ -63,3 +63,11 @@ class CollegeLessonRepo(BaseRepo):
             .order_by(CollegeLesson.date.desc())
         )
         return list(result.scalars().all())
+
+    async def get_all_for_group(self, group: str) -> list[CollegeLesson]:
+        result = await self.session.execute(
+            select(CollegeLesson)
+            .where(CollegeLesson.group == group)
+            .order_by(CollegeLesson.date.desc(), CollegeLesson.para)
+        )
+        return list(result.scalars().all())

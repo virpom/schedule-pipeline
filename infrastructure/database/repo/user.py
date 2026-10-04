@@ -45,6 +45,12 @@ class UserRepo(BaseRepo):
         )
         await self.session.commit()
 
+    async def set_bell_detail(self, user_id: int, value: str) -> None:
+        await self.session.execute(
+            update(User).where(User.id == user_id).values(bell_detail=value)
+        )
+        await self.session.commit()
+
     async def get_subscribed(self) -> list[User]:
         result = await self.session.execute(
             select(User).where(User.subscribed == True, User.group.is_not(None))  # noqa: E712

@@ -47,14 +47,14 @@ async def poll_once(session_pool, config: Config) -> list[datetime.date]:
 async def notify_new_schedule(bot, session_pool, dates: list[datetime.date]) -> None:
     async with session_pool() as db:
         repo = RequestsRepo(db)
-        bell = await repo.bell_schedule.as_dict()
+        bell, lunches = await repo.bell_schedule.get_context()
         subscribers = await repo.users.get_subscribed()
     for date in sorted(dates):
         for user in subscribers:
             async with session_pool() as db:
                 repo = RequestsRepo(db)
                 lessons = await repo.college_lessons.get_for_group_date(user.group, date)
-            text = format_day(date, lessons, bell)
+            text = format_day(date, lessons, bell, lunches, user.bell_detail)
             await send_message(bot, user.id, text)
 
 

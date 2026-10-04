@@ -17,6 +17,7 @@ class User(Base, TimestampMixin):
     language: Mapped[str] = mapped_column(String(10), server_default=text("'ru'"))
     group: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     subscribed: Mapped[bool] = mapped_column(Boolean, server_default=text("0"))
+    bell_detail: Mapped[str] = mapped_column(String(16), server_default=text("'brief'"))
 
     def __repr__(self):
         return f"<User {self.id} {self.username} {self.group}>"

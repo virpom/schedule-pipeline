@@ -4,6 +4,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from common.schedule import format_bell
 from config import Config
 from infrastructure.database.repo.requests import RequestsRepo
 
@@ -21,12 +22,8 @@ def _is_admin(message: Message, config: Config) -> bool:
 async def show_bell(message: Message, repo: RequestsRepo, config: Config):
     if not _is_admin(message, config):
         return
-    bell = await repo.bell_schedule.get_all()
-    lines = [
-        f"{b.day_type} {b.course_group} п{b.para}: {b.start:%H:%M}–{b.end:%H:%M}"
-        for b in sorted(bell, key=lambda x: (x.day_type, x.course_group, x.para))
-    ]
-    await message.answer("\n".join(lines) or "Звонки не заданы")
+    bell, lunches = await repo.bell_schedule.get_context()
+    await message.answer(format_bell(bell, lunches))
 
 
 @admin_router.message(Command("setbell"))
