@@ -1,6 +1,7 @@
+import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, Boolean, String
+from sqlalchemy import BigInteger, Boolean, DateTime, String
 from sqlalchemy import text, true
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,6 +19,7 @@ class User(Base, TimestampMixin):
     group: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     subscribed: Mapped[bool] = mapped_column(Boolean, server_default=text("0"))
     bell_detail: Mapped[str] = mapped_column(String(16), server_default=text("'brief'"))
+    last_seen: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, nullable=True)
 
     def __repr__(self):
         return f"<User {self.id} {self.username} {self.group}>"

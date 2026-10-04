@@ -9,7 +9,7 @@ from common.schedule import format_day
 from config import Config
 from infrastructure.database.repo.requests import RequestsRepo
 from parsers import polar
-from tgbot.services.broadcaster import send_message
+from tgbot.services.broadcaster import broadcast_many
 
 
 async def poll_once(session_pool, config: Config) -> list[datetime.date]:
@@ -44,18 +44,22 @@ async def poll_once(session_pool, config: Config) -> list[datetime.date]:
     return new_dates
 
 
-async def notify_new_schedule(bot, session_pool, dates: list[datetime.date]) -> None:
+async def notify_new_schedule(bot, session_pool, dates: list[datetime.date], rate: float) -> None:
     async with session_pool() as db:
         repo = RequestsRepo(db)
         bell, lunches = await repo.bell_schedule.get_context()
         subscribers = await repo.users.get_subscribed()
+
+    items: list[tuple[int, str]] = []
     for date in sorted(dates):
         for user in subscribers:
             async with session_pool() as db:
                 repo = RequestsRepo(db)
                 lessons = await repo.college_lessons.get_for_group_date(user.group, date)
             text = format_day(date, lessons, bell, lunches, user.bell_detail)
-            await send_message(bot, user.id, text)
+            items.append((user.id, text))
+
+    await broadcast_many(bot, items, rate=rate)
 
 
 async def poller_loop(bot, session_pool, config: Config) -> None:
@@ -64,7 +68,7 @@ async def poller_loop(bot, session_pool, config: Config) -> None:
         try:
             new_dates = await poll_once(session_pool, config)
             if new_dates:
-                await notify_new_schedule(bot, session_pool, new_dates)
+                await notify_new_schedule(bot, session_pool, new_dates, config.notify_rate)
         except Exception:
             logging.exception("poll failed")
         await asyncio.sleep(config.poll_interval)

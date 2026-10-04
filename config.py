@@ -25,6 +25,7 @@ class Config:
     base_url: str
     poll_interval: int
     mode: str  # daily | permanent
+    notify_rate: float  # messages per second for broadcasts
 
 
 def load_config(path: str = ".env") -> Config:
@@ -44,4 +45,5 @@ def load_config(path: str = ".env") -> Config:
         base_url=env.str("BASE_URL", "https://polaruniversity.ru"),
         poll_interval=env.int("POLL_INTERVAL", 1800),
         mode=env.str("MODE", "daily"),
+        notify_rate=env.float("NOTIFY_RATE", 5.0),
     )

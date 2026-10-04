@@ -26,6 +26,21 @@ async def show_bell(message: Message, repo: RequestsRepo, config: Config):
     await message.answer(format_bell(bell, lunches))
 
 
+@admin_router.message(Command("stats"))
+async def stats(message: Message, repo: RequestsRepo, config: Config):
+    if not _is_admin(message, config):
+        return
+    total = await repo.users.count_total()
+    active = await repo.users.count_active(datetime.datetime.now() - datetime.timedelta(days=7))
+    subscribed = await repo.users.count_subscribed()
+    await message.answer(
+        "👥 <b>Статистика</b>\n\n"
+        f"Всего пользователей: <b>{total}</b>\n"
+        f"Активных (7 дней): <b>{active}</b>\n"
+        f"Подписаны на рассылку: <b>{subscribed}</b>"
+    )
+
+
 @admin_router.message(Command("setbell"))
 async def set_bell(message: Message, repo: RequestsRepo, config: Config):
     if not _is_admin(message, config):

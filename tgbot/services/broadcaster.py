@@ -62,3 +62,27 @@ async def broadcast(
         logging.info(f"{count} messages successful sent.")
 
     return count
+
+
+async def broadcast_many(
+        bot: Bot,
+        items: list[tuple[Union[str, int], str]],
+        rate: float = 5.0,
+) -> int:
+    """Send personalized messages with rate limiting.
+
+    Telegram limits are ~30 msg/s globally per bot, plus per-chat flood
+    control (429 retry_after). Here we pace at `rate` msg/s and let
+    send_message() handle retry_after / failures, so a slow or blocked
+    recipient never stalls the rest of the queue.
+    """
+    if not items:
+        return 0
+    delay = 1.0 / max(rate, 0.1)
+    sent = 0
+    for user_id, text in items:
+        if await send_message(bot, user_id, text):
+            sent += 1
+        await asyncio.sleep(delay)
+    logging.info("broadcast_many: %d/%d sent at %.1f msg/s", sent, len(items), rate)
+    return sent
