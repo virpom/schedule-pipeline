@@ -45,5 +45,5 @@ def load_config(path: str = ".env") -> Config:
         base_url=env.str("BASE_URL", "https://polaruniversity.ru"),
         poll_interval=env.int("POLL_INTERVAL", 1800),
         mode=env.str("MODE", "daily"),
-        notify_rate=env.float("NOTIFY_RATE", 5.0),
+        notify_rate=env.float("NOTIFY_RATE", 20.0),
     )

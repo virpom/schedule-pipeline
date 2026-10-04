@@ -301,7 +301,7 @@ async def teacher_answer(message: Message, repo: RequestsRepo, state: FSMContext
     )
 
 
-@user_router.message(F.text)
+@user_router.message(F.text, ~F.text.startswith("/"))
 async def any_text(message: Message, repo: RequestsRepo, user: User):
     group = message.text.strip().upper()
     known = await repo.college_lessons.get_groups()
