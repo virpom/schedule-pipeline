@@ -1,12 +1,13 @@
 import datetime
 import re
 from io import BytesIO
+from urllib.parse import unquote
 
 from aiohttp import ClientSession
 from bs4 import BeautifulSoup
 from docx import Document
 
-DAILY_RE = re.compile(r"(\d{2})\.(\d{2})\.(\d{4})")
+DAILY_RE = re.compile(r"(\d{1,2})\.(\d{1,2})\.(\d{4})")
 
 
 async def fetch_html(session: ClientSession, url: str) -> str:
@@ -14,20 +15,32 @@ async def fetch_html(session: ClientSession, url: str) -> str:
         return await response.text()
 
 
+def _href_basename(href: str) -> str:
+    return unquote(href.split("?")[0].split("#")[0].rstrip("/").split("/")[-1])
+
+
 def extract_daily_links(html: str, base_url: str) -> list[tuple[datetime.date, str]]:
     soup = BeautifulSoup(html, "html.parser")
-    result = []
+    result: list[tuple[datetime.date, str]] = []
+    seen: set[str] = set()
     for a in soup.find_all("a", href=True):
         text = a.get_text(strip=True)
-        if "Расписание на" not in text:
-            continue
-        m = DAILY_RE.search(text) or DAILY_RE.search(a["href"])
+        href = a["href"]
+
+        # primary: anchor text "Расписание на DD.MM.YYYY."
+        if "Расписание на" in text:
+            m = DAILY_RE.search(text) or DAILY_RE.search(href)
+        else:
+            # fallback: filename starts with date, e.g. "06.10.2026рз26.docx"
+            m = DAILY_RE.match(_href_basename(href))
         if not m:
             continue
+
         day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        url = a["href"]
-        if url.startswith("/"):
-            url = base_url.rstrip("/") + url
+        url = href if not href.startswith("/") else base_url.rstrip("/") + href
+        if url in seen:
+            continue
+        seen.add(url)
         result.append((datetime.date(year, month, day), url))
     return result
 
