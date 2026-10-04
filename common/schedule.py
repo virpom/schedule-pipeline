@@ -99,6 +99,25 @@ def format_week(entries, bell, lunches, detail: str = DETAIL_BRIEF) -> str:
     return "\n\n".join(format_day(d, les, bell, lunches, detail) for d, les in entries)
 
 
+def format_teacher_results(entries, bell, lunches) -> str:
+    parts = []
+    for date, lessons in entries:
+        dt = day_type_from_date(date)
+        lines = [f"📅 <b>{WEEKDAY_FULL[date.weekday()]}, {date.day} {MONTHS_GEN[date.month]}</b>"]
+        for l in lessons:
+            cg = course_group_from_group(l.group)
+            para_end = getattr(l, "para_end", None) or l.para
+            for p in range(l.para, para_end + 1):
+                bs = bell.get((dt, cg, p)) or bell.get((dt, "I_IV", p))
+                time_str = _para_brief(bs) if bs else f"пара {p}"
+                lines.append(f"<b>{time_str}</b>  {l.subject}")
+                meta = " · ".join(x for x in (l.group, l.room) if x)
+                if meta:
+                    lines.append(meta)
+        parts.append("\n".join(lines))
+    return "\n\n".join(parts)
+
+
 def format_bell(bell, lunches) -> str:
     lines = ["⏰ <b>Расписание звонков</b>\n"]
     for day_type, title in [("MONDAY", "Понедельник"), ("OTHER", "Остальные дни")]:

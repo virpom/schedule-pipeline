@@ -11,6 +11,7 @@ from common.schedule import (
     DETAIL_ORDER,
     format_bell,
     format_day,
+    format_teacher_results,
     format_week,
 )
 from infrastructure.database.models import User
@@ -27,6 +28,10 @@ class SubjectSearch(StatesGroup):
     waiting = State()
 
 
+class TeacherSearch(StatesGroup):
+    waiting = State()
+
+
 def menu_kb(subscribed: bool, bell_detail: str = "brief") -> InlineKeyboardMarkup:
     sub_text = "🔕 Отписаться" if subscribed else "🔔 Подписаться"
     detail_label = DETAIL_LABELS.get(bell_detail, "кратко")
@@ -36,10 +41,11 @@ def menu_kb(subscribed: bool, bell_detail: str = "brief") -> InlineKeyboardMarku
         [InlineKeyboardButton(text="🗓 Вся неделя", callback_data="week"),
          InlineKeyboardButton(text="📜 История", callback_data="hist")],
         [InlineKeyboardButton(text="⏰ Звонки", callback_data="bell"),
-         InlineKeyboardButton(text="🔎 Предмет", callback_data="find")],
-        [InlineKeyboardButton(text=f"🕒 Детализация: {detail_label}", callback_data="detail")],
-        [InlineKeyboardButton(text=sub_text, callback_data="sub:toggle")],
-        [InlineKeyboardButton(text="🎯 Сменить группу", callback_data="pick")],
+         InlineKeyboardButton(text=f"🕒 Детализация: {detail_label}", callback_data="detail")],
+        [InlineKeyboardButton(text="🔎 Предмет", callback_data="find"),
+         InlineKeyboardButton(text="👨‍🏫 Преподаватель", callback_data="find_teacher")],
+        [InlineKeyboardButton(text=sub_text, callback_data="sub:toggle"),
+         InlineKeyboardButton(text="🎯 Сменить группу", callback_data="pick")],
     ])
 
 
@@ -256,6 +262,43 @@ async def subject_answer(message: Message, repo: RequestsRepo, user: User, state
         for d in sorted(by_date, reverse=True)
     ]
     await message.answer(f"🔎 «{subj}» — последние занятия:\n\n" + "\n\n".join(parts), reply_markup=BACK_KB)
+
+
+@user_router.callback_query(F.data == "find_teacher")
+async def cb_find_teacher(cb: CallbackQuery, state: FSMContext):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Отмена", callback_data="find:cancel")],
+    ])
+    await cb.message.edit_text("👨‍🏫 Напиши фамилию преподавателя:", reply_markup=kb)
+    await state.set_state(TeacherSearch.waiting)
+    await cb.answer()
+
+
+@user_router.message(TeacherSearch.waiting)
+async def teacher_answer(message: Message, repo: RequestsRepo, state: FSMContext):
+    await state.clear()
+    q = message.text.strip()
+    lessons = await repo.college_lessons.get_all_lessons()
+    matched = [l for l in lessons if q.casefold() in (l.teacher or "").casefold()]
+    if not matched:
+        await message.answer(f"Преподаватель «{q}» не найден", reply_markup=BACK_KB)
+        return
+
+    today = datetime.date.today()
+    week_end = today + datetime.timedelta(days=6)
+    upcoming = [l for l in matched if today <= l.date <= week_end]
+    scope = upcoming if upcoming else matched[-12:]
+
+    bell, lunches = await repo.bell_schedule.get_context()
+    by_date: dict[datetime.date, list] = {}
+    for l in scope:
+        by_date.setdefault(l.date, []).append(l)
+    entries = [(d, by_date[d]) for d in sorted(by_date)]
+
+    await message.answer(
+        f"👨‍🏫 «{q}»:\n\n" + format_teacher_results(entries, bell, lunches),
+        reply_markup=BACK_KB,
+    )
 
 
 @user_router.message(F.text)

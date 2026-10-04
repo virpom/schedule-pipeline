@@ -71,3 +71,9 @@ class CollegeLessonRepo(BaseRepo):
             .order_by(CollegeLesson.date.desc(), CollegeLesson.para)
         )
         return list(result.scalars().all())
+
+    async def get_all_lessons(self) -> list[CollegeLesson]:
+        result = await self.session.execute(
+            select(CollegeLesson).order_by(CollegeLesson.date, CollegeLesson.para)
+        )
+        return list(result.scalars().all())
