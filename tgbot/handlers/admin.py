@@ -2,7 +2,7 @@ import datetime
 
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from common.schedule import format_bell
 from config import Config
@@ -18,6 +18,10 @@ def _is_admin(message: Message, config: Config) -> bool:
     return message.from_user.id in config.tg_bot.admin_ids
 
 
+def _is_admin_cb(cb: CallbackQuery, config: Config) -> bool:
+    return cb.from_user.id in config.tg_bot.admin_ids
+
+
 @admin_router.message(Command("bell"))
 async def show_bell(message: Message, repo: RequestsRepo, config: Config):
     if not _is_admin(message, config):
@@ -26,11 +30,7 @@ async def show_bell(message: Message, repo: RequestsRepo, config: Config):
     await message.answer(format_bell(bell, lunches))
 
 
-@admin_router.message(Command("stats"))
-async def stats(message: Message, repo: RequestsRepo, config: Config):
-    if not _is_admin(message, config):
-        return
-
+async def _build_stats(repo: RequestsRepo) -> tuple[str, InlineKeyboardMarkup]:
     users = await repo.users.get_all()
     now = datetime.datetime.now()
     week_ago = now - datetime.timedelta(days=7)
@@ -46,10 +46,10 @@ async def stats(message: Message, repo: RequestsRepo, config: Config):
     no_group = [0, 0]
     for u in users:
         if u.group:
-            t, s = group_stats.setdefault(u.group, [0, 0])
-            t += 1
+            entry = group_stats.setdefault(u.group, [0, 0])
+            entry[0] += 1
             if u.subscribed:
-                s += 1
+                entry[1] += 1
         else:
             no_group[0] += 1
             if u.subscribed:
@@ -63,13 +63,61 @@ async def stats(message: Message, repo: RequestsRepo, config: Config):
     lines.append("📚 <b>Расписание в базе</b>")
     lines.append(f"Занятий: {lessons} · Дней: {days} · Групп: {groups}")
     lines.append("")
-    lines.append("👥 <b>По группам</b>")
-    for g, (t, s) in sorted(group_stats.items(), key=lambda x: -x[1][0]):
-        lines.append(f"{g} — {t} · рассылка {s}")
-    if no_group[0]:
-        lines.append(f"Без группы — {no_group[0]} · рассылка {no_group[1]}")
+    lines.append("👥 <b>По группам</b> (нажми, чтобы раскрыть)")
 
-    await message.answer("\n".join(lines))
+    rows = []
+    for g, (t, s) in sorted(group_stats.items(), key=lambda x: (-x[1][0], x[0])):
+        rows.append([InlineKeyboardButton(text=f"{g} — {t} · рассылка {s}", callback_data=f"group_users:{g}")])
+    if no_group[0]:
+        rows.append([InlineKeyboardButton(text=f"Без группы — {no_group[0]} · рассылка {no_group[1]}", callback_data="group_users:__none__")])
+
+    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@admin_router.message(Command("stats"))
+async def stats(message: Message, repo: RequestsRepo, config: Config):
+    if not _is_admin(message, config):
+        return
+    text, kb = await _build_stats(repo)
+    await message.answer(text, reply_markup=kb)
+
+
+@admin_router.callback_query(lambda cb: cb.data == "admin_stats")
+async def cb_admin_stats(cb: CallbackQuery, repo: RequestsRepo, config: Config):
+    if not _is_admin_cb(cb, config):
+        return
+    text, kb = await _build_stats(repo)
+    await cb.message.edit_text(text, reply_markup=kb)
+    await cb.answer()
+
+
+@admin_router.callback_query(lambda cb: cb.data and cb.data.startswith("group_users:"))
+async def cb_group_users(cb: CallbackQuery, repo: RequestsRepo, config: Config):
+    if not _is_admin_cb(cb, config):
+        return
+    group = cb.data.split(":", 1)[1]
+    if group == "__none__":
+        users = await repo.users.get_by_group(None)
+        title = "Без группы"
+    else:
+        users = await repo.users.get_by_group(group)
+        title = group
+
+    lines = [f"👥 <b>{title}</b> ({len(users)})\n"]
+    for u in users:
+        tag = f"@{u.username}" if u.username else str(u.id)
+        line = f"{tag} — {u.full_name}"
+        if u.subscribed:
+            line += " 🔔"
+        lines.append(line)
+    if not users:
+        lines.append("Никого нет")
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад к статистике", callback_data="admin_stats")],
+    ])
+    await cb.message.edit_text("\n".join(lines), reply_markup=kb)
+    await cb.answer()
 
 
 @admin_router.message(Command("settings"))
