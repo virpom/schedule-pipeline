@@ -44,12 +44,12 @@ def _para_full(bs, lunch) -> str:
     first = f"{bs.start:%H:%M}–{bs.h1_end:%H:%M}"
     second = f"{bs.h2_start:%H:%M}–{bs.end:%H:%M}"
     if lunch and lunch.position == "inside":
-        return f"{first} · 🍽 {lunch.lunch_start:%H:%M}–{lunch.lunch_end:%H:%M} · {second}"
-    return f"{first} · {second}"
+        return f"{first} / 🍽 {lunch.lunch_start:%H:%M}–{lunch.lunch_end:%H:%M} / {second}"
+    return f"{first} / {second}"
 
 
 def _lunch_line(lunch) -> str:
-    return f"🍽 Обед <b>{lunch.lunch_start:%H:%M}–{lunch.lunch_end:%H:%M}</b>"
+    return f"🍽 Обед {lunch.lunch_start:%H:%M}–{lunch.lunch_end:%H:%M}"
 
 
 def format_day(date: datetime.date, lessons, bell, lunches, detail: str = DETAIL_BRIEF) -> str:
@@ -79,11 +79,10 @@ def format_day(date: datetime.date, lessons, bell, lunches, detail: str = DETAIL
                 time_str = _para_brief(bs)
 
             line = f"<b>{time_str}</b>  {lesson.subject}"
-            if lesson.teacher:
-                line += f" — {lesson.teacher}"
-            if lesson.room:
-                line += f" · {lesson.room}"
             lines.append(line)
+            meta = " · ".join(x for x in (lesson.teacher, lesson.room) if x)
+            if meta:
+                lines.append(meta)
 
             if lunch and lunch.para == p and (
                     detail == DETAIL_LUNCH

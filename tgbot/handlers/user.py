@@ -244,7 +244,7 @@ async def subject_answer(message: Message, repo: RequestsRepo, user: User, state
     lessons = await repo.college_lessons.get_all_for_group(user.group)
     matched = [l for l in lessons if subj.casefold() in l.subject.casefold()]
     if not matched:
-        await message.answer(f"По «{subj}» ничего не нашлось 🙈", reply_markup=BACK_KB)
+        await message.answer(f"По «{subj}» ничего не нашлось", reply_markup=BACK_KB)
         return
     results = matched[:5]
     bell, lunches = await repo.bell_schedule.get_context()
