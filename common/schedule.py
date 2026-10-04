@@ -28,14 +28,9 @@ def day_type_from_date(date: datetime.date) -> str:
     return "MONDAY" if date.weekday() == 0 else "OTHER"
 
 
-def _time_range(bell, dt, cg, para, para_end):
-    start_t = bell.get((dt, cg, para)) or bell.get((dt, "I_IV", para))
-    end_t = bell.get((dt, cg, para_end)) or bell.get((dt, "I_IV", para_end))
-    if start_t and end_t:
-        return f"{start_t[0]:%H:%M}–{end_t[1]:%H:%M}"
-    if start_t:
-        return f"{start_t[0]:%H:%M}–{start_t[1]:%H:%M}"
-    return f"пара {para}"
+def _time(bell, dt, cg, para):
+    t = bell.get((dt, cg, para)) or bell.get((dt, "I_IV", para))
+    return f"{t[0]:%H:%M}–{t[1]:%H:%M}" if t else f"пара {para}"
 
 
 def format_day(
@@ -56,14 +51,14 @@ def format_day(
 
     for lesson in lessons:
         cg = course_group_from_group(lesson.group)
-        pe = getattr(lesson, "para_end", None) or lesson.para
-        time_str = _time_range(bell, dt, cg, lesson.para, pe)
-        line = f"<b>{time_str}</b>  {lesson.subject}"
-        if lesson.teacher:
-            line += f" — {lesson.teacher}"
-        if lesson.room:
-            line += f" · {lesson.room}"
-        lines.append(line)
+        para_end = getattr(lesson, "para_end", None) or lesson.para
+        for p in range(lesson.para, para_end + 1):
+            line = f"<b>{_time(bell, dt, cg, p)}</b>  {lesson.subject}"
+            if lesson.teacher:
+                line += f" — {lesson.teacher}"
+            if lesson.room:
+                line += f" · {lesson.room}"
+            lines.append(line)
 
     return "\n".join(lines)
 
