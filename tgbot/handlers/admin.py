@@ -7,7 +7,7 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from common.schedule import format_bell, format_day
 from config import Config
@@ -253,7 +253,7 @@ async def _send_preview(message: Message, repo: RequestsRepo, config: Config, da
     text = format_day(date, lessons, bell, lunches, "brief")
     photo = photos.random_photo(config.photos_path, photos.weekday_folder(date))
     if photo:
-        await message.bot.send_photo(message.chat.id, photo, caption=text)
+        await message.bot.send_photo(message.chat.id, FSInputFile(photo), caption=text)
     else:
         await message.answer(text)
 

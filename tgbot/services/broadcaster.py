@@ -4,7 +4,7 @@ from typing import Union
 
 from aiogram import Bot
 from aiogram import exceptions
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import FSInputFile, InlineKeyboardMarkup
 
 
 async def send_message(
@@ -71,7 +71,7 @@ async def send_photo(
         caption: str = "",
 ) -> bool:
     try:
-        await bot.send_photo(user_id, photo, caption=caption)
+        await bot.send_photo(user_id, FSInputFile(photo), caption=caption)
     except exceptions.TelegramBadRequest as e:
         logging.error("Target [ID:%s] BadRequest: %s", user_id, e.message)
     except exceptions.TelegramForbiddenError:
