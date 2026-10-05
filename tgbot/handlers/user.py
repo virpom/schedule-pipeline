@@ -40,7 +40,7 @@ def _on_off(value: bool) -> str:
 def menu_kb(user: User, support_link: str = "") -> InlineKeyboardMarkup:
     sub_text = "🔕 Отписаться" if user.subscribed else "🔔 Подписаться"
     detail_label = DETAIL_LABELS.get(user.bell_detail, "кратко")
-    bell_text = "🔔 Звонки"
+    bell_text = f"🔔 Звонки: {_on_off(user.bell_notify)}"
     image_text = f"🖼 Картинки: {_on_off(user.send_image)}"
 
     rows = [
