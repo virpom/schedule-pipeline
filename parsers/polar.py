@@ -61,12 +61,13 @@ def _parse_para(raw: str) -> tuple[int, int] | None:
     return nums[0], nums[-1]
 
 
-def parse_docx(data: bytes, date: datetime.date) -> list[dict]:
+def parse_docx(data: bytes, date: datetime.date) -> tuple[list[dict], list[dict]]:
     doc = Document(BytesIO(data))
     if not doc.tables:
-        return []
+        return [], []
 
-    lessons = []
+    lessons: list[dict] = []
+    no_lessons: list[dict] = []
     current_group = ""
     for row in doc.tables[0].rows:
         cells = [c.text.strip() for c in row.cells]
@@ -81,6 +82,9 @@ def parse_docx(data: bytes, date: datetime.date) -> list[dict]:
 
         paras = _parse_para(para_raw)
         if paras is None:
+            # row without a para number — e.g. «Занятий нет. Смотреть расписание на …»
+            if "занятий нет" in subject_raw.lower():
+                no_lessons.append({"date": date, "group": current_group, "note": subject_raw})
             continue
 
         subject, teacher = _split_subject(subject_raw)
@@ -96,7 +100,7 @@ def parse_docx(data: bytes, date: datetime.date) -> list[dict]:
             "teacher": teacher,
             "room": room,
         })
-    return lessons
+    return lessons, no_lessons
 
 
 if __name__ == "__main__":
@@ -112,10 +116,12 @@ if __name__ == "__main__":
             assert links, "no daily links found"
             date, url = links[0]
             async with session.get(url, raise_for_status=True) as resp:
-                lessons = parse_docx(await resp.read(), date)
+                lessons, no_lessons = parse_docx(await resp.read(), date)
             assert lessons, "no lessons parsed"
-            print(f"{url} -> {len(lessons)} lessons on {date}")
+            print(f"{url} -> {len(lessons)} lessons, {len(no_lessons)} no-lessons on {date}")
             for l in lessons[:3]:
                 print("  ", l)
+            for n in no_lessons[:3]:
+                print("  NO:", n)
 
     asyncio.run(demo())

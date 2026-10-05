@@ -6,7 +6,7 @@ import time
 
 from aiohttp import ClientSession
 
-from common.schedule import format_day
+from common.schedule import format_day, format_no_lessons
 from config import Config
 from infrastructure.database.repo.requests import RequestsRepo
 from parsers import polar
@@ -34,12 +34,13 @@ async def poll_once(session_pool, config: Config) -> list[datetime.date]:
                 if prev == digest:
                     continue
 
-                lessons = polar.parse_docx(data, date)
+                lessons, no_lessons = polar.parse_docx(data, date)
                 for lesson in lessons:
                     lesson["source_url"] = url
                 await repo.college_lessons.replace_date(date, lessons)
+                await repo.no_lessons.replace_date(date, no_lessons)
                 await repo.schedule_files.set_hash(date, digest)
-                logging.info("parsed %s (%s) -> %d lessons", url, date, len(lessons))
+                logging.info("parsed %s (%s) -> %d lessons, %d no-lessons", url, date, len(lessons), len(no_lessons))
 
                 if prev is None:
                     new_dates.append(date)
@@ -60,7 +61,11 @@ async def notify_new_schedule(bot, session_pool, dates: list[datetime.date], rat
             async with session_pool() as db:
                 repo = RequestsRepo(db)
                 lessons = await repo.college_lessons.get_for_group_date(user.group, date)
-            text = format_day(date, lessons, bell, lunches, user.bell_detail)
+                note = await repo.no_lessons.get_note(date, user.group) if not lessons else None
+            if lessons:
+                text = format_day(date, lessons, bell, lunches, user.bell_detail)
+            else:
+                text = format_no_lessons(date, note)
             photo = photos.random_photo(photos_path, weekday) if user.send_image else None
             items.append((user.id, text, photo))
         for chat in chats:
@@ -69,7 +74,11 @@ async def notify_new_schedule(bot, session_pool, dates: list[datetime.date], rat
             async with session_pool() as db:
                 repo = RequestsRepo(db)
                 lessons = await repo.college_lessons.get_for_group_date(chat.group, date)
-            text = format_day(date, lessons, bell, lunches, "brief")
+                note = await repo.no_lessons.get_note(date, chat.group) if not lessons else None
+            if lessons:
+                text = format_day(date, lessons, bell, lunches, "brief")
+            else:
+                text = format_no_lessons(date, note)
             photo = photos.random_photo(photos_path, weekday)
             items.append((chat.id, text, photo))
 

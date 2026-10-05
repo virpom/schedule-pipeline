@@ -11,6 +11,7 @@ from common.schedule import (
     DETAIL_ORDER,
     format_bell,
     format_day,
+    format_no_lessons,
     format_not_published,
     format_teacher_results,
     format_week,
@@ -142,15 +143,16 @@ async def _show_day(cb: CallbackQuery, repo: RequestsRepo, user: User, date: dat
     if lessons:
         text = format_day(date, lessons, bell, lunches, user.bell_detail)
     else:
+        note = await repo.no_lessons.get_note(date, user.group)
         published = await repo.schedule_files.get_hash(date) is not None
-        if published:
-            text = format_day(date, [], bell, lunches, user.bell_detail)
+        if note or published:
+            text = format_no_lessons(date, note)
         else:
             s = await repo.settings.get_all()
             deadline = int(s.get("deadline_hour", 20) or 20)
             now = datetime.datetime.now()
             if 0 <= deadline <= 23 and now.hour >= deadline:
-                text = format_day(date, [], bell, lunches, user.bell_detail)
+                text = format_no_lessons(date)
             else:
                 text = format_not_published(date)
         for i in range(1, 8):

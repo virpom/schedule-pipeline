@@ -97,6 +97,14 @@ def format_not_published(date: datetime.date) -> str:
     return f"📅 <b>{WEEKDAY_FULL[date.weekday()]}, {date.day} {MONTHS_GEN[date.month]}</b>\n\nРасписание ещё не выложено ⏳"
 
 
+def format_no_lessons(date: datetime.date, note: str | None = None) -> str:
+    header = f"📅 <b>{WEEKDAY_FULL[date.weekday()]}, {date.day} {MONTHS_GEN[date.month]}</b>"
+    text = f"{header}\n\nЗанятий нет 🙌"
+    if note:
+        text += f"\n<i>{note}</i>"
+    return text
+
+
 def format_week(entries, bell, lunches, detail: str = DETAIL_BRIEF) -> str:
     if not entries:
         return "На этой неделе расписания пока нет 📭"

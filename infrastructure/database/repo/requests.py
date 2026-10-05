@@ -6,6 +6,7 @@ from infrastructure.database.repo.bell_reminder import BellReminderRepo
 from infrastructure.database.repo.bell_schedule import BellScheduleRepo
 from infrastructure.database.repo.chat import ChatRepo
 from infrastructure.database.repo.college_lesson import CollegeLessonRepo
+from infrastructure.database.repo.no_lessons import NoLessonsRepo
 from infrastructure.database.repo.schedule_file import ScheduleFileRepo
 from infrastructure.database.repo.setting import SettingRepo
 from infrastructure.database.repo.user import UserRepo
@@ -26,6 +27,10 @@ class RequestsRepo:
     @property
     def college_lessons(self) -> CollegeLessonRepo:
         return CollegeLessonRepo(self.session)
+
+    @property
+    def no_lessons(self) -> NoLessonsRepo:
+        return NoLessonsRepo(self.session)
 
     @property
     def bell_schedule(self) -> BellScheduleRepo:
