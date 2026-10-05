@@ -40,7 +40,7 @@ def _on_off(value: bool) -> str:
 def menu_kb(user: User, support_link: str = "") -> InlineKeyboardMarkup:
     sub_text = "🔕 Отписаться" if user.subscribed else "🔔 Подписаться"
     detail_label = DETAIL_LABELS.get(user.bell_detail, "кратко")
-    bell_text = f"🔔 Напоминания: {_on_off(user.bell_notify)}"
+    bell_text = "🔔 Звонки"
     image_text = f"🖼 Картинки: {_on_off(user.send_image)}"
 
     rows = [
@@ -48,7 +48,7 @@ def menu_kb(user: User, support_link: str = "") -> InlineKeyboardMarkup:
          InlineKeyboardButton(text="📅 Завтра", callback_data="day:tomorrow")],
         [InlineKeyboardButton(text="🗓 Вся неделя", callback_data="week"),
          InlineKeyboardButton(text="📜 История", callback_data="hist")],
-        [InlineKeyboardButton(text="⏰ Звонки", callback_data="bell"),
+        [InlineKeyboardButton(text="⏰ Расписание звонков", callback_data="bell"),
          InlineKeyboardButton(text=f"🕒 Детализация: {detail_label}", callback_data="detail")],
         [InlineKeyboardButton(text="🔎 Предмет", callback_data="find"),
          InlineKeyboardButton(text="👨‍🏫 Преподаватель", callback_data="find_teacher")],
