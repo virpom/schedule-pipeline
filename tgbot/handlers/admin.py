@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import os
 import time
@@ -28,6 +29,7 @@ class AdminState(StatesGroup):
     set_night = State()
     set_support = State()
     set_broadcast = State()
+    confirm_broadcast = State()
     upload_photo = State()
 
 
@@ -256,19 +258,36 @@ async def _send_preview(message: Message, repo: RequestsRepo, config: Config, da
         await message.answer(text)
 
 
+async def _report_broadcast(bot, chat_id, items, rate):
+    sent = await broadcast_many(bot, items, rate=rate)
+    try:
+        await bot.send_message(chat_id, f"Готово: отправлено {sent}/{len(items)}")
+    except Exception:
+        pass
+
+
+async def _confirm_broadcast(message: Message, repo: RequestsRepo, state: FSMContext, text: str):
+    users = await repo.users.get_all()
+    await state.update_data(broadcast_text=text)
+    await state.set_state(AdminState.confirm_broadcast)
+    preview = text if len(text) <= 400 else text[:400] + "…"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Отправить всем", callback_data="adm:bc_send"),
+         InlineKeyboardButton(text="❌ Отмена", callback_data="adm:bc_cancel")],
+    ])
+    await message.answer(f"Отправить <b>{len(users)}</b> пользователям?\n\n{preview}", reply_markup=kb)
+
+
 @admin_router.message(Command("broadcast"))
-async def broadcast_cmd(message: Message, repo: RequestsRepo, config: Config):
+async def broadcast_cmd(message: Message, repo: RequestsRepo, config: Config, state: FSMContext):
     if not _is_admin(message, config):
         return
     parts = message.text.split(None, 1)
     if len(parts) < 2:
-        await message.answer("Формат: /broadcast текст")
+        await state.set_state(AdminState.set_broadcast)
+        await message.answer("Введи текст сообщения для всех:")
         return
-    text = parts[1]
-    users = await repo.users.get_all()
-    rate = float((await repo.settings.get_all())["notify_rate"])
-    sent = await broadcast_many(message.bot, [(u.id, text) for u in users], rate=rate)
-    await message.answer(f"Отправлено {sent}/{len(users)}")
+    await _confirm_broadcast(message, repo, state, parts[1])
 
 
 @admin_router.message(Command("notify"))
@@ -283,8 +302,8 @@ async def notify_cmd(message: Message, repo: RequestsRepo, config: Config, sessi
     rate = float((await repo.settings.get_all())["notify_rate"])
 
     if len(parts) < 2 or parts[1].lower() == "all":
-        await notify_new_schedule(message.bot, session_pool, [latest], rate, config.photos_path)
         await message.answer("Рассылка расписания запущена (всем подписчикам и чатам)")
+        asyncio.create_task(notify_new_schedule(message.bot, session_pool, [latest], rate, config.photos_path))
         return
 
     arg = parts[1]
@@ -315,19 +334,41 @@ async def cb_notify(cb: CallbackQuery, repo: RequestsRepo, config: Config, sessi
     if not latest:
         await cb.answer("В базе нет расписания")
         return
-    rate = float((await repo.settings.get_all())["notify_rate"])
-    await notify_new_schedule(cb.message.bot, session_pool, [latest], rate, config.photos_path)
     await cb.answer("Рассылка запущена")
+    rate = float((await repo.settings.get_all())["notify_rate"])
+    asyncio.create_task(notify_new_schedule(cb.message.bot, session_pool, [latest], rate, config.photos_path))
 
 
 @admin_router.message(AdminState.set_broadcast)
 async def m_broadcast(message: Message, repo: RequestsRepo, state: FSMContext):
+    await _confirm_broadcast(message, repo, state, message.text.strip())
+
+
+@admin_router.callback_query(lambda cb: cb.data == "adm:bc_send")
+async def cb_bc_send(cb: CallbackQuery, repo: RequestsRepo, config: Config, state: FSMContext):
+    if not _is_admin_cb(cb, config):
+        return
+    data = await state.get_data()
+    text = data.get("broadcast_text")
     await state.clear()
-    text = message.text.strip()
+    if not text:
+        await cb.answer("Нет текста")
+        return
     users = await repo.users.get_all()
     rate = float((await repo.settings.get_all())["notify_rate"])
-    sent = await broadcast_many(message.bot, [(u.id, text) for u in users], rate=rate)
-    await message.answer(f"Отправлено {sent}/{len(users)}")
+    items = [(u.id, text) for u in users]
+    await cb.message.edit_text(f"Рассылка запущена ({len(items)} получателей)")
+    await cb.answer()
+    asyncio.create_task(_report_broadcast(cb.message.bot, cb.message.chat.id, items, rate))
+
+
+@admin_router.callback_query(lambda cb: cb.data == "adm:bc_cancel")
+async def cb_bc_cancel(cb: CallbackQuery, config: Config, state: FSMContext):
+    if not _is_admin_cb(cb, config):
+        return
+    await state.clear()
+    await cb.message.edit_text("Отменено")
+    await cb.answer()
 
 
 @admin_router.message(Command("setbell"))

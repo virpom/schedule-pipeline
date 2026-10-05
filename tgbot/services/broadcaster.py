@@ -22,7 +22,7 @@ async def send_message(
             reply_markup=reply_markup,
         )
     except exceptions.TelegramBadRequest as e:
-        logging.error("Telegram server says - Bad Request: chat not found")
+        logging.error("Target [ID:%s] BadRequest: %s", user_id, e.message)
     except exceptions.TelegramForbiddenError:
         logging.error(f"Target [ID:{user_id}]: got TelegramForbiddenError")
     except exceptions.TelegramRetryAfter as e:
@@ -72,8 +72,8 @@ async def send_photo(
 ) -> bool:
     try:
         await bot.send_photo(user_id, photo, caption=caption)
-    except exceptions.TelegramBadRequest:
-        logging.error("Telegram server says - Bad Request: chat not found")
+    except exceptions.TelegramBadRequest as e:
+        logging.error("Target [ID:%s] BadRequest: %s", user_id, e.message)
     except exceptions.TelegramForbiddenError:
         logging.error(f"Target [ID:{user_id}]: got TelegramForbiddenError")
     except exceptions.TelegramRetryAfter as e:
