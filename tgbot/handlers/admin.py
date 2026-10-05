@@ -290,31 +290,34 @@ async def broadcast_cmd(message: Message, repo: RequestsRepo, config: Config, st
     await _confirm_broadcast(message, repo, state, parts[1])
 
 
+def _notify_menu_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔔 Всем подписчикам", callback_data="adm:notify_all")],
+        [InlineKeyboardButton(text="👤 Себе (превью)", callback_data="adm:notify_me")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back")],
+    ])
+
+
 @admin_router.message(Command("notify"))
-async def notify_cmd(message: Message, repo: RequestsRepo, config: Config, session_pool, user):
+async def notify_cmd(message: Message, repo: RequestsRepo, config: Config, user):
     if not _is_admin(message, config):
         return
-    latest = await repo.college_lessons.get_latest_date()
-    if not latest:
-        await message.answer("В базе нет расписания")
-        return
     parts = message.text.split()
-    rate = float((await repo.settings.get_all())["notify_rate"])
-
-    if len(parts) < 2 or parts[1].lower() == "all":
-        await message.answer("Рассылка расписания запущена (всем подписчикам и чатам)")
-        asyncio.create_task(notify_new_schedule(message.bot, session_pool, [latest], rate, config.photos_path))
-        return
-
-    arg = parts[1]
-    if arg.lower() == "me":
-        if not user.group:
-            await message.answer("У тебя не выбрана группа")
+    if len(parts) >= 2:
+        latest = await repo.college_lessons.get_latest_date()
+        if not latest:
+            await message.answer("В базе нет расписания")
             return
-        group = user.group
-    else:
-        group = arg.upper()
-    await _send_preview(message, repo, config, latest, group)
+        arg = parts[1]
+        if arg.lower() == "me":
+            if not user.group:
+                await message.answer("У тебя не выбрана группа")
+                return
+            await _send_preview(message, repo, config, latest, user.group)
+        else:
+            await _send_preview(message, repo, config, latest, arg.upper())
+        return
+    await message.answer("🔔 <b>Тест уведомления</b>\n\nКому отправить?", reply_markup=_notify_menu_kb())
 
 
 @admin_router.callback_query(lambda cb: cb.data == "adm:broadcast")
@@ -327,16 +330,60 @@ async def cb_broadcast(cb: CallbackQuery, config: Config, state: FSMContext):
 
 
 @admin_router.callback_query(lambda cb: cb.data == "adm:notify")
-async def cb_notify(cb: CallbackQuery, repo: RequestsRepo, config: Config, session_pool):
+async def cb_notify_menu(cb: CallbackQuery, config: Config):
+    if not _is_admin_cb(cb, config):
+        return
+    await cb.message.edit_text("🔔 <b>Тест уведомления</b>\n\nКому отправить?", reply_markup=_notify_menu_kb())
+    await cb.answer()
+
+
+@admin_router.callback_query(lambda cb: cb.data == "adm:notify_all")
+async def cb_notify_all(cb: CallbackQuery, config: Config):
+    if not _is_admin_cb(cb, config):
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Да, отправить всем", callback_data="adm:notify_confirm")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="adm:notify_cancel")],
+    ])
+    await cb.message.edit_text("Отправить расписание всем подписчикам и чатам?", reply_markup=kb)
+    await cb.answer()
+
+
+@admin_router.callback_query(lambda cb: cb.data == "adm:notify_confirm")
+async def cb_notify_confirm(cb: CallbackQuery, repo: RequestsRepo, config: Config, session_pool):
     if not _is_admin_cb(cb, config):
         return
     latest = await repo.college_lessons.get_latest_date()
     if not latest:
         await cb.answer("В базе нет расписания")
         return
-    await cb.answer("Рассылка запущена")
+    await cb.message.edit_text("Рассылка запущена")
+    await cb.answer()
     rate = float((await repo.settings.get_all())["notify_rate"])
     asyncio.create_task(notify_new_schedule(cb.message.bot, session_pool, [latest], rate, config.photos_path))
+
+
+@admin_router.callback_query(lambda cb: cb.data == "adm:notify_cancel")
+async def cb_notify_cancel(cb: CallbackQuery, config: Config):
+    if not _is_admin_cb(cb, config):
+        return
+    await cb.message.edit_text("Отменено")
+    await cb.answer()
+
+
+@admin_router.callback_query(lambda cb: cb.data == "adm:notify_me")
+async def cb_notify_me(cb: CallbackQuery, repo: RequestsRepo, config: Config, user):
+    if not _is_admin_cb(cb, config):
+        return
+    latest = await repo.college_lessons.get_latest_date()
+    if not latest:
+        await cb.answer("В базе нет расписания")
+        return
+    if not user.group:
+        await cb.answer("У тебя не выбрана группа")
+        return
+    await cb.answer()
+    await _send_preview(cb.message, repo, config, latest, user.group)
 
 
 @admin_router.message(AdminState.set_broadcast)
