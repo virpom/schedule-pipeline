@@ -32,5 +32,6 @@ class DatabaseMiddleware(BaseMiddleware):
             data["repo"] = repo
             data["user"] = user
             data["config"] = self.config
+            data["session_pool"] = self.session_pool
 
             return await handler(event, data)

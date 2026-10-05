@@ -8,10 +8,12 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from common.schedule import format_bell
+from common.schedule import format_bell, format_day
 from config import Config
 from infrastructure.database.repo.requests import RequestsRepo
 from tgbot.services import photos
+from tgbot.services.broadcaster import broadcast_many
+from tgbot.services.poller import notify_new_schedule
 
 admin_router = Router()
 
@@ -25,6 +27,7 @@ class AdminState(StatesGroup):
     set_deadline = State()
     set_night = State()
     set_support = State()
+    set_broadcast = State()
     upload_photo = State()
 
 
@@ -52,10 +55,12 @@ def _settings_text(s: dict) -> str:
 
 def _admin_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📊 Статистика", callback_data="adm:stats")],
-        [InlineKeyboardButton(text="⚙️ Настройки", callback_data="adm:settings")],
-        [InlineKeyboardButton(text="🖼 Фото", callback_data="adm:photos")],
-        [InlineKeyboardButton(text="⏰ Звонки", callback_data="adm:bell")],
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="adm:stats"),
+         InlineKeyboardButton(text="⚙️ Настройки", callback_data="adm:settings")],
+        [InlineKeyboardButton(text="🖼 Фото", callback_data="adm:photos"),
+         InlineKeyboardButton(text="⏰ Звонки", callback_data="adm:bell")],
+        [InlineKeyboardButton(text="📢 Сообщение всем", callback_data="adm:broadcast"),
+         InlineKeyboardButton(text="🔔 Тест уведомления", callback_data="adm:notify")],
     ])
 
 
@@ -238,6 +243,91 @@ async def list_chats(message: Message, repo: RequestsRepo, config: Config):
     for c in chats:
         lines.append(f"{c.id} · {c.title or '—'} → {c.group or '—'}")
     await message.answer("\n".join(lines))
+
+
+async def _send_preview(message: Message, repo: RequestsRepo, config: Config, date, group: str):
+    bell, lunches = await repo.bell_schedule.get_context()
+    lessons = await repo.college_lessons.get_for_group_date(group, date)
+    text = format_day(date, lessons, bell, lunches, "brief")
+    photo = photos.random_photo(config.photos_path, photos.weekday_folder(date))
+    if photo:
+        await message.bot.send_photo(message.chat.id, photo, caption=text)
+    else:
+        await message.answer(text)
+
+
+@admin_router.message(Command("broadcast"))
+async def broadcast_cmd(message: Message, repo: RequestsRepo, config: Config):
+    if not _is_admin(message, config):
+        return
+    parts = message.text.split(None, 1)
+    if len(parts) < 2:
+        await message.answer("Формат: /broadcast текст")
+        return
+    text = parts[1]
+    users = await repo.users.get_all()
+    rate = float((await repo.settings.get_all())["notify_rate"])
+    sent = await broadcast_many(message.bot, [(u.id, text) for u in users], rate=rate)
+    await message.answer(f"Отправлено {sent}/{len(users)}")
+
+
+@admin_router.message(Command("notify"))
+async def notify_cmd(message: Message, repo: RequestsRepo, config: Config, session_pool, user):
+    if not _is_admin(message, config):
+        return
+    latest = await repo.college_lessons.get_latest_date()
+    if not latest:
+        await message.answer("В базе нет расписания")
+        return
+    parts = message.text.split()
+    rate = float((await repo.settings.get_all())["notify_rate"])
+
+    if len(parts) < 2 or parts[1].lower() == "all":
+        await notify_new_schedule(message.bot, session_pool, [latest], rate, config.photos_path)
+        await message.answer("Рассылка расписания запущена (всем подписчикам и чатам)")
+        return
+
+    arg = parts[1]
+    if arg.lower() == "me":
+        if not user.group:
+            await message.answer("У тебя не выбрана группа")
+            return
+        group = user.group
+    else:
+        group = arg.upper()
+    await _send_preview(message, repo, config, latest, group)
+
+
+@admin_router.callback_query(lambda cb: cb.data == "adm:broadcast")
+async def cb_broadcast(cb: CallbackQuery, config: Config, state: FSMContext):
+    if not _is_admin_cb(cb, config):
+        return
+    await state.set_state(AdminState.set_broadcast)
+    await cb.message.answer("Введи текст сообщения для всех:")
+    await cb.answer()
+
+
+@admin_router.callback_query(lambda cb: cb.data == "adm:notify")
+async def cb_notify(cb: CallbackQuery, repo: RequestsRepo, config: Config, session_pool):
+    if not _is_admin_cb(cb, config):
+        return
+    latest = await repo.college_lessons.get_latest_date()
+    if not latest:
+        await cb.answer("В базе нет расписания")
+        return
+    rate = float((await repo.settings.get_all())["notify_rate"])
+    await notify_new_schedule(cb.message.bot, session_pool, [latest], rate, config.photos_path)
+    await cb.answer("Рассылка запущена")
+
+
+@admin_router.message(AdminState.set_broadcast)
+async def m_broadcast(message: Message, repo: RequestsRepo, state: FSMContext):
+    await state.clear()
+    text = message.text.strip()
+    users = await repo.users.get_all()
+    rate = float((await repo.settings.get_all())["notify_rate"])
+    sent = await broadcast_many(message.bot, [(u.id, text) for u in users], rate=rate)
+    await message.answer(f"Отправлено {sent}/{len(users)}")
 
 
 @admin_router.message(Command("setbell"))

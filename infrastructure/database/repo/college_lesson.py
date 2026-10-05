@@ -85,3 +85,7 @@ class CollegeLessonRepo(BaseRepo):
     async def count_dates(self) -> int:
         result = await self.session.execute(select(func.count(func.distinct(CollegeLesson.date))))
         return result.scalar_one()
+
+    async def get_latest_date(self) -> datetime.date | None:
+        result = await self.session.execute(select(func.max(CollegeLesson.date)))
+        return result.scalar_one()
