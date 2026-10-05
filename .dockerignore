@@ -2,6 +2,7 @@
 .gitignore
 .env
 data/
+photos
 __pycache__/
 *.db
 README.md
