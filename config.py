@@ -26,6 +26,7 @@ class Config:
     poll_interval: int
     mode: str  # daily | permanent
     notify_rate: float  # messages per second for broadcasts
+    photos_path: str  # dir with per-weekday photo folders
 
 
 def load_config(path: str = ".env") -> Config:
@@ -46,4 +47,5 @@ def load_config(path: str = ".env") -> Config:
         poll_interval=env.int("POLL_INTERVAL", 1800),
         mode=env.str("MODE", "daily"),
         notify_rate=env.float("NOTIFY_RATE", 20.0),
+        photos_path=env.str("PHOTOS_PATH", "/data/photos"),
     )

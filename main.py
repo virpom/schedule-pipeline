@@ -12,7 +12,7 @@ from infrastructure.database.repo.requests import RequestsRepo
 from infrastructure.database.setup import create_engine, create_session_pool
 from tgbot.handlers import routers_list
 from tgbot.middlewares.database import DatabaseMiddleware
-from tgbot.services.broadcaster import broadcast
+from tgbot.services.bell import bell_loop
 from tgbot.services.poller import poller_loop
 
 
@@ -28,11 +28,10 @@ def register_global_middlewares(dp: Dispatcher, session_pool, config) -> None:
     dp.callback_query.outer_middleware(DatabaseMiddleware(session_pool, config))
 
 
-async def on_startup(bot: Bot, admin_ids: list[int], session_pool) -> None:
+async def on_startup(session_pool) -> None:
     async with session_pool() as session:
         repo = RequestsRepo(session)
         await repo.bell_schedule.seed_if_empty()
-    await broadcast(bot, admin_ids, "Бот запущен")
 
 
 async def main() -> None:
@@ -50,14 +49,16 @@ async def main() -> None:
     dp.include_routers(*routers_list)
     register_global_middlewares(dp, session_pool, config)
 
-    await on_startup(bot, config.tg_bot.admin_ids, session_pool)
+    await on_startup(session_pool)
 
     poller_task = asyncio.create_task(poller_loop(bot, session_pool, config))
+    bell_task = asyncio.create_task(bell_loop(bot, session_pool, config))
 
     try:
         await dp.start_polling(bot)
     finally:
         poller_task.cancel()
+        bell_task.cancel()
         await engine.dispose()
 
 

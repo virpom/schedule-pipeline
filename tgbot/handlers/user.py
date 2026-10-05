@@ -11,6 +11,7 @@ from common.schedule import (
     DETAIL_ORDER,
     format_bell,
     format_day,
+    format_not_published,
     format_teacher_results,
     format_week,
 )
@@ -32,10 +33,17 @@ class TeacherSearch(StatesGroup):
     waiting = State()
 
 
-def menu_kb(subscribed: bool, bell_detail: str = "brief") -> InlineKeyboardMarkup:
-    sub_text = "🔕 Отписаться" if subscribed else "🔔 Подписаться"
-    detail_label = DETAIL_LABELS.get(bell_detail, "кратко")
-    return InlineKeyboardMarkup(inline_keyboard=[
+def _on_off(value: bool) -> str:
+    return "вкл" if value else "выкл"
+
+
+def menu_kb(user: User, support_link: str = "") -> InlineKeyboardMarkup:
+    sub_text = "🔕 Отписаться" if user.subscribed else "🔔 Подписаться"
+    detail_label = DETAIL_LABELS.get(user.bell_detail, "кратко")
+    bell_text = f"🔔 Напоминания: {_on_off(user.bell_notify)}"
+    image_text = f"🖼 Картинки: {_on_off(user.send_image)}"
+
+    rows = [
         [InlineKeyboardButton(text="📅 Сегодня", callback_data="day:today"),
          InlineKeyboardButton(text="📅 Завтра", callback_data="day:tomorrow")],
         [InlineKeyboardButton(text="🗓 Вся неделя", callback_data="week"),
@@ -44,14 +52,25 @@ def menu_kb(subscribed: bool, bell_detail: str = "brief") -> InlineKeyboardMarku
          InlineKeyboardButton(text=f"🕒 Детализация: {detail_label}", callback_data="detail")],
         [InlineKeyboardButton(text="🔎 Предмет", callback_data="find"),
          InlineKeyboardButton(text="👨‍🏫 Преподаватель", callback_data="find_teacher")],
-        [InlineKeyboardButton(text=sub_text, callback_data="sub:toggle"),
-         InlineKeyboardButton(text="🎯 Сменить группу", callback_data="pick")],
-    ])
+        [InlineKeyboardButton(text=sub_text, callback_data="sub:toggle")],
+        [InlineKeyboardButton(text=bell_text, callback_data="bell_toggle"),
+         InlineKeyboardButton(text=image_text, callback_data="image_toggle")],
+        [InlineKeyboardButton(text="🎯 Сменить группу", callback_data="pick")],
+    ]
+    if support_link:
+        rows.append([InlineKeyboardButton(text="📨 Поддержка", url=support_link)])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def menu_text(user: User) -> str:
     group = user.group or "не выбрана"
     return f"🎓 <b>Расписание ПТК</b>\n\nТвоя группа: <b>{group}</b>\n\nВыбери действие 👇"
+
+
+async def _render_menu(repo: RequestsRepo, user: User) -> tuple[str, InlineKeyboardMarkup]:
+    s = await repo.settings.get_all()
+    return menu_text(user), menu_kb(user, s["support_link"])
 
 
 async def _pick_kb(repo: RequestsRepo) -> InlineKeyboardMarkup:
@@ -73,7 +92,8 @@ async def _require_group(cb: CallbackQuery, user: User) -> bool:
 async def start(message: Message, user: User, repo: RequestsRepo, state: FSMContext):
     await state.clear()
     if user.group:
-        await message.answer(menu_text(user), reply_markup=menu_kb(user.subscribed, user.bell_detail))
+        text, kb = await _render_menu(repo, user)
+        await message.answer(text, reply_markup=kb)
     else:
         await message.answer(
             "🎓 Привет! Я бот расписания Политехнического колледжа ЗГУ.\n\nВыбери свою группу 👇",
@@ -89,7 +109,8 @@ async def set_group_cmd(message: Message, repo: RequestsRepo, user: User):
         return
     group = parts[1].strip().upper()
     await repo.users.set_group(user.id, group)
-    await message.answer(f"Твоя группа: <b>{group}</b>", reply_markup=menu_kb(user.subscribed, user.bell_detail))
+    text, kb = await _render_menu(repo, user)
+    await message.answer(f"Твоя группа: <b>{group}</b>\n\n{text}", reply_markup=kb)
 
 
 @user_router.callback_query(F.data == "pick")
@@ -102,14 +123,16 @@ async def cb_pick(cb: CallbackQuery, repo: RequestsRepo):
 async def cb_group(cb: CallbackQuery, repo: RequestsRepo, user: User):
     group = cb.data.split(":", 1)[1]
     await repo.users.set_group(user.id, group)
-    await cb.message.edit_text(f"Твоя группа: <b>{group}</b>", reply_markup=menu_kb(user.subscribed, user.bell_detail))
+    text, kb = await _render_menu(repo, user)
+    await cb.message.edit_text(f"Твоя группа: <b>{group}</b>\n\n{text}", reply_markup=kb)
     await cb.answer(f"Группа {group}")
 
 
 @user_router.callback_query(F.data == "menu")
-async def cb_menu(cb: CallbackQuery, user: User, state: FSMContext):
+async def cb_menu(cb: CallbackQuery, user: User, repo: RequestsRepo, state: FSMContext):
     await state.clear()
-    await cb.message.edit_text(menu_text(user), reply_markup=menu_kb(user.subscribed, user.bell_detail))
+    text, kb = await _render_menu(repo, user)
+    await cb.message.edit_text(text, reply_markup=kb)
     await cb.answer()
 
 
@@ -119,7 +142,17 @@ async def _show_day(cb: CallbackQuery, repo: RequestsRepo, user: User, date: dat
     if lessons:
         text = format_day(date, lessons, bell, lunches, user.bell_detail)
     else:
-        text = format_day(date, [], bell, lunches, user.bell_detail)
+        published = await repo.schedule_files.get_hash(date) is not None
+        if published:
+            text = format_day(date, [], bell, lunches, user.bell_detail)
+        else:
+            s = await repo.settings.get_all()
+            deadline = int(s.get("deadline_hour", 20) or 20)
+            now = datetime.datetime.now()
+            if 0 <= deadline <= 23 and now.hour >= deadline:
+                text = format_day(date, [], bell, lunches, user.bell_detail)
+            else:
+                text = format_not_published(date)
         for i in range(1, 8):
             d = date + datetime.timedelta(days=i)
             nxt = await repo.college_lessons.get_for_group_date(user.group, d)
@@ -211,8 +244,29 @@ async def cb_sub(cb: CallbackQuery, repo: RequestsRepo, user: User):
         return
     new = not user.subscribed
     await repo.users.set_subscribed(user.id, new)
-    await cb.message.edit_text(menu_text(user), reply_markup=menu_kb(new, user.bell_detail))
+    text, kb = await _render_menu(repo, user)
+    await cb.message.edit_text(text, reply_markup=kb)
     await cb.answer("Подписка включена 🔔" if new else "Подписка отключена 🔕")
+
+
+@user_router.callback_query(F.data == "bell_toggle")
+async def cb_bell_toggle(cb: CallbackQuery, repo: RequestsRepo, user: User):
+    if not await _require_group(cb, user):
+        return
+    new = not user.bell_notify
+    await repo.users.set_bell_notify(user.id, new)
+    text, kb = await _render_menu(repo, user)
+    await cb.message.edit_text(text, reply_markup=kb)
+    await cb.answer("Напоминания о парах включены 🔔" if new else "Напоминания отключены 🔕")
+
+
+@user_router.callback_query(F.data == "image_toggle")
+async def cb_image_toggle(cb: CallbackQuery, repo: RequestsRepo, user: User):
+    new = not user.send_image
+    await repo.users.set_send_image(user.id, new)
+    text, kb = await _render_menu(repo, user)
+    await cb.message.edit_text(text, reply_markup=kb)
+    await cb.answer("Картинки включены 🖼" if new else "Картинки отключены")
 
 
 @user_router.callback_query(F.data == "detail")
@@ -220,7 +274,8 @@ async def cb_detail(cb: CallbackQuery, repo: RequestsRepo, user: User):
     cur = user.bell_detail if user.bell_detail in DETAIL_ORDER else DETAIL_ORDER[0]
     nxt = DETAIL_ORDER[(DETAIL_ORDER.index(cur) + 1) % len(DETAIL_ORDER)]
     await repo.users.set_bell_detail(user.id, nxt)
-    await cb.message.edit_text(menu_text(user), reply_markup=menu_kb(user.subscribed, nxt))
+    text, kb = await _render_menu(repo, user)
+    await cb.message.edit_text(text, reply_markup=kb)
     await cb.answer(f"Детализация: {DETAIL_LABELS[nxt]}")
 
 
@@ -237,9 +292,10 @@ async def cb_find(cb: CallbackQuery, user: User, state: FSMContext):
 
 
 @user_router.callback_query(F.data == "find:cancel")
-async def cb_find_cancel(cb: CallbackQuery, user: User, state: FSMContext):
+async def cb_find_cancel(cb: CallbackQuery, user: User, repo: RequestsRepo, state: FSMContext):
     await state.clear()
-    await cb.message.edit_text(menu_text(user), reply_markup=menu_kb(user.subscribed, user.bell_detail))
+    text, kb = await _render_menu(repo, user)
+    await cb.message.edit_text(text, reply_markup=kb)
     await cb.answer()
 
 
@@ -307,6 +363,8 @@ async def any_text(message: Message, repo: RequestsRepo, user: User):
     known = await repo.college_lessons.get_groups()
     if group in known:
         await repo.users.set_group(user.id, group)
-        await message.answer(f"Твоя группа: <b>{group}</b>", reply_markup=menu_kb(user.subscribed, user.bell_detail))
+        text, kb = await _render_menu(repo, user)
+        await message.answer(f"Твоя группа: <b>{group}</b>\n\n{text}", reply_markup=kb)
     else:
-        await message.answer(menu_text(user), reply_markup=menu_kb(user.subscribed, user.bell_detail))
+        text, kb = await _render_menu(repo, user)
+        await message.answer(text, reply_markup=kb)

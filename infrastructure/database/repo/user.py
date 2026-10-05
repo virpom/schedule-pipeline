@@ -25,6 +25,9 @@ class UserRepo(BaseRepo):
                 full_name=full_name,
                 language=language,
                 last_seen=datetime.datetime.now(),
+                subscribed=True,
+                send_image=True,
+                bell_notify=False,
             )
             .on_conflict_do_update(
                 index_elements=[User.id],
@@ -54,9 +57,31 @@ class UserRepo(BaseRepo):
         )
         await self.session.commit()
 
+    async def set_send_image(self, user_id: int, value: bool) -> None:
+        await self.session.execute(
+            update(User).where(User.id == user_id).values(send_image=value)
+        )
+        await self.session.commit()
+
+    async def set_bell_notify(self, user_id: int, value: bool) -> None:
+        await self.session.execute(
+            update(User).where(User.id == user_id).values(bell_notify=value)
+        )
+        await self.session.commit()
+
     async def get_subscribed(self) -> list[User]:
         result = await self.session.execute(
             select(User).where(User.subscribed == True, User.group.is_not(None))  # noqa: E712
+        )
+        return list(result.scalars().all())
+
+    async def get_bell_subscribers(self) -> list[User]:
+        result = await self.session.execute(
+            select(User).where(
+                User.subscribed == True,  # noqa: E712
+                User.bell_notify == True,  # noqa: E712
+                User.group.is_not(None),
+            )
         )
         return list(result.scalars().all())
 

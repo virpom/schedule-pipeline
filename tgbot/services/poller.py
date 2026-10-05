@@ -10,7 +10,8 @@ from common.schedule import format_day
 from config import Config
 from infrastructure.database.repo.requests import RequestsRepo
 from parsers import polar
-from tgbot.services.broadcaster import broadcast_many
+from tgbot.services import photos
+from tgbot.services.broadcaster import broadcast_schedule
 
 
 async def poll_once(session_pool, config: Config) -> list[datetime.date]:
@@ -45,22 +46,34 @@ async def poll_once(session_pool, config: Config) -> list[datetime.date]:
     return new_dates
 
 
-async def notify_new_schedule(bot, session_pool, dates: list[datetime.date], rate: float) -> None:
+async def notify_new_schedule(bot, session_pool, dates: list[datetime.date], rate: float, photos_path: str) -> None:
     async with session_pool() as db:
         repo = RequestsRepo(db)
         bell, lunches = await repo.bell_schedule.get_context()
         subscribers = await repo.users.get_subscribed()
+        chats = await repo.chats.get_all()
 
-    items: list[tuple[int, str]] = []
+    items: list[tuple[int, str, str | None]] = []
     for date in sorted(dates):
+        weekday = photos.weekday_folder(date)
         for user in subscribers:
             async with session_pool() as db:
                 repo = RequestsRepo(db)
                 lessons = await repo.college_lessons.get_for_group_date(user.group, date)
             text = format_day(date, lessons, bell, lunches, user.bell_detail)
-            items.append((user.id, text))
+            photo = photos.random_photo(photos_path, weekday) if user.send_image else None
+            items.append((user.id, text, photo))
+        for chat in chats:
+            if not chat.group:
+                continue
+            async with session_pool() as db:
+                repo = RequestsRepo(db)
+                lessons = await repo.college_lessons.get_for_group_date(chat.group, date)
+            text = format_day(date, lessons, bell, lunches, "brief")
+            photo = photos.random_photo(photos_path, weekday)
+            items.append((chat.id, text, photo))
 
-    await broadcast_many(bot, items, rate=rate)
+    await broadcast_schedule(bot, items, rate=rate)
 
 
 def _in_night(now: datetime.datetime, start_str: str, end_str: str) -> bool:
@@ -96,7 +109,7 @@ async def poller_loop(bot, session_pool, config: Config) -> None:
                 if time.monotonic() - last_poll >= interval:
                     new_dates = await poll_once(session_pool, config)
                     if new_dates:
-                        await notify_new_schedule(bot, session_pool, new_dates, rate)
+                        await notify_new_schedule(bot, session_pool, new_dates, rate, config.photos_path)
                     last_poll = time.monotonic()
         except Exception:
             logging.exception("poll failed")

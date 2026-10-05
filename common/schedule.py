@@ -93,6 +93,10 @@ def format_day(date: datetime.date, lessons, bell, lunches, detail: str = DETAIL
     return "\n".join(lines)
 
 
+def format_not_published(date: datetime.date) -> str:
+    return f"📅 <b>{WEEKDAY_FULL[date.weekday()]}, {date.day} {MONTHS_GEN[date.month]}</b>\n\nРасписание ещё не выложено ⏳"
+
+
 def format_week(entries, bell, lunches, detail: str = DETAIL_BRIEF) -> str:
     if not entries:
         return "На этой неделе расписания пока нет 📭"
