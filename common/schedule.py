@@ -114,7 +114,7 @@ def format_day(
             else:
                 time_str = _para_brief(bs)
 
-            line = f"<b>{time_str}</b>  {lesson.subject}"
+            line = f"{p}) <b>{time_str}</b>  {lesson.subject}"
             lines.append(line)
             if meta == "group":
                 m = " · ".join(x for x in (lesson.group, lesson.room) if x)

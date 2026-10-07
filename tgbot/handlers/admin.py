@@ -29,6 +29,7 @@ class AdminState(StatesGroup):
     set_night = State()
     set_support = State()
     set_broadcast = State()
+    set_group_broadcast = State()
     confirm_broadcast = State()
     upload_photo = State()
 
@@ -58,10 +59,12 @@ def _settings_text(s: dict) -> str:
 def _admin_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Статистика", callback_data="adm:stats"),
-         InlineKeyboardButton(text="⚙️ Настройки", callback_data="adm:settings")],
-        [InlineKeyboardButton(text="🖼 Фото", callback_data="adm:photos"),
+         InlineKeyboardButton(text="👨‍🏫 Преподаватели", callback_data="adm:teachers")],
+        [InlineKeyboardButton(text="⚙️ Настройки", callback_data="adm:settings"),
          InlineKeyboardButton(text="⏰ Звонки", callback_data="adm:bell")],
-        [InlineKeyboardButton(text="📢 Сообщение всем", callback_data="adm:broadcast"),
+        [InlineKeyboardButton(text="🖼 Фото", callback_data="adm:photos"),
+         InlineKeyboardButton(text="💬 Чаты", callback_data="adm:chats")],
+        [InlineKeyboardButton(text="📢 Рассылка", callback_data="adm:broadcast_menu"),
          InlineKeyboardButton(text="🔔 Тест уведомления", callback_data="adm:notify")],
     ])
 
@@ -307,6 +310,23 @@ async def _confirm_broadcast(message: Message, repo: RequestsRepo, state: FSMCon
     await message.answer(f"Отправить <b>{len(users)}</b> {label}?\n\n{preview}", reply_markup=kb)
 
 
+async def _target_users(repo: RequestsRepo, target: str):
+    if target == "teachers":
+        return await repo.users.get_teachers_users(), "преподавателям"
+    if target == "all" or not target:
+        return await repo.users.get_all(), "пользователям"
+    return await repo.users.get_by_group(target), f"в группе {target}"
+
+
+def _broadcast_menu_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👥 Всем", callback_data="adm:broadcast")],
+        [InlineKeyboardButton(text="👨‍🏫 Преподавателям", callback_data="adm:broadcast_teachers")],
+        [InlineKeyboardButton(text="🎓 Группе", callback_data="adm:broadcast_group")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back")],
+    ])
+
+
 @admin_router.message(Command("broadcast"))
 async def broadcast_cmd(message: Message, repo: RequestsRepo, config: Config, state: FSMContext):
     if not _is_admin(message, config):
@@ -377,13 +397,49 @@ async def notify_cmd(message: Message, repo: RequestsRepo, config: Config, user)
     await message.answer("🔔 <b>Тест уведомления</b>\n\nКому отправить?", reply_markup=_notify_menu_kb())
 
 
+@admin_router.callback_query(lambda cb: cb.data == "adm:broadcast_menu")
+async def cb_broadcast_menu(cb: CallbackQuery, config: Config):
+    if not _is_admin_cb(cb, config):
+        return
+    await cb.message.edit_text("📢 <b>Рассылка</b>\n\nКому отправить?", reply_markup=_broadcast_menu_kb())
+    await cb.answer()
+
+
 @admin_router.callback_query(lambda cb: cb.data == "adm:broadcast")
 async def cb_broadcast(cb: CallbackQuery, config: Config, state: FSMContext):
     if not _is_admin_cb(cb, config):
         return
+    await state.update_data(broadcast_target="all")
     await state.set_state(AdminState.set_broadcast)
     await cb.message.answer("Введи текст сообщения для всех:")
     await cb.answer()
+
+
+@admin_router.callback_query(lambda cb: cb.data == "adm:broadcast_teachers")
+async def cb_broadcast_teachers(cb: CallbackQuery, config: Config, state: FSMContext):
+    if not _is_admin_cb(cb, config):
+        return
+    await state.update_data(broadcast_target="teachers")
+    await state.set_state(AdminState.set_broadcast)
+    await cb.message.answer("Введи текст сообщения для преподавателей:")
+    await cb.answer()
+
+
+@admin_router.callback_query(lambda cb: cb.data == "adm:broadcast_group")
+async def cb_broadcast_group(cb: CallbackQuery, config: Config, state: FSMContext):
+    if not _is_admin_cb(cb, config):
+        return
+    await state.set_state(AdminState.set_group_broadcast)
+    await cb.message.answer("Напиши номер группы (например, ДП-26):")
+    await cb.answer()
+
+
+@admin_router.message(AdminState.set_group_broadcast)
+async def m_group_broadcast(message: Message, state: FSMContext):
+    group = message.text.strip().upper()
+    await state.update_data(broadcast_target=group)
+    await state.set_state(AdminState.set_broadcast)
+    await message.answer(f"Введи текст сообщения для группы {group}:")
 
 
 @admin_router.callback_query(lambda cb: cb.data == "adm:notify")
@@ -442,7 +498,10 @@ async def cb_notify_me(cb: CallbackQuery, repo: RequestsRepo, config: Config, us
 
 @admin_router.message(AdminState.set_broadcast)
 async def m_broadcast(message: Message, repo: RequestsRepo, state: FSMContext):
-    await _confirm_broadcast(message, repo, state, message.text.strip())
+    data = await state.get_data()
+    target = data.get("broadcast_target", "all")
+    users, label = await _target_users(repo, target)
+    await _confirm_broadcast(message, repo, state, message.text.strip(), users, label)
 
 
 @admin_router.callback_query(lambda cb: cb.data == "adm:bc_send")
@@ -610,6 +669,24 @@ async def cb_adm_teachers(cb: CallbackQuery, repo: RequestsRepo, config: Config)
         [InlineKeyboardButton(text="⬅️ Назад к статистике", callback_data="adm:stats")],
     ])
     await cb.message.edit_text(await _teachers_text(repo), reply_markup=kb)
+    await cb.answer()
+
+
+@admin_router.callback_query(lambda cb: cb.data == "adm:chats")
+async def cb_adm_chats(cb: CallbackQuery, repo: RequestsRepo, config: Config):
+    if not _is_admin_cb(cb, config):
+        return
+    chats = await repo.chats.get_all()
+    if not chats:
+        lines = ["💬 <b>Чаты</b>\n\nПока нет"]
+    else:
+        lines = ["💬 <b>Чаты</b>\n"]
+        for c in chats:
+            lines.append(f"{c.id} · {c.title or '—'} → {c.group or '—'}")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back")],
+    ])
+    await cb.message.edit_text("\n".join(lines), reply_markup=kb)
     await cb.answer()
 
 
