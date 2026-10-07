@@ -1,3 +1,4 @@
+from collections import Counter
 from typing import Optional
 
 import datetime
@@ -5,8 +6,25 @@ import datetime
 from sqlalchemy import select, update
 from sqlalchemy.dialects.sqlite import insert
 
+from common.schedule import course_group_from_course
 from infrastructure.database.models import User
 from infrastructure.database.repo.base import BaseRepo
+
+
+def majority_course_groups(rows) -> dict[str, str]:
+    counts: dict[str, Counter] = {}
+    for group, course in rows:
+        if course is None:
+            continue
+        counts.setdefault(group, Counter())[course] += 1
+    out: dict[str, str] = {}
+    for group, counter in counts.items():
+        top = counter.most_common()
+        if len(top) == 1 or top[0][1] > top[1][1]:
+            cg = course_group_from_course(top[0][0])
+            if cg:
+                out[group] = cg
+    return out
 
 
 class UserRepo(BaseRepo):
@@ -55,6 +73,12 @@ class UserRepo(BaseRepo):
     async def set_teacher_name(self, user_id: int, name: str) -> None:
         await self.session.execute(
             update(User).where(User.id == user_id).values(teacher_name=name)
+        )
+        await self.session.commit()
+
+    async def set_course(self, user_id: int, course: Optional[int]) -> None:
+        await self.session.execute(
+            update(User).where(User.id == user_id).values(course=course)
         )
         await self.session.commit()
 
@@ -115,3 +139,11 @@ class UserRepo(BaseRepo):
             select(User).where(User.role == "teacher", User.teacher_name.is_not(None))
         )
         return list(result.scalars().all())
+
+    async def get_group_course_map(self) -> dict[str, str]:
+        result = await self.session.execute(
+            select(User.group, User.course).where(
+                User.group.is_not(None), User.course.is_not(None)
+            )
+        )
+        return majority_course_groups(result.all())

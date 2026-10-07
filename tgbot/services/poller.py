@@ -6,7 +6,7 @@ import time
 
 from aiohttp import ClientSession
 
-from common.schedule import format_day, format_no_lessons
+from common.schedule import course_group_from_course, format_day, format_no_lessons
 from config import Config
 from infrastructure.database.repo.requests import RequestsRepo
 from parsers import polar
@@ -63,6 +63,7 @@ async def notify_new_schedule(bot, session_pool, changes: list[tuple[datetime.da
         bell, lunches = await repo.bell_schedule.get_context()
         subscribers = await repo.users.get_subscribed()
         chats = await repo.chats.get_all()
+        group_course_map = await repo.users.get_group_course_map()
 
     items: list[tuple[int, str, str | None]] = []
     for date, is_new in sorted(changes, key=lambda x: x[0]):
@@ -78,11 +79,17 @@ async def notify_new_schedule(bot, session_pool, changes: list[tuple[datetime.da
                     lessons = await repo.college_lessons.get_for_group_date(user.group, date)
                     note = await repo.no_lessons.get_note(date, user.group) if not lessons else None
             is_teacher = user.role == "teacher"
+            if is_teacher:
+                gcg = group_course_map or None
+            else:
+                cg = course_group_from_course(user.course)
+                gcg = {user.group: cg} if cg else None
             if lessons:
                 text = format_day(
                     date, lessons, bell, lunches, user.bell_detail,
                     meta="group" if is_teacher else "teacher",
                     show_rov=not is_teacher,
+                    group_course_group=gcg,
                 )
             else:
                 text = format_no_lessons(date, note)

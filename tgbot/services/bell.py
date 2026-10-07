@@ -3,20 +3,15 @@ import datetime
 import logging
 
 from common.schedule import (
-    BELL_ALL,
-    BELL_PARA,
-    BELL_PARA_BREAK,
-    BELL_PARA_LUNCH,
+    BELL_FULL,
+    BELL_START_END,
+    course_group_from_course,
     course_group_from_group,
     day_type_from_date,
 )
 from config import Config
 from infrastructure.database.repo.requests import RequestsRepo
 from tgbot.services.broadcaster import send_message
-
-
-def _user_has_mode(mode: str) -> bool:
-    return mode in (BELL_PARA, BELL_PARA_BREAK, BELL_PARA_LUNCH, BELL_ALL)
 
 
 async def _tick(bot, session_pool, now: datetime.datetime) -> None:
@@ -27,6 +22,7 @@ async def _tick(bot, session_pool, now: datetime.datetime) -> None:
         repo = RequestsRepo(db)
         bell, lunches = await repo.bell_schedule.get_context()
         subscribers = await repo.users.get_bell_subscribers()
+        group_course_map = await repo.users.get_group_course_map()
 
     dt = day_type_from_date(today)
     for user in subscribers:
@@ -39,27 +35,37 @@ async def _tick(bot, session_pool, now: datetime.datetime) -> None:
         if not lessons:
             continue
 
+        is_teacher = user.role == "teacher"
+        own_cg = None if is_teacher else course_group_from_course(user.course)
+
         events: list[tuple[datetime.time, str, str]] = []
         for l in lessons:
-            cg = course_group_from_group(l.group)
+            cg = own_cg or (group_course_map.get(l.group) if is_teacher else None) or course_group_from_group(l.group)
             para_end = getattr(l, "para_end", None) or l.para
             lunch = lunches.get((dt, cg)) or lunches.get((dt, "I_IV"))
 
             # start bell
-            bs = bell.get((dt, cg, l.para)) or bell.get((dt, "I_IV", l.para))
-            if bs and user.bell_mode in (BELL_PARA, BELL_PARA_BREAK, BELL_PARA_LUNCH, BELL_ALL):
+            bs0 = bell.get((dt, cg, l.para)) or bell.get((dt, "I_IV", l.para))
+            if bs0 and user.bell_mode in (BELL_START_END, BELL_FULL):
                 text = f"🔔 {l.para} пара · {l.subject}"
                 if l.room:
                     text += f" · {l.room}"
-                events.append((bs.start, f"s:{l.para}", text))
+                events.append((bs0.start, f"s:{l.para}", text))
 
-            # break (end of lesson)
-            be = bell.get((dt, cg, para_end)) or bell.get((dt, "I_IV", para_end))
-            if be and user.bell_mode in (BELL_PARA_BREAK, BELL_ALL):
-                events.append((be.end, f"b:{para_end}", "🔔 Перемена"))
+            for p in range(l.para, para_end + 1):
+                bp = bell.get((dt, cg, p)) or bell.get((dt, "I_IV", p))
+                if not bp:
+                    continue
+                # break between academic hours (skip when it coincides with lunch inside)
+                if user.bell_mode == BELL_FULL and bp.h1_end != bp.h2_start:
+                    if not (lunch and lunch.position == "inside" and lunch.para == p):
+                        events.append((bp.h1_end, f"h1:{p}", "🔔 Перемена"))
+                # end of lesson
+                if p == para_end and user.bell_mode in (BELL_START_END, BELL_FULL):
+                    events.append((bp.end, f"e:{p}", "🔔 Конец пары"))
 
-            # lunch
-            if lunch and user.bell_mode in (BELL_PARA_LUNCH, BELL_ALL):
+            # lunch (big break)
+            if user.bell_mode == BELL_FULL and lunch:
                 events.append((lunch.lunch_start, "lunch", "🍽 Обед"))
 
         for t, key, text in events:

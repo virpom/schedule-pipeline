@@ -15,17 +15,13 @@ DETAIL_ORDER = [DETAIL_BRIEF, DETAIL_LUNCH, DETAIL_FULL]
 DETAIL_LABELS = {DETAIL_BRIEF: "кратко", DETAIL_LUNCH: "с обедом", DETAIL_FULL: "полное"}
 
 BELL_OFF = "off"
-BELL_PARA = "para"
-BELL_PARA_BREAK = "para_break"
-BELL_PARA_LUNCH = "para_lunch"
-BELL_ALL = "all"
-BELL_ORDER = [BELL_OFF, BELL_PARA, BELL_PARA_BREAK, BELL_PARA_LUNCH, BELL_ALL]
+BELL_START_END = "start_end"
+BELL_FULL = "full"
+BELL_ORDER = [BELL_OFF, BELL_START_END, BELL_FULL]
 BELL_LABELS = {
     BELL_OFF: "выкл",
-    BELL_PARA: "звонок",
-    BELL_PARA_BREAK: "звонок+перемена",
-    BELL_PARA_LUNCH: "звонок+обед",
-    BELL_ALL: "всё",
+    BELL_START_END: "звонок+конец пары",
+    BELL_FULL: "звонок+перемена+конец",
 }
 
 
@@ -55,6 +51,12 @@ def course_from_group(group: str) -> int:
 
 def course_group_from_group(group: str) -> str:
     course = course_from_group(group)
+    return "I_IV" if course in (1, 4) else "II_III"
+
+
+def course_group_from_course(course: int | None) -> str | None:
+    if not course:
+        return None
     return "I_IV" if course in (1, 4) else "II_III"
 
 
@@ -88,6 +90,7 @@ def format_day(
         detail: str = DETAIL_BRIEF,
         meta: str = "teacher",
         show_rov: bool = True,
+        group_course_group: dict[str, str] | None = None,
 ) -> str:
     header = f"📅 <b>{WEEKDAY_FULL[date.weekday()]}, {date.day} {MONTHS_GEN[date.month]}</b>"
     if not lessons:
@@ -101,7 +104,7 @@ def format_day(
         lines.append(f"<b>{rov.start:%H:%M}–{rov.end:%H:%M}</b>  Разговоры о важном 🇷🇺")
 
     for lesson in lessons:
-        cg = course_group_from_group(lesson.group)
+        cg = (group_course_group or {}).get(lesson.group) or course_group_from_group(lesson.group)
         lunch = lunches.get((dt, cg)) or lunches.get((dt, "I_IV"))
         para_end = getattr(lesson, "para_end", None) or lesson.para
         for p in range(lesson.para, para_end + 1):
@@ -144,10 +147,10 @@ def format_no_lessons(date: datetime.date, note: str | None = None) -> str:
     return text
 
 
-def format_week(entries, bell, lunches, detail: str = DETAIL_BRIEF, meta: str = "teacher", show_rov: bool = True) -> str:
+def format_week(entries, bell, lunches, detail: str = DETAIL_BRIEF, meta: str = "teacher", show_rov: bool = True, group_course_group: dict[str, str] | None = None) -> str:
     if not entries:
         return "На этой неделе расписания пока нет 📭"
-    return "\n\n".join(format_day(d, les, bell, lunches, detail, meta, show_rov) for d, les in entries)
+    return "\n\n".join(format_day(d, les, bell, lunches, detail, meta, show_rov, group_course_group) for d, les in entries)
 
 
 def format_teacher_results(entries, bell, lunches, detail: str = DETAIL_BRIEF) -> str:

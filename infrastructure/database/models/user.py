@@ -1,7 +1,7 @@
 import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, Boolean, DateTime, String
+from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String
 from sqlalchemy import text, true
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,6 +19,7 @@ class User(Base, TimestampMixin):
     role: Mapped[str] = mapped_column(String(16), server_default=text("'student'"))
     group: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     teacher_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    course: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     subscribed: Mapped[bool] = mapped_column(Boolean, server_default=text("1"))
     bell_detail: Mapped[str] = mapped_column(String(16), server_default=text("'brief'"))
     send_image: Mapped[bool] = mapped_column(Boolean, server_default=text("0"))

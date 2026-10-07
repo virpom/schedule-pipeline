@@ -9,7 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from common.schedule import format_bell, format_day
+from common.schedule import course_group_from_course, format_bell, format_day
 from config import Config
 from infrastructure.database.repo.requests import RequestsRepo
 from tgbot.services import photos
@@ -277,14 +277,18 @@ async def _preview_for_user(message: Message, repo: RequestsRepo, config: Config
             await message.answer("У тебя не выбрана фамилия")
             return
         lessons = await repo.college_lessons.get_for_teacher_date(user.teacher_name, date)
+        gcg = await repo.users.get_group_course_map() or None
     else:
         if not user.group:
             await message.answer("У тебя не выбрана группа")
             return
         lessons = await repo.college_lessons.get_for_group_date(user.group, date)
+        cg = course_group_from_course(user.course)
+        gcg = {user.group: cg} if cg else None
     text = format_day(date, lessons, bell, lunches, "brief",
                       meta="group" if is_teacher else "teacher",
-                      show_rov=not is_teacher)
+                      show_rov=not is_teacher,
+                      group_course_group=gcg)
     photo = photos.random_photo(config.photos_path, photos.weekday_folder(date)) if (user.send_image and not is_teacher) else None
     if photo:
         await message.bot.send_photo(message.chat.id, FSInputFile(photo), caption=text)
