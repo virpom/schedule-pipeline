@@ -84,6 +84,8 @@ async def _build_stats(repo: RequestsRepo) -> tuple[str, InlineKeyboardMarkup]:
     total = len(users)
     active = sum(1 for u in users if u.last_seen and u.last_seen >= week_ago)
     subscribed = sum(1 for u in users if u.subscribed)
+    teachers = [u for u in users if u.role == "teacher"]
+    students = [u for u in users if u.role != "teacher"]
 
     lessons = await repo.college_lessons.count_lessons()
     days = await repo.college_lessons.count_dates()
@@ -91,7 +93,7 @@ async def _build_stats(repo: RequestsRepo) -> tuple[str, InlineKeyboardMarkup]:
 
     group_stats: dict[str, list[int]] = {}
     no_group = [0, 0]
-    for u in users:
+    for u in students:
         if u.group:
             entry = group_stats.setdefault(u.group, [0, 0])
             entry[0] += 1
@@ -106,6 +108,7 @@ async def _build_stats(repo: RequestsRepo) -> tuple[str, InlineKeyboardMarkup]:
     lines.append(f"Всего пользователей: <b>{total}</b>")
     lines.append(f"Активных (7 дней): <b>{active}</b>")
     lines.append(f"Подписаны на рассылку: <b>{subscribed}</b>")
+    lines.append(f"Преподавателей: <b>{len(teachers)}</b>")
     lines.append("")
     lines.append("📚 <b>Расписание в базе</b>")
     lines.append(f"Занятий: {lessons} · Дней: {days} · Групп: {groups}")
@@ -117,6 +120,8 @@ async def _build_stats(repo: RequestsRepo) -> tuple[str, InlineKeyboardMarkup]:
         rows.append([InlineKeyboardButton(text=f"{g} — {t} · рассылка {s}", callback_data=f"group_users:{g}")])
     if no_group[0]:
         rows.append([InlineKeyboardButton(text=f"Без группы — {no_group[0]} · рассылка {no_group[1]}", callback_data="group_users:__none__")])
+    if teachers:
+        rows.append([InlineKeyboardButton(text=f"👨‍🏫 Преподаватели — {len(teachers)}", callback_data="adm:teachers")])
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back")])
 
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
@@ -247,11 +252,34 @@ async def list_chats(message: Message, repo: RequestsRepo, config: Config):
     await message.answer("\n".join(lines))
 
 
-async def _send_preview(message: Message, repo: RequestsRepo, config: Config, date, group: str):
+async def _send_preview(message: Message, repo: RequestsRepo, config: Config, date, group: str, send_image: bool = True):
     bell, lunches = await repo.bell_schedule.get_context()
     lessons = await repo.college_lessons.get_for_group_date(group, date)
     text = format_day(date, lessons, bell, lunches, "brief")
-    photo = photos.random_photo(config.photos_path, photos.weekday_folder(date))
+    photo = photos.random_photo(config.photos_path, photos.weekday_folder(date)) if send_image else None
+    if photo:
+        await message.bot.send_photo(message.chat.id, FSInputFile(photo), caption=text)
+    else:
+        await message.answer(text)
+
+
+async def _preview_for_user(message: Message, repo: RequestsRepo, config: Config, date, user):
+    bell, lunches = await repo.bell_schedule.get_context()
+    is_teacher = user.role == "teacher"
+    if is_teacher:
+        if not user.teacher_name:
+            await message.answer("У тебя не выбрана фамилия")
+            return
+        lessons = await repo.college_lessons.get_for_teacher_date(user.teacher_name, date)
+    else:
+        if not user.group:
+            await message.answer("У тебя не выбрана группа")
+            return
+        lessons = await repo.college_lessons.get_for_group_date(user.group, date)
+    text = format_day(date, lessons, bell, lunches, "brief",
+                      meta="group" if is_teacher else "teacher",
+                      show_rov=not is_teacher)
+    photo = photos.random_photo(config.photos_path, photos.weekday_folder(date)) if (user.send_image and not is_teacher) else None
     if photo:
         await message.bot.send_photo(message.chat.id, FSInputFile(photo), caption=text)
     else:
@@ -266,16 +294,17 @@ async def _report_broadcast(bot, chat_id, items, rate):
         pass
 
 
-async def _confirm_broadcast(message: Message, repo: RequestsRepo, state: FSMContext, text: str):
-    users = await repo.users.get_all()
-    await state.update_data(broadcast_text=text)
+async def _confirm_broadcast(message: Message, repo: RequestsRepo, state: FSMContext, text: str, users=None, label: str = "пользователям"):
+    if users is None:
+        users = await repo.users.get_all()
+    await state.update_data(broadcast_text=text, broadcast_ids=[u.id for u in users])
     await state.set_state(AdminState.confirm_broadcast)
     preview = text if len(text) <= 400 else text[:400] + "…"
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Отправить всем", callback_data="adm:bc_send"),
+        [InlineKeyboardButton(text="✅ Отправить", callback_data="adm:bc_send"),
          InlineKeyboardButton(text="❌ Отмена", callback_data="adm:bc_cancel")],
     ])
-    await message.answer(f"Отправить <b>{len(users)}</b> пользователям?\n\n{preview}", reply_markup=kb)
+    await message.answer(f"Отправить <b>{len(users)}</b> {label}?\n\n{preview}", reply_markup=kb)
 
 
 @admin_router.message(Command("broadcast"))
@@ -288,6 +317,37 @@ async def broadcast_cmd(message: Message, repo: RequestsRepo, config: Config, st
         await message.answer("Введи текст сообщения для всех:")
         return
     await _confirm_broadcast(message, repo, state, parts[1])
+
+
+@admin_router.message(Command("broadcast_teachers"))
+async def broadcast_teachers_cmd(message: Message, repo: RequestsRepo, config: Config, state: FSMContext):
+    if not _is_admin(message, config):
+        return
+    parts = message.text.split(None, 1)
+    if len(parts) < 2:
+        await message.answer("Формат: /broadcast_teachers текст")
+        return
+    teachers = await repo.users.get_teachers_users()
+    if not teachers:
+        await message.answer("Преподавателей пока нет")
+        return
+    await _confirm_broadcast(message, repo, state, parts[1], teachers, label="преподавателям")
+
+
+@admin_router.message(Command("broadcast_group"))
+async def broadcast_group_cmd(message: Message, repo: RequestsRepo, config: Config, state: FSMContext):
+    if not _is_admin(message, config):
+        return
+    parts = message.text.split(None, 2)
+    if len(parts) < 3:
+        await message.answer("Формат: /broadcast_group ДП-26 текст")
+        return
+    group = parts[1].upper()
+    users = await repo.users.get_by_group(group)
+    if not users:
+        await message.answer(f"В группе {group} никого нет")
+        return
+    await _confirm_broadcast(message, repo, state, parts[2], users, label=f"в группе {group}")
 
 
 def _notify_menu_kb() -> InlineKeyboardMarkup:
@@ -310,12 +370,9 @@ async def notify_cmd(message: Message, repo: RequestsRepo, config: Config, user)
             return
         arg = parts[1]
         if arg.lower() == "me":
-            if not user.group:
-                await message.answer("У тебя не выбрана группа")
-                return
-            await _send_preview(message, repo, config, latest, user.group)
+            await _preview_for_user(message, repo, config, latest, user)
         else:
-            await _send_preview(message, repo, config, latest, arg.upper())
+            await _send_preview(message, repo, config, latest, arg.upper(), send_image=user.send_image)
         return
     await message.answer("🔔 <b>Тест уведомления</b>\n\nКому отправить?", reply_markup=_notify_menu_kb())
 
@@ -379,11 +436,8 @@ async def cb_notify_me(cb: CallbackQuery, repo: RequestsRepo, config: Config, us
     if not latest:
         await cb.answer("В базе нет расписания")
         return
-    if not user.group:
-        await cb.answer("У тебя не выбрана группа")
-        return
     await cb.answer()
-    await _send_preview(cb.message, repo, config, latest, user.group)
+    await _preview_for_user(cb.message, repo, config, latest, user)
 
 
 @admin_router.message(AdminState.set_broadcast)
@@ -397,13 +451,13 @@ async def cb_bc_send(cb: CallbackQuery, repo: RequestsRepo, config: Config, stat
         return
     data = await state.get_data()
     text = data.get("broadcast_text")
+    ids = data.get("broadcast_ids")
     await state.clear()
     if not text:
         await cb.answer("Нет текста")
         return
-    users = await repo.users.get_all()
+    items = [(uid, text) for uid in ids] if ids else [(u.id, text) for u in await repo.users.get_all()]
     rate = float((await repo.settings.get_all())["notify_rate"])
-    items = [(u.id, text) for u in users]
     await cb.message.edit_text(f"Рассылка запущена ({len(items)} получателей)")
     await cb.answer()
     asyncio.create_task(_report_broadcast(cb.message.bot, cb.message.chat.id, items, rate))
@@ -524,6 +578,38 @@ async def cb_group_users(cb: CallbackQuery, repo: RequestsRepo, config: Config):
         [InlineKeyboardButton(text="⬅️ Назад к статистике", callback_data="adm:stats")],
     ])
     await cb.message.edit_text("\n".join(lines), reply_markup=kb)
+    await cb.answer()
+
+
+async def _teachers_text(repo: RequestsRepo) -> str:
+    teachers = await repo.users.get_teachers_users()
+    lines = [f"👨‍🏫 <b>Преподаватели</b> ({len(teachers)})\n"]
+    for t in sorted(teachers, key=lambda x: (x.teacher_name or "")):
+        tag = f"@{t.username}" if t.username else str(t.id)
+        line = f"{tag} — {t.teacher_name}"
+        if t.subscribed:
+            line += " 🔔"
+        lines.append(line)
+    if not teachers:
+        lines.append("Пока нет")
+    return "\n".join(lines)
+
+
+@admin_router.message(Command("teachers"))
+async def teachers_cmd(message: Message, repo: RequestsRepo, config: Config):
+    if not _is_admin(message, config):
+        return
+    await message.answer(await _teachers_text(repo))
+
+
+@admin_router.callback_query(lambda cb: cb.data == "adm:teachers")
+async def cb_adm_teachers(cb: CallbackQuery, repo: RequestsRepo, config: Config):
+    if not _is_admin_cb(cb, config):
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад к статистике", callback_data="adm:stats")],
+    ])
+    await cb.message.edit_text(await _teachers_text(repo), reply_markup=kb)
     await cb.answer()
 
 

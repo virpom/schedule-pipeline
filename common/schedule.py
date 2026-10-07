@@ -33,6 +33,16 @@ def teacher_base(name: str) -> str:
     return (name or "").split(",")[0].strip()
 
 
+def teacher_matches(lesson_teacher: str, selected_name: str) -> bool:
+    lb = teacher_base(lesson_teacher)
+    if lb == selected_name:
+        return True
+    ls = lb.split()
+    ss = selected_name.split()
+    # surname-only lesson («Ляшко») matches selected «Ляшко Д.В.»
+    return len(ls) == 1 and len(ss) > 1 and ls[0].casefold() == ss[0].casefold()
+
+
 def course_from_group(group: str) -> int:
     m = re.search(r"(\d{2})", group)
     if not m:

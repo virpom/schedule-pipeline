@@ -3,7 +3,7 @@ import datetime
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.sqlite import insert
 
-from common.schedule import teacher_base
+from common.schedule import teacher_base, teacher_matches
 from infrastructure.database.models import CollegeLesson
 from infrastructure.database.repo.base import BaseRepo
 
@@ -93,19 +93,24 @@ class CollegeLessonRepo(BaseRepo):
 
     async def get_teachers(self) -> list[str]:
         result = await self.session.execute(select(CollegeLesson.teacher).distinct())
-        return sorted({teacher_base(t) for (t,) in result.all() if t})
+        names = {teacher_base(t) for (t,) in result.all() if t}
+        surnames_with_initials = {n.split()[0] for n in names if len(n.split()) > 1}
+        return sorted(
+            n for n in names
+            if len(n.split()) > 1 or n.split()[0] not in surnames_with_initials
+        )
 
     async def get_for_teacher_date(self, teacher_name: str, date: datetime.date) -> list[CollegeLesson]:
         return [l for l in await self.get_all_lessons()
-                if l.date == date and teacher_base(l.teacher) == teacher_name]
+                if l.date == date and teacher_matches(l.teacher, teacher_name)]
 
     async def get_for_teacher_range(self, teacher_name: str, start: datetime.date, end: datetime.date) -> list[CollegeLesson]:
         return [l for l in await self.get_all_lessons()
-                if start <= l.date <= end and teacher_base(l.teacher) == teacher_name]
+                if start <= l.date <= end and teacher_matches(l.teacher, teacher_name)]
 
     async def get_dates_for_teacher(self, teacher_name: str) -> list[datetime.date]:
-        dates = {l.date for l in await self.get_all_lessons() if teacher_base(l.teacher) == teacher_name}
+        dates = {l.date for l in await self.get_all_lessons() if teacher_matches(l.teacher, teacher_name)}
         return sorted(dates, reverse=True)
 
     async def get_all_for_teacher(self, teacher_name: str) -> list[CollegeLesson]:
-        return [l for l in await self.get_all_lessons() if teacher_base(l.teacher) == teacher_name]
+        return [l for l in await self.get_all_lessons() if teacher_matches(l.teacher, teacher_name)]

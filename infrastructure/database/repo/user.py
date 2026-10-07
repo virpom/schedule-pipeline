@@ -109,3 +109,9 @@ class UserRepo(BaseRepo):
         cond = User.group.is_(None) if group is None else (User.group == group)
         result = await self.session.execute(select(User).where(cond).order_by(User.created_at))
         return list(result.scalars().all())
+
+    async def get_teachers_users(self) -> list[User]:
+        result = await self.session.execute(
+            select(User).where(User.role == "teacher", User.teacher_name.is_not(None))
+        )
+        return list(result.scalars().all())
