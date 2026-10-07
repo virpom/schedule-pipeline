@@ -51,13 +51,14 @@ def course_from_group(group: str) -> int:
 
 def course_group_from_group(group: str) -> str:
     course = course_from_group(group)
-    return "I_IV" if course in (1, 4) else "II_III"
+    # ponytail: key "I_IV" now means 1–2 курс, "II_III" means 3–4 курс
+    return "I_IV" if course in (1, 2) else "II_III"
 
 
 def course_group_from_course(course: int | None) -> str | None:
     if not course:
         return None
-    return "I_IV" if course in (1, 4) else "II_III"
+    return "I_IV" if course in (1, 2) else "II_III"
 
 
 def day_type_from_date(date: datetime.date) -> str:
@@ -167,7 +168,7 @@ def format_bell(bell, lunches) -> str:
         rov = bell.get((day_type, "ALL", 0))
         if rov:
             lines.append(f"🇷🇺 Разговоры о важном · {rov.start:%H:%M}–{rov.end:%H:%M}")
-        for cg, label in [("I_IV", "I и IV курс"), ("II_III", "II и III курс")]:
+        for cg, label in [("I_IV", "1–2 курс"), ("II_III", "3–4 курс")]:
             lunch = lunches.get((day_type, cg))
             paras = [bell[(day_type, cg, p)] for p in range(1, 6) if (day_type, cg, p) in bell]
             if not paras:

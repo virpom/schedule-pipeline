@@ -38,9 +38,16 @@ async def _tick(bot, session_pool, now: datetime.datetime) -> None:
         is_teacher = user.role == "teacher"
         own_cg = None if is_teacher else course_group_from_course(user.course)
 
+        def _cg(group: str) -> str:
+            if own_cg:
+                return own_cg
+            if is_teacher:
+                return group_course_map.get(group) or course_group_from_group(group)
+            return course_group_from_group(group)
+
         events: list[tuple[datetime.time, str, str]] = []
         for l in lessons:
-            cg = own_cg or (group_course_map.get(l.group) if is_teacher else None) or course_group_from_group(l.group)
+            cg = _cg(l.group)
             para_end = getattr(l, "para_end", None) or l.para
             lunch = lunches.get((dt, cg)) or lunches.get((dt, "I_IV"))
 
@@ -60,13 +67,21 @@ async def _tick(bot, session_pool, now: datetime.datetime) -> None:
                 if user.bell_mode == BELL_FULL and bp.h1_end != bp.h2_start:
                     if not (lunch and lunch.position == "inside" and lunch.para == p):
                         events.append((bp.h1_end, f"h1:{p}", "🔔 Перемена"))
-                # end of lesson
+                # end of lesson (skip when lunch follows this para at the same minute)
                 if p == para_end and user.bell_mode in (BELL_START_END, BELL_FULL):
-                    events.append((bp.end, f"e:{p}", "🔔 Конец пары"))
+                    if not (lunch and lunch.position == "after" and lunch.para == p):
+                        events.append((bp.end, f"e:{p}", "🔔 Конец пары"))
 
-            # lunch (big break)
-            if user.bell_mode == BELL_FULL and lunch:
-                events.append((lunch.lunch_start, "lunch", "🍽 Обед"))
+        # lunch (big break) — anchored to the para where lunch sits (2-я пара)
+        if user.bell_mode == BELL_FULL:
+            lunch_lesson = next(
+                (l for l in lessons if l.para <= 2 <= (getattr(l, "para_end", None) or l.para)),
+                None,
+            )
+            if lunch_lesson:
+                lunch = lunches.get((dt, _cg(lunch_lesson.group))) or lunches.get((dt, "I_IV"))
+                if lunch:
+                    events.append((lunch.lunch_start, "lunch", "🍽 Обед"))
 
         for t, key, text in events:
             if t != now_min:
