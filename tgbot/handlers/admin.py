@@ -28,6 +28,7 @@ class AdminState(StatesGroup):
     set_deadline = State()
     set_night = State()
     set_support = State()
+    set_cooldown = State()
     set_broadcast = State()
     set_group_broadcast = State()
     confirm_broadcast = State()
@@ -52,6 +53,7 @@ def _settings_text(s: dict) -> str:
         f"Скорость рассылки: <b>{s['notify_rate']} сообщ/сек</b>\n"
         f"Ночная пауза: <b>{night}</b>\n"
         f"Дедлайн «занятий нет»: <b>{s['deadline_hour']}:00</b>\n"
+        f"Кулдаун битых ссылок: <b>{s['failed_cooldown']} сек</b>\n"
         f"Ссылка поддержки: <b>{s['support_link'] or '—'}</b>"
     )
 
@@ -75,6 +77,7 @@ def _settings_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Скорость рассылки", callback_data="adm:set_rate")],
         [InlineKeyboardButton(text="Ночная пауза", callback_data="adm:set_night")],
         [InlineKeyboardButton(text="Дедлайн «занятий нет»", callback_data="adm:set_deadline")],
+        [InlineKeyboardButton(text="Кулдаун битых ссылок", callback_data="adm:set_cooldown")],
         [InlineKeyboardButton(text="Ссылка поддержки", callback_data="adm:set_support")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back")],
     ])
@@ -737,6 +740,15 @@ async def cb_set_support(cb: CallbackQuery, config: Config, state: FSMContext):
     await cb.answer()
 
 
+@admin_router.callback_query(lambda cb: cb.data == "adm:set_cooldown")
+async def cb_set_cooldown(cb: CallbackQuery, config: Config, state: FSMContext):
+    if not _is_admin_cb(cb, config):
+        return
+    await state.set_state(AdminState.set_cooldown)
+    await cb.message.answer("Введи кулдаун битых ссылок (секунд, мин. 60):")
+    await cb.answer()
+
+
 @admin_router.message(AdminState.set_poll)
 async def m_set_poll(message: Message, repo: RequestsRepo, state: FSMContext):
     await state.clear()
@@ -814,6 +826,20 @@ async def m_set_support(message: Message, repo: RequestsRepo, state: FSMContext)
     link = message.text.strip()
     await repo.settings.set("support_link", link)
     await message.answer(f"Ссылка поддержки: {link}")
+
+
+@admin_router.message(AdminState.set_cooldown)
+async def m_set_cooldown(message: Message, repo: RequestsRepo, state: FSMContext):
+    await state.clear()
+    try:
+        sec = int(message.text.strip())
+        if sec < 60:
+            raise ValueError
+    except ValueError:
+        await message.answer("Неверно. Целое число секунд (мин. 60).")
+        return
+    await repo.settings.set("failed_cooldown", str(sec))
+    await message.answer(f"Кулдаун битых ссылок: {sec} сек")
 
 
 # ---- photo management ----

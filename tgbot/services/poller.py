@@ -14,18 +14,29 @@ from tgbot.services import photos
 from tgbot.services.broadcaster import broadcast_schedule
 
 
-async def poll_once(session_pool, config: Config) -> list[tuple[datetime.date, bool]]:
+_failed: dict[str, float] = {}
+
+
+async def poll_once(session_pool, config: Config, failed_cooldown: int = 1800) -> list[tuple[datetime.date, bool]]:
     changes: list[tuple[datetime.date, bool]] = []
+    today = datetime.date.today()
     async with ClientSession() as session:
         html = await polar.fetch_html(session, config.schedule_url)
         links = polar.extract_daily_links(html, config.base_url)
+        now = time.monotonic()
         for date, url in links:
+            if date < today:
+                continue
+            if url in _failed and now - _failed[url] < failed_cooldown:
+                continue
             try:
                 async with session.get(url, raise_for_status=True) as resp:
                     data = await resp.read()
             except Exception as e:
-                logging.warning("download failed %s: %s", url, e)
+                _failed[url] = time.monotonic()
+                logging.warning("download failed %s: %s (cooldown %ss)", url, e, failed_cooldown)
                 continue
+            _failed.pop(url, None)
 
             digest = hashlib.md5(data).hexdigest()
             async with session_pool() as db:
@@ -121,11 +132,12 @@ async def poller_loop(bot, session_pool, config: Config) -> None:
 
             interval = int(settings["poll_interval"])
             rate = float(settings["notify_rate"])
+            failed_cooldown = int(settings.get("failed_cooldown", 1800) or 1800)
             now = datetime.datetime.now()
 
             if not _in_night(now, settings["night_start"], settings["night_end"]):
                 if time.monotonic() - last_poll >= interval:
-                    changes = await poll_once(session_pool, config)
+                    changes = await poll_once(session_pool, config, failed_cooldown)
                     if changes:
                         await notify_new_schedule(bot, session_pool, changes, rate, config.photos_path)
                     last_poll = time.monotonic()

@@ -12,6 +12,7 @@ DEFAULTS = {
     "night_end": "07:00",
     "deadline_hour": "20",
     "support_link": "",
+    "failed_cooldown": "1800",
 }
 
 
