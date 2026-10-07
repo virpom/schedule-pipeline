@@ -417,7 +417,7 @@ async def cb_notify_confirm(cb: CallbackQuery, repo: RequestsRepo, config: Confi
     await cb.message.edit_text("Рассылка запущена")
     await cb.answer()
     rate = float((await repo.settings.get_all())["notify_rate"])
-    asyncio.create_task(notify_new_schedule(cb.message.bot, session_pool, [latest], rate, config.photos_path))
+    asyncio.create_task(notify_new_schedule(cb.message.bot, session_pool, [(latest, True)], rate, config.photos_path))
 
 
 @admin_router.callback_query(lambda cb: cb.data == "adm:notify_cancel")

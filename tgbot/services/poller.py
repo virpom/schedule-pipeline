@@ -14,8 +14,8 @@ from tgbot.services import photos
 from tgbot.services.broadcaster import broadcast_schedule
 
 
-async def poll_once(session_pool, config: Config) -> list[datetime.date]:
-    new_dates: list[datetime.date] = []
+async def poll_once(session_pool, config: Config) -> list[tuple[datetime.date, bool]]:
+    changes: list[tuple[datetime.date, bool]] = []
     async with ClientSession() as session:
         html = await polar.fetch_html(session, config.schedule_url)
         links = polar.extract_daily_links(html, config.base_url)
@@ -42,12 +42,11 @@ async def poll_once(session_pool, config: Config) -> list[datetime.date]:
                 await repo.schedule_files.set_hash(date, digest)
                 logging.info("parsed %s (%s) -> %d lessons, %d no-lessons", url, date, len(lessons), len(no_lessons))
 
-                if prev is None:
-                    new_dates.append(date)
-    return new_dates
+                changes.append((date, prev is None))
+    return changes
 
 
-async def notify_new_schedule(bot, session_pool, dates: list[datetime.date], rate: float, photos_path: str) -> None:
+async def notify_new_schedule(bot, session_pool, changes: list[tuple[datetime.date, bool]], rate: float, photos_path: str) -> None:
     async with session_pool() as db:
         repo = RequestsRepo(db)
         bell, lunches = await repo.bell_schedule.get_context()
@@ -55,8 +54,9 @@ async def notify_new_schedule(bot, session_pool, dates: list[datetime.date], rat
         chats = await repo.chats.get_all()
 
     items: list[tuple[int, str, str | None]] = []
-    for date in sorted(dates):
+    for date, is_new in sorted(changes, key=lambda x: x[0]):
         weekday = photos.weekday_folder(date)
+        prefix = "🆕 <b>Новое расписание</b>\n\n" if is_new else "🔄 <b>Расписание изменилось</b>\n\n"
         for user in subscribers:
             async with session_pool() as db:
                 repo = RequestsRepo(db)
@@ -76,7 +76,7 @@ async def notify_new_schedule(bot, session_pool, dates: list[datetime.date], rat
             else:
                 text = format_no_lessons(date, note)
             photo = photos.random_photo(photos_path, weekday) if (user.send_image and not is_teacher) else None
-            items.append((user.id, text, photo))
+            items.append((user.id, prefix + text, photo))
         for chat in chats:
             if not chat.group:
                 continue
@@ -89,7 +89,7 @@ async def notify_new_schedule(bot, session_pool, dates: list[datetime.date], rat
             else:
                 text = format_no_lessons(date, note)
             photo = photos.random_photo(photos_path, weekday)
-            items.append((chat.id, text, photo))
+            items.append((chat.id, prefix + text, photo))
 
     await broadcast_schedule(bot, items, rate=rate)
 
@@ -125,9 +125,9 @@ async def poller_loop(bot, session_pool, config: Config) -> None:
 
             if not _in_night(now, settings["night_start"], settings["night_end"]):
                 if time.monotonic() - last_poll >= interval:
-                    new_dates = await poll_once(session_pool, config)
-                    if new_dates:
-                        await notify_new_schedule(bot, session_pool, new_dates, rate, config.photos_path)
+                    changes = await poll_once(session_pool, config)
+                    if changes:
+                        await notify_new_schedule(bot, session_pool, changes, rate, config.photos_path)
                     last_poll = time.monotonic()
         except Exception:
             logging.exception("poll failed")
