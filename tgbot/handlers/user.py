@@ -7,6 +7,8 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from common.schedule import (
+    BELL_LABELS,
+    BELL_ORDER,
     DETAIL_LABELS,
     DETAIL_ORDER,
     format_bell,
@@ -25,6 +27,11 @@ BACK_KB = InlineKeyboardMarkup(
     inline_keyboard=[[InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")]]
 )
 
+ROLE_KB = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="🎓 Студент", callback_data="role:student")],
+    [InlineKeyboardButton(text="👨‍🏫 Преподаватель", callback_data="role:teacher")],
+])
+
 
 class SubjectSearch(StatesGroup):
     waiting = State()
@@ -34,6 +41,18 @@ class TeacherSearch(StatesGroup):
     waiting = State()
 
 
+class GroupSearch(StatesGroup):
+    waiting = State()
+
+
+def _is_teacher(user: User) -> bool:
+    return user.role == "teacher"
+
+
+def _has_identity(user: User) -> bool:
+    return bool(user.teacher_name) if _is_teacher(user) else bool(user.group)
+
+
 def _on_off(value: bool) -> str:
     return "вкл" if value else "выкл"
 
@@ -41,8 +60,10 @@ def _on_off(value: bool) -> str:
 def menu_kb(user: User, support_link: str = "") -> InlineKeyboardMarkup:
     sub_text = "🔕 Отписаться" if user.subscribed else "🔔 Подписаться"
     detail_label = DETAIL_LABELS.get(user.bell_detail, "кратко")
-    bell_text = f"🔔 Звонки: {_on_off(user.bell_notify)}"
-    image_text = f"🖼 Картинки: {_on_off(user.send_image)}"
+    bell_label = BELL_LABELS.get(user.bell_mode, "выкл")
+
+    second_search = "👥 Группа" if _is_teacher(user) else "👨‍🏫 Преподаватель"
+    second_search_cb = "find_group" if _is_teacher(user) else "find_teacher"
 
     rows = [
         [InlineKeyboardButton(text="📅 Сегодня", callback_data="day:today"),
@@ -52,12 +73,18 @@ def menu_kb(user: User, support_link: str = "") -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⏰ Расписание звонков", callback_data="bell"),
          InlineKeyboardButton(text=f"🕒 Детализация: {detail_label}", callback_data="detail")],
         [InlineKeyboardButton(text="🔎 Предмет", callback_data="find"),
-         InlineKeyboardButton(text="👨‍🏫 Преподаватель", callback_data="find_teacher")],
+         InlineKeyboardButton(text=second_search, callback_data=second_search_cb)],
         [InlineKeyboardButton(text=sub_text, callback_data="sub:toggle")],
-        [InlineKeyboardButton(text=bell_text, callback_data="bell_toggle"),
-         InlineKeyboardButton(text=image_text, callback_data="image_toggle")],
-        [InlineKeyboardButton(text="🎯 Сменить группу", callback_data="pick")],
+        [InlineKeyboardButton(text=f"🔔 Звонки: {bell_label}", callback_data="bell_mode")],
     ]
+    if _is_teacher(user):
+        rows.append([InlineKeyboardButton(text="🎯 Сменить фамилию", callback_data="pick_teacher")])
+    else:
+        rows.append([
+            InlineKeyboardButton(text=f"🐱 Картинки: {_on_off(user.send_image)}", callback_data="image_toggle"),
+            InlineKeyboardButton(text="🎯 Сменить группу", callback_data="pick"),
+        ])
+    rows.append([InlineKeyboardButton(text="🎭 Сменить роль", callback_data="role_switch")])
     if support_link:
         rows.append([InlineKeyboardButton(text="📨 Поддержка", url=support_link)])
 
@@ -65,8 +92,9 @@ def menu_kb(user: User, support_link: str = "") -> InlineKeyboardMarkup:
 
 
 def menu_text(user: User) -> str:
-    group = user.group or "не выбрана"
-    return f"🎓 <b>Расписание ПТК</b>\n\nТвоя группа: <b>{group}</b>\n\nВыбери действие 👇"
+    ident = user.teacher_name if _is_teacher(user) else (user.group or "не выбрана")
+    label = "Преподаватель" if _is_teacher(user) else "Группа"
+    return f"🎓 <b>Расписание ПТК</b>\n\n{label}: <b>{ident}</b>\n\nВыбери действие 👇"
 
 
 async def _render_menu(repo: RequestsRepo, user: User) -> tuple[str, InlineKeyboardMarkup]:
@@ -82,24 +110,49 @@ async def _pick_kb(repo: RequestsRepo) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def _require_group(cb: CallbackQuery, user: User) -> bool:
-    if user.group:
+async def _teacher_pick_kb(repo: RequestsRepo) -> InlineKeyboardMarkup:
+    teachers = await repo.college_lessons.get_teachers()
+    buttons = [InlineKeyboardButton(text=t, callback_data=f"teacher:{t}") for t in teachers]
+    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+    rows.append([InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _require_identity(cb: CallbackQuery, user: User) -> bool:
+    if _has_identity(user):
         return True
-    await cb.answer("Сначала выбери группу 🎯")
+    await cb.answer("Сначала выбери группу или фамилию 🎯")
     return False
+
+
+async def _user_lessons(repo: RequestsRepo, user: User, date: datetime.date):
+    if _is_teacher(user):
+        return await repo.college_lessons.get_for_teacher_date(user.teacher_name, date)
+    return await repo.college_lessons.get_for_group_date(user.group, date)
+
+
+async def _user_lessons_range(repo: RequestsRepo, user: User, start: datetime.date, end: datetime.date):
+    if _is_teacher(user):
+        return await repo.college_lessons.get_for_teacher_range(user.teacher_name, start, end)
+    return await repo.college_lessons.get_for_group_range(user.group, start, end)
+
+
+def _fmt(user: User, date: datetime.date, lessons, bell, lunches) -> str:
+    return format_day(
+        date, lessons, bell, lunches, user.bell_detail,
+        meta="group" if _is_teacher(user) else "teacher",
+        show_rov=not _is_teacher(user),
+    )
 
 
 @user_router.message(CommandStart())
 async def start(message: Message, user: User, repo: RequestsRepo, state: FSMContext):
     await state.clear()
-    if user.group:
+    if _has_identity(user):
         text, kb = await _render_menu(repo, user)
         await message.answer(text, reply_markup=kb)
     else:
-        await message.answer(
-            "🎓 Привет! Я бот расписания Политехнического колледжа ЗГУ.\n\nВыбери свою группу 👇",
-            reply_markup=await _pick_kb(repo),
-        )
+        await message.answer("🎓 Привет! Кто ты?", reply_markup=ROLE_KB)
 
 
 @user_router.message(Command("group"))
@@ -109,9 +162,32 @@ async def set_group_cmd(message: Message, repo: RequestsRepo, user: User):
         await message.answer("Формат: /group ТЭ-26ФП")
         return
     group = parts[1].strip().upper()
+    await repo.users.set_role(user.id, "student")
     await repo.users.set_group(user.id, group)
     text, kb = await _render_menu(repo, user)
     await message.answer(f"Твоя группа: <b>{group}</b>\n\n{text}", reply_markup=kb)
+
+
+@user_router.callback_query(F.data == "role:student")
+async def cb_role_student(cb: CallbackQuery, repo: RequestsRepo, user: User):
+    await repo.users.set_role(user.id, "student")
+    await cb.message.edit_text("🎓 Выбери свою группу 👇", reply_markup=await _pick_kb(repo))
+    await cb.answer()
+
+
+@user_router.callback_query(F.data == "role:teacher")
+async def cb_role_teacher(cb: CallbackQuery, repo: RequestsRepo, user: User):
+    await repo.users.set_role(user.id, "teacher")
+    await cb.message.edit_text("👨‍🏫 Выбери себя из списка 👇", reply_markup=await _teacher_pick_kb(repo))
+    await cb.answer()
+
+
+@user_router.callback_query(F.data == "role_switch")
+async def cb_role_switch(cb: CallbackQuery, repo: RequestsRepo, user: User):
+    await repo.users.set_group(user.id, None)
+    await repo.users.set_teacher_name(user.id, None)
+    await cb.message.edit_text("🎓 Кто ты?", reply_markup=ROLE_KB)
+    await cb.answer()
 
 
 @user_router.callback_query(F.data == "pick")
@@ -120,13 +196,30 @@ async def cb_pick(cb: CallbackQuery, repo: RequestsRepo):
     await cb.answer()
 
 
+@user_router.callback_query(F.data == "pick_teacher")
+async def cb_pick_teacher(cb: CallbackQuery, repo: RequestsRepo):
+    await cb.message.edit_text("👨‍🏫 Выбери себя из списка 👇", reply_markup=await _teacher_pick_kb(repo))
+    await cb.answer()
+
+
 @user_router.callback_query(F.data.startswith("group:"))
 async def cb_group(cb: CallbackQuery, repo: RequestsRepo, user: User):
     group = cb.data.split(":", 1)[1]
+    await repo.users.set_role(user.id, "student")
     await repo.users.set_group(user.id, group)
     text, kb = await _render_menu(repo, user)
     await cb.message.edit_text(f"Твоя группа: <b>{group}</b>\n\n{text}", reply_markup=kb)
     await cb.answer(f"Группа {group}")
+
+
+@user_router.callback_query(F.data.startswith("teacher:"))
+async def cb_teacher(cb: CallbackQuery, repo: RequestsRepo, user: User):
+    name = cb.data.split(":", 1)[1]
+    await repo.users.set_role(user.id, "teacher")
+    await repo.users.set_teacher_name(user.id, name)
+    text, kb = await _render_menu(repo, user)
+    await cb.message.edit_text(f"Преподаватель: <b>{name}</b>\n\n{text}", reply_markup=kb)
+    await cb.answer(name)
 
 
 @user_router.callback_query(F.data == "menu")
@@ -139,11 +232,13 @@ async def cb_menu(cb: CallbackQuery, user: User, repo: RequestsRepo, state: FSMC
 
 async def _show_day(cb: CallbackQuery, repo: RequestsRepo, user: User, date: datetime.date):
     bell, lunches = await repo.bell_schedule.get_context()
-    lessons = await repo.college_lessons.get_for_group_date(user.group, date)
+    lessons = await _user_lessons(repo, user, date)
     if lessons:
-        text = format_day(date, lessons, bell, lunches, user.bell_detail)
+        text = _fmt(user, date, lessons, bell, lunches)
     else:
-        note = await repo.no_lessons.get_note(date, user.group)
+        note = None
+        if not _is_teacher(user):
+            note = await repo.no_lessons.get_note(date, user.group)
         published = await repo.schedule_files.get_hash(date) is not None
         if note or published:
             text = format_no_lessons(date, note)
@@ -157,9 +252,9 @@ async def _show_day(cb: CallbackQuery, repo: RequestsRepo, user: User, date: dat
                 text = format_not_published(date)
         for i in range(1, 8):
             d = date + datetime.timedelta(days=i)
-            nxt = await repo.college_lessons.get_for_group_date(user.group, d)
+            nxt = await _user_lessons(repo, user, d)
             if nxt:
-                text += "\n\nБлижайшее —\n" + format_day(d, nxt, bell, lunches, user.bell_detail)
+                text += "\n\nБлижайшее —\n" + _fmt(user, d, nxt, bell, lunches)
                 break
     await cb.message.edit_text(text, reply_markup=BACK_KB)
     await cb.answer()
@@ -167,31 +262,36 @@ async def _show_day(cb: CallbackQuery, repo: RequestsRepo, user: User, date: dat
 
 @user_router.callback_query(F.data == "day:today")
 async def cb_today(cb: CallbackQuery, repo: RequestsRepo, user: User):
-    if not await _require_group(cb, user):
+    if not await _require_identity(cb, user):
         return
     await _show_day(cb, repo, user, datetime.date.today())
 
 
 @user_router.callback_query(F.data == "day:tomorrow")
 async def cb_tomorrow(cb: CallbackQuery, repo: RequestsRepo, user: User):
-    if not await _require_group(cb, user):
+    if not await _require_identity(cb, user):
         return
     await _show_day(cb, repo, user, datetime.date.today() + datetime.timedelta(days=1))
 
 
 @user_router.callback_query(F.data == "week")
 async def cb_week(cb: CallbackQuery, repo: RequestsRepo, user: User):
-    if not await _require_group(cb, user):
+    if not await _require_identity(cb, user):
         return
     bell, lunches = await repo.bell_schedule.get_context()
     start = datetime.date.today()
     end = start + datetime.timedelta(days=6)
-    lessons = await repo.college_lessons.get_for_group_range(user.group, start, end)
+    lessons = await _user_lessons_range(repo, user, start, end)
     by_date: dict[datetime.date, list] = {}
     for l in lessons:
         by_date.setdefault(l.date, []).append(l)
     entries = [(d, by_date[d]) for d in sorted(by_date)]
-    await cb.message.edit_text(format_week(entries, bell, lunches, user.bell_detail), reply_markup=BACK_KB)
+    meta = "group" if _is_teacher(user) else "teacher"
+    show_rov = not _is_teacher(user)
+    await cb.message.edit_text(
+        format_week(entries, bell, lunches, user.bell_detail, meta, show_rov),
+        reply_markup=BACK_KB,
+    )
     await cb.answer()
 
 
@@ -204,9 +304,12 @@ async def cb_bell(cb: CallbackQuery, repo: RequestsRepo):
 
 @user_router.callback_query(F.data == "hist")
 async def cb_hist(cb: CallbackQuery, repo: RequestsRepo, user: User):
-    if not await _require_group(cb, user):
+    if not await _require_identity(cb, user):
         return
-    dates = await repo.college_lessons.get_dates_for_group(user.group)
+    if _is_teacher(user):
+        dates = await repo.college_lessons.get_dates_for_teacher(user.teacher_name)
+    else:
+        dates = await repo.college_lessons.get_dates_for_group(user.group)
     past = [d for d in dates if d < datetime.date.today()]
     if not past:
         await cb.message.edit_text("📜 Истории расписания пока нет", reply_markup=BACK_KB)
@@ -227,22 +330,22 @@ async def cb_hist(cb: CallbackQuery, repo: RequestsRepo, user: User):
 
 @user_router.callback_query(F.data.startswith("hist:"))
 async def cb_hist_date(cb: CallbackQuery, repo: RequestsRepo, user: User):
-    if not await _require_group(cb, user):
+    if not await _require_identity(cb, user):
         return
     date = datetime.date.fromisoformat(cb.data.split(":", 1)[1])
     bell, lunches = await repo.bell_schedule.get_context()
-    lessons = await repo.college_lessons.get_for_group_date(user.group, date)
+    lessons = await _user_lessons(repo, user, date)
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ К истории", callback_data="hist")],
         [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
     ])
-    await cb.message.edit_text(format_day(date, lessons, bell, lunches, user.bell_detail), reply_markup=kb)
+    await cb.message.edit_text(_fmt(user, date, lessons, bell, lunches), reply_markup=kb)
     await cb.answer()
 
 
 @user_router.callback_query(F.data == "sub:toggle")
 async def cb_sub(cb: CallbackQuery, repo: RequestsRepo, user: User):
-    if not await _require_group(cb, user):
+    if not await _require_identity(cb, user):
         return
     new = not user.subscribed
     await repo.users.set_subscribed(user.id, new)
@@ -251,15 +354,16 @@ async def cb_sub(cb: CallbackQuery, repo: RequestsRepo, user: User):
     await cb.answer("Подписка включена 🔔" if new else "Подписка отключена 🔕")
 
 
-@user_router.callback_query(F.data == "bell_toggle")
-async def cb_bell_toggle(cb: CallbackQuery, repo: RequestsRepo, user: User):
-    if not await _require_group(cb, user):
+@user_router.callback_query(F.data == "bell_mode")
+async def cb_bell_mode(cb: CallbackQuery, repo: RequestsRepo, user: User):
+    if not await _require_identity(cb, user):
         return
-    new = not user.bell_notify
-    await repo.users.set_bell_notify(user.id, new)
+    cur = user.bell_mode if user.bell_mode in BELL_ORDER else BELL_ORDER[0]
+    nxt = BELL_ORDER[(BELL_ORDER.index(cur) + 1) % len(BELL_ORDER)]
+    await repo.users.set_bell_mode(user.id, nxt)
     text, kb = await _render_menu(repo, user)
     await cb.message.edit_text(text, reply_markup=kb)
-    await cb.answer("Напоминания о парах включены 🔔" if new else "Напоминания отключены 🔕")
+    await cb.answer(f"Звонки: {BELL_LABELS[nxt]}")
 
 
 @user_router.callback_query(F.data == "image_toggle")
@@ -268,7 +372,7 @@ async def cb_image_toggle(cb: CallbackQuery, repo: RequestsRepo, user: User):
     await repo.users.set_send_image(user.id, new)
     text, kb = await _render_menu(repo, user)
     await cb.message.edit_text(text, reply_markup=kb)
-    await cb.answer("Картинки включены 🖼" if new else "Картинки отключены")
+    await cb.answer("Картинки включены 🐱" if new else "Картинки отключены")
 
 
 @user_router.callback_query(F.data == "detail")
@@ -283,7 +387,7 @@ async def cb_detail(cb: CallbackQuery, repo: RequestsRepo, user: User):
 
 @user_router.callback_query(F.data == "find")
 async def cb_find(cb: CallbackQuery, user: User, state: FSMContext):
-    if not await _require_group(cb, user):
+    if not await _require_identity(cb, user):
         return
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Отмена", callback_data="find:cancel")],
@@ -305,7 +409,10 @@ async def cb_find_cancel(cb: CallbackQuery, user: User, repo: RequestsRepo, stat
 async def subject_answer(message: Message, repo: RequestsRepo, user: User, state: FSMContext):
     await state.clear()
     subj = message.text.strip()
-    lessons = await repo.college_lessons.get_all_for_group(user.group)
+    if _is_teacher(user):
+        lessons = await repo.college_lessons.get_all_for_teacher(user.teacher_name)
+    else:
+        lessons = await repo.college_lessons.get_all_for_group(user.group)
     matched = [l for l in lessons if subj.casefold() in l.subject.casefold()]
     if not matched:
         await message.answer(f"По «{subj}» ничего не нашлось", reply_markup=BACK_KB)
@@ -315,10 +422,7 @@ async def subject_answer(message: Message, repo: RequestsRepo, user: User, state
     by_date: dict[datetime.date, list] = {}
     for l in results:
         by_date.setdefault(l.date, []).append(l)
-    parts = [
-        format_day(d, by_date[d], bell, lunches, user.bell_detail)
-        for d in sorted(by_date, reverse=True)
-    ]
+    parts = [_fmt(user, d, by_date[d], bell, lunches) for d in sorted(by_date, reverse=True)]
     await message.answer(f"🔎 «{subj}» — последние занятия:\n\n" + "\n\n".join(parts), reply_markup=BACK_KB)
 
 
@@ -341,32 +445,53 @@ async def teacher_answer(message: Message, repo: RequestsRepo, state: FSMContext
     if not matched:
         await message.answer(f"Преподаватель «{q}» не найден", reply_markup=BACK_KB)
         return
-
     today = datetime.date.today()
     week_end = today + datetime.timedelta(days=6)
     upcoming = [l for l in matched if today <= l.date <= week_end]
     scope = upcoming if upcoming else matched[-12:]
-
     bell, lunches = await repo.bell_schedule.get_context()
     by_date: dict[datetime.date, list] = {}
     for l in scope:
         by_date.setdefault(l.date, []).append(l)
     entries = [(d, by_date[d]) for d in sorted(by_date)]
-
     await message.answer(
         f"👨‍🏫 «{q}»:\n\n" + format_teacher_results(entries, bell, lunches),
         reply_markup=BACK_KB,
     )
 
 
+@user_router.callback_query(F.data == "find_group")
+async def cb_find_group(cb: CallbackQuery, state: FSMContext):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Отмена", callback_data="find:cancel")],
+    ])
+    await cb.message.edit_text("👥 Напиши номер группы (например, ДП-26):", reply_markup=kb)
+    await state.set_state(GroupSearch.waiting)
+    await cb.answer()
+
+
+@user_router.message(GroupSearch.waiting)
+async def group_answer(message: Message, repo: RequestsRepo, state: FSMContext):
+    await state.clear()
+    group = message.text.strip().upper()
+    bell, lunches = await repo.bell_schedule.get_context()
+    start = datetime.date.today()
+    end = start + datetime.timedelta(days=6)
+    lessons = await repo.college_lessons.get_for_group_range(group, start, end)
+    if not lessons:
+        await message.answer(f"У группы «{group}» пар на неделю нет", reply_markup=BACK_KB)
+        return
+    by_date: dict[datetime.date, list] = {}
+    for l in lessons:
+        by_date.setdefault(l.date, []).append(l)
+    entries = [(d, by_date[d]) for d in sorted(by_date)]
+    await message.answer(
+        f"👥 «{group}» — неделя:\n\n" + format_teacher_results(entries, bell, lunches),
+        reply_markup=BACK_KB,
+    )
+
+
 @user_router.message(F.text, ~F.text.startswith("/"))
 async def any_text(message: Message, repo: RequestsRepo, user: User):
-    group = message.text.strip().upper()
-    known = await repo.college_lessons.get_groups()
-    if group in known:
-        await repo.users.set_group(user.id, group)
-        text, kb = await _render_menu(repo, user)
-        await message.answer(f"Твоя группа: <b>{group}</b>\n\n{text}", reply_markup=kb)
-    else:
-        text, kb = await _render_menu(repo, user)
-        await message.answer(text, reply_markup=kb)
+    text, kb = await _render_menu(repo, user)
+    await message.answer(text, reply_markup=kb)

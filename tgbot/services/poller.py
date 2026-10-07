@@ -60,13 +60,22 @@ async def notify_new_schedule(bot, session_pool, dates: list[datetime.date], rat
         for user in subscribers:
             async with session_pool() as db:
                 repo = RequestsRepo(db)
-                lessons = await repo.college_lessons.get_for_group_date(user.group, date)
-                note = await repo.no_lessons.get_note(date, user.group) if not lessons else None
+                if user.role == "teacher" and user.teacher_name:
+                    lessons = await repo.college_lessons.get_for_teacher_date(user.teacher_name, date)
+                    note = None
+                else:
+                    lessons = await repo.college_lessons.get_for_group_date(user.group, date)
+                    note = await repo.no_lessons.get_note(date, user.group) if not lessons else None
+            is_teacher = user.role == "teacher"
             if lessons:
-                text = format_day(date, lessons, bell, lunches, user.bell_detail)
+                text = format_day(
+                    date, lessons, bell, lunches, user.bell_detail,
+                    meta="group" if is_teacher else "teacher",
+                    show_rov=not is_teacher,
+                )
             else:
                 text = format_no_lessons(date, note)
-            photo = photos.random_photo(photos_path, weekday) if user.send_image else None
+            photo = photos.random_photo(photos_path, weekday) if (user.send_image and not is_teacher) else None
             items.append((user.id, text, photo))
         for chat in chats:
             if not chat.group:

@@ -26,8 +26,9 @@ class UserRepo(BaseRepo):
                 language=language,
                 last_seen=datetime.datetime.now(),
                 subscribed=True,
-                send_image=True,
-                bell_notify=False,
+                send_image=False,
+                bell_mode="off",
+                role="student",
             )
             .on_conflict_do_update(
                 index_elements=[User.id],
@@ -39,9 +40,21 @@ class UserRepo(BaseRepo):
         await self.session.commit()
         return result.scalar_one()
 
+    async def set_role(self, user_id: int, value: str) -> None:
+        await self.session.execute(
+            update(User).where(User.id == user_id).values(role=value)
+        )
+        await self.session.commit()
+
     async def set_group(self, user_id: int, group: str) -> None:
         await self.session.execute(
             update(User).where(User.id == user_id).values(group=group)
+        )
+        await self.session.commit()
+
+    async def set_teacher_name(self, user_id: int, name: str) -> None:
+        await self.session.execute(
+            update(User).where(User.id == user_id).values(teacher_name=name)
         )
         await self.session.commit()
 
@@ -63,15 +76,18 @@ class UserRepo(BaseRepo):
         )
         await self.session.commit()
 
-    async def set_bell_notify(self, user_id: int, value: bool) -> None:
+    async def set_bell_mode(self, user_id: int, value: str) -> None:
         await self.session.execute(
-            update(User).where(User.id == user_id).values(bell_notify=value)
+            update(User).where(User.id == user_id).values(bell_mode=value)
         )
         await self.session.commit()
 
     async def get_subscribed(self) -> list[User]:
         result = await self.session.execute(
-            select(User).where(User.subscribed == True, User.group.is_not(None))  # noqa: E712
+            select(User).where(
+                User.subscribed == True,  # noqa: E712
+                (User.group.is_not(None)) | (User.teacher_name.is_not(None)),
+            )
         )
         return list(result.scalars().all())
 
@@ -79,8 +95,8 @@ class UserRepo(BaseRepo):
         result = await self.session.execute(
             select(User).where(
                 User.subscribed == True,  # noqa: E712
-                User.bell_notify == True,  # noqa: E712
-                User.group.is_not(None),
+                User.bell_mode != "off",
+                (User.group.is_not(None)) | (User.teacher_name.is_not(None)),
             )
         )
         return list(result.scalars().all())

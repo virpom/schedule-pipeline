@@ -16,12 +16,14 @@ class User(Base, TimestampMixin):
     full_name: Mapped[str] = mapped_column(String(128))
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=true())
     language: Mapped[str] = mapped_column(String(10), server_default=text("'ru'"))
+    role: Mapped[str] = mapped_column(String(16), server_default=text("'student'"))
     group: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    teacher_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     subscribed: Mapped[bool] = mapped_column(Boolean, server_default=text("1"))
     bell_detail: Mapped[str] = mapped_column(String(16), server_default=text("'brief'"))
-    send_image: Mapped[bool] = mapped_column(Boolean, server_default=text("1"))
-    bell_notify: Mapped[bool] = mapped_column(Boolean, server_default=text("0"))
+    send_image: Mapped[bool] = mapped_column(Boolean, server_default=text("0"))
+    bell_mode: Mapped[str] = mapped_column(String(16), server_default=text("'off'"))
     last_seen: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, nullable=True)
 
     def __repr__(self):
-        return f"<User {self.id} {self.username} {self.group}>"
+        return f"<User {self.id} {self.role} {self.group or self.teacher_name}>"

@@ -14,6 +14,24 @@ DETAIL_FULL = "full"
 DETAIL_ORDER = [DETAIL_BRIEF, DETAIL_LUNCH, DETAIL_FULL]
 DETAIL_LABELS = {DETAIL_BRIEF: "кратко", DETAIL_LUNCH: "с обедом", DETAIL_FULL: "полное"}
 
+BELL_OFF = "off"
+BELL_PARA = "para"
+BELL_PARA_BREAK = "para_break"
+BELL_PARA_LUNCH = "para_lunch"
+BELL_ALL = "all"
+BELL_ORDER = [BELL_OFF, BELL_PARA, BELL_PARA_BREAK, BELL_PARA_LUNCH, BELL_ALL]
+BELL_LABELS = {
+    BELL_OFF: "выкл",
+    BELL_PARA: "звонок",
+    BELL_PARA_BREAK: "звонок+перемена",
+    BELL_PARA_LUNCH: "звонок+обед",
+    BELL_ALL: "всё",
+}
+
+
+def teacher_base(name: str) -> str:
+    return (name or "").split(",")[0].strip()
+
 
 def course_from_group(group: str) -> int:
     m = re.search(r"(\d{2})", group)
@@ -52,21 +70,29 @@ def _lunch_line(lunch) -> str:
     return f"🍽 Обед {lunch.lunch_start:%H:%M}–{lunch.lunch_end:%H:%M}"
 
 
-def format_day(date: datetime.date, lessons, bell, lunches, detail: str = DETAIL_BRIEF) -> str:
+def format_day(
+        date: datetime.date,
+        lessons,
+        bell,
+        lunches,
+        detail: str = DETAIL_BRIEF,
+        meta: str = "teacher",
+        show_rov: bool = True,
+) -> str:
     header = f"📅 <b>{WEEKDAY_FULL[date.weekday()]}, {date.day} {MONTHS_GEN[date.month]}</b>"
     if not lessons:
         return f"{header}\n\nЗанятий нет 🙌"
 
     lines = [header, ""]
     dt = day_type_from_date(date)
-    cg = course_group_from_group(lessons[0].group)
-    lunch = lunches.get((dt, cg)) or lunches.get((dt, "I_IV"))
 
     rov = bell.get(("MONDAY", "ALL", 0))
-    if dt == "MONDAY" and rov:
+    if show_rov and dt == "MONDAY" and rov:
         lines.append(f"<b>{rov.start:%H:%M}–{rov.end:%H:%M}</b>  Разговоры о важном 🇷🇺")
 
     for lesson in lessons:
+        cg = course_group_from_group(lesson.group)
+        lunch = lunches.get((dt, cg)) or lunches.get((dt, "I_IV"))
         para_end = getattr(lesson, "para_end", None) or lesson.para
         for p in range(lesson.para, para_end + 1):
             bs = bell.get((dt, cg, p)) or bell.get((dt, "I_IV", p))
@@ -80,9 +106,12 @@ def format_day(date: datetime.date, lessons, bell, lunches, detail: str = DETAIL
 
             line = f"<b>{time_str}</b>  {lesson.subject}"
             lines.append(line)
-            meta = " · ".join(x for x in (lesson.teacher, lesson.room) if x)
-            if meta:
-                lines.append(meta)
+            if meta == "group":
+                m = " · ".join(x for x in (lesson.group, lesson.room) if x)
+            else:
+                m = " · ".join(x for x in (lesson.teacher, lesson.room) if x)
+            if m:
+                lines.append(m)
 
             if lunch and lunch.para == p and (
                     detail == DETAIL_LUNCH
@@ -105,28 +134,16 @@ def format_no_lessons(date: datetime.date, note: str | None = None) -> str:
     return text
 
 
-def format_week(entries, bell, lunches, detail: str = DETAIL_BRIEF) -> str:
+def format_week(entries, bell, lunches, detail: str = DETAIL_BRIEF, meta: str = "teacher", show_rov: bool = True) -> str:
     if not entries:
         return "На этой неделе расписания пока нет 📭"
-    return "\n\n".join(format_day(d, les, bell, lunches, detail) for d, les in entries)
+    return "\n\n".join(format_day(d, les, bell, lunches, detail, meta, show_rov) for d, les in entries)
 
 
-def format_teacher_results(entries, bell, lunches) -> str:
+def format_teacher_results(entries, bell, lunches, detail: str = DETAIL_BRIEF) -> str:
     parts = []
     for date, lessons in entries:
-        dt = day_type_from_date(date)
-        lines = [f"📅 <b>{WEEKDAY_FULL[date.weekday()]}, {date.day} {MONTHS_GEN[date.month]}</b>"]
-        for l in lessons:
-            cg = course_group_from_group(l.group)
-            para_end = getattr(l, "para_end", None) or l.para
-            for p in range(l.para, para_end + 1):
-                bs = bell.get((dt, cg, p)) or bell.get((dt, "I_IV", p))
-                time_str = _para_brief(bs) if bs else f"пара {p}"
-                lines.append(f"<b>{time_str}</b>  {l.subject}")
-                meta = " · ".join(x for x in (l.group, l.room) if x)
-                if meta:
-                    lines.append(meta)
-        parts.append("\n".join(lines))
+        parts.append(format_day(date, lessons, bell, lunches, detail, meta="group", show_rov=False))
     return "\n\n".join(parts)
 
 
