@@ -618,6 +618,24 @@ async def cb_admin_stats(cb: CallbackQuery, repo: RequestsRepo, config: Config):
     await cb.answer()
 
 
+def _user_marks(u) -> str:
+    marks = []
+    if u.subscribed:
+        marks.append("🔔")
+    if u.send_image:
+        marks.append("🐱")
+    if u.last_seen and u.last_seen.date() == datetime.date.today():
+        marks.append("⚡")
+    if u.bell_mode and u.bell_mode != "off":
+        marks.append("⏰")
+    return (" " + "".join(marks)) if marks else ""
+
+
+def _user_line(u) -> str:
+    tag = f"@{u.username}" if u.username else str(u.id)
+    return f"{tag} — {u.full_name}{_user_marks(u)}"
+
+
 @admin_router.callback_query(lambda cb: cb.data and cb.data.startswith("group_users:"))
 async def cb_group_users(cb: CallbackQuery, repo: RequestsRepo, config: Config):
     if not _is_admin_cb(cb, config):
@@ -630,13 +648,9 @@ async def cb_group_users(cb: CallbackQuery, repo: RequestsRepo, config: Config):
         users = await repo.users.get_by_group(group)
         title = group
 
-    lines = [f"👥 <b>{title}</b> ({len(users)})\n"]
+    lines = [f"👥 <b>{title}</b> ({len(users)})", "🔔 рассылка · 🐱 фото · ⚡ был сегодня · ⏰ звонки\n"]
     for u in users:
-        tag = f"@{u.username}" if u.username else str(u.id)
-        line = f"{tag} — {u.full_name}"
-        if u.subscribed:
-            line += " 🔔"
-        lines.append(line)
+        lines.append(_user_line(u))
     if not users:
         lines.append("Никого нет")
 
@@ -652,9 +666,7 @@ async def _teachers_text(repo: RequestsRepo) -> str:
     lines = [f"👨‍🏫 <b>Преподаватели</b> ({len(teachers)})\n"]
     for t in sorted(teachers, key=lambda x: (x.teacher_name or "")):
         tag = f"@{t.username}" if t.username else str(t.id)
-        line = f"{tag} — {t.teacher_name}"
-        if t.subscribed:
-            line += " 🔔"
+        line = f"{tag} — {t.teacher_name}{_user_marks(t)}"
         lines.append(line)
     if not teachers:
         lines.append("Пока нет")
