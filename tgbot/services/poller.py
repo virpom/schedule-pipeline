@@ -21,7 +21,17 @@ async def poll_once(session_pool, config: Config, failed_cooldown: int = 1800) -
     changes: list[tuple[datetime.date, bool]] = []
     today = datetime.date.today()
     async with ClientSession() as session:
-        html = await polar.fetch_html(session, config.schedule_url)
+        try:
+            html = await polar.fetch_html(session, config.schedule_url)
+        except Exception as e:
+            async with session_pool() as db:
+                repo = RequestsRepo(db)
+                await repo.settings.set("site_down", "1")
+            logging.warning("site unreachable: %s", e)
+            return changes
+        async with session_pool() as db:
+            repo = RequestsRepo(db)
+            await repo.settings.set("site_down", "0")
         links = polar.extract_daily_links(html, config.base_url)
         now = time.monotonic()
         for date, url in links:

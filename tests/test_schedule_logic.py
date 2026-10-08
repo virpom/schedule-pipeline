@@ -5,14 +5,14 @@ from infrastructure.database.repo.user import majority_course_groups
 def test_course_group_from_course():
     assert course_group_from_course(None) is None
     assert course_group_from_course(1) == "I_IV"
-    assert course_group_from_course(2) == "I_IV"
+    assert course_group_from_course(2) == "II_III"
     assert course_group_from_course(3) == "II_III"
-    assert course_group_from_course(4) == "II_III"
+    assert course_group_from_course(4) == "I_IV"
 
 
 def test_majority_course_groups():
     rows = [("ЭК-25", 2), ("ЭК-25", 2), ("ЭК-25", 3)]
-    assert majority_course_groups(rows) == {"ЭК-25": "I_IV"}
+    assert majority_course_groups(rows) == {"ЭК-25": "II_III"}
 
     rows = [("ТЭ-26ФП", 1), ("ТЭ-26ФП", 1), ("ТЭ-26ФП", 1)]
     assert majority_course_groups(rows) == {"ТЭ-26ФП": "I_IV"}

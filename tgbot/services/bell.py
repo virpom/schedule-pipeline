@@ -67,6 +67,7 @@ async def _tick(bot, session_pool, now: datetime.datetime) -> None:
                 if user.bell_mode == BELL_FULL and bp.h1_end != bp.h2_start:
                     if not (lunch and lunch.position == "inside" and lunch.para == p):
                         events.append((bp.h1_end, f"h1:{p}", "🔔 Перемена"))
+                        events.append((bp.h2_start, f"h2:{p}", "🔔 Перемена закончилась"))
                 # end of lesson (skip when lunch follows this para at the same minute)
                 if p == para_end and user.bell_mode in (BELL_START_END, BELL_FULL):
                     if not (lunch and lunch.position == "after" and lunch.para == p):
@@ -82,6 +83,7 @@ async def _tick(bot, session_pool, now: datetime.datetime) -> None:
                 lunch = lunches.get((dt, _cg(lunch_lesson.group))) or lunches.get((dt, "I_IV"))
                 if lunch:
                     events.append((lunch.lunch_start, "lunch", "🍽 Обед"))
+                    events.append((lunch.lunch_end, "lunch_end", "🍽 Обед закончился"))
 
         for t, key, text in events:
             if t != now_min:
