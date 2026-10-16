@@ -3,7 +3,7 @@ from typing import Optional
 
 import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.sqlite import insert
 
 from common.schedule import course_group_from_course
@@ -132,6 +132,42 @@ class UserRepo(BaseRepo):
                 User.subscribed == True,  # noqa: E712
                 User.group == group,
             )
+        )
+        return list(result.scalars().all())
+
+    async def get(self, user_id: int) -> Optional[User]:
+        result = await self.session.execute(select(User).where(User.id == user_id))
+        return result.scalar_one_or_none()
+
+    async def find_by_username(self, username: str) -> list[User]:
+        """Найти пользователя по @нику (регистр и ведущий @ не важны)."""
+        clean = username.lstrip("@").strip()
+        if not clean:
+            return []
+        result = await self.session.execute(
+            select(User).where(func.lower(User.username) == clean.lower())
+        )
+        return list(result.scalars().all())
+
+    async def search(self, query: str, limit: int = 8) -> list[User]:
+        """Поиск по @нику, имени или id — для выдачи прав редактора."""
+        q = query.strip()
+        if not q:
+            return []
+        if q.isdigit():
+            user = await self.get(int(q))
+            return [user] if user else []
+
+        clean = q.lstrip("@").lower()
+        result = await self.session.execute(
+            select(User)
+            .where(
+                (func.lower(User.username) == clean)
+                | (func.lower(User.username).like(f"%{clean}%"))
+                | (func.lower(User.full_name).like(f"%{clean}%"))
+            )
+            .order_by(User.last_seen.desc().nullslast())
+            .limit(limit)
         )
         return list(result.scalars().all())
 

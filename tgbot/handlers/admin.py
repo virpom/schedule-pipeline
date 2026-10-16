@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import logging
 import os
 import time
 
@@ -951,7 +952,7 @@ def _editors_kb(editors, users_by_id: dict) -> InlineKeyboardMarkup:
     rows = []
     for e in editors:
         u = users_by_id.get(e.user_id)
-        name = (u.full_name if u else str(e.user_id))[:28]
+        name = _user_option(u) if u else str(e.user_id)
         rows.append([InlineKeyboardButton(
             text=f"❌ {name} → {e.group}", callback_data=f"adm:ed_del:{e.user_id}")])
     rows.append([InlineKeyboardButton(text="➕ Добавить редактора",
@@ -1000,6 +1001,31 @@ async def cb_editor_revoke(cb: CallbackQuery, repo: RequestsRepo, config: Config
     await cb.answer("Отозвано")
 
 
+def _user_option(u) -> str:
+    """«@ник — Имя (ГРУППА)» — понятная подпись для кнопки."""
+    parts = []
+    if u.username:
+        parts.append(f"@{u.username}")
+    name = (u.full_name or "").strip()
+    if name and name.lower() != (u.username or "").lower():
+        parts.append(name[:22])
+    label = " — ".join(parts) or str(u.id)
+    if u.group:
+        label += f" ({u.group})"
+    return label
+
+
+def _pick_editor_kb(found, query: str) -> InlineKeyboardMarkup:
+    rows = []
+    for u in found:
+        rows.append([InlineKeyboardButton(
+            text=_user_option(u)[:60], callback_data=f"adm:ed_pick:{u.id}")])
+    rows.append([InlineKeyboardButton(text="🔍 Искать ещё",
+                                      callback_data="adm:ed_add")])
+    rows.append([InlineKeyboardButton(text="⬅️ Отмена", callback_data="adm:editors")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 @admin_router.callback_query(lambda cb: cb.data == "adm:ed_add")
 async def cb_editor_add(cb: CallbackQuery, repo: RequestsRepo, config: Config,
                         state: FSMContext):
@@ -1008,10 +1034,11 @@ async def cb_editor_add(cb: CallbackQuery, repo: RequestsRepo, config: Config,
     await state.set_state(AdminState.set_editor)
     await cb.message.edit_text(
         "✏️ <b>Новый редактор</b>\n\n"
-        "Пришли <b>id пользователя</b> и <b>группу</b> через пробел.\n\n"
-        "Например: <code>494917175 ДП-26</code>\n\n"
-        "<i>id можно узнать в статистике или попросить старосту "
-        "нажать «⚙️ Настройки» — там виден его id.</i>",
+        "Пришли <b>@никнейм</b> того, кому даёшь права.\n\n"
+        "Например: <code>@virp0m</code> или <code>virp0m</code>\n\n"
+        "Можно также ввести <b>имя</b> или <b>id</b> — я поищу.\n"
+        "<i>Если никто не нашёлся — попроси старосту открыть бота "
+        "и нажать «Старт».</i>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⬅️ Отмена", callback_data="adm:editors")]]))
     await cb.answer()
@@ -1022,17 +1049,98 @@ async def set_editor(message: Message, repo: RequestsRepo, config: Config,
                      state: FSMContext):
     if not _is_admin(message, config):
         return
-    parts = (message.text or "").split()
-    if len(parts) != 2 or not parts[0].isdigit():
-        await message.answer("Нужно два значения: <code>id группа</code>. Попробуй ещё раз.")
+    query = (message.text or "").strip()
+    if not query:
+        await message.answer("Пришли @никнейм, имя или id.")
         return
-    user_id, group = int(parts[0]), parts[1]
-    await repo.editors.grant(user_id, group, granted_by=message.from_user.id)
+
+    found = await repo.users.search(query, limit=8)
+    if not found:
+        await message.answer(
+            f"🔍 По запросу <code>{query}</code> никто не найден.\n\n"
+            "Проверь написание или попроси человека нажать «Старт» в боте.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔍 Искать ещё", callback_data="adm:ed_add")],
+                [InlineKeyboardButton(text="⬅️ Отмена", callback_data="adm:editors")]]))
+        return
+
+    if len(found) == 1:
+        await _ask_group(message, repo, state, found[0])
+        return
+
+    await message.answer(
+        f"🔍 Нашёл <b>{len(found)}</b> — выбери нужного 👇",
+        reply_markup=_pick_editor_kb(found, query))
+    await state.update_data(candidates=[u.id for u in found])
+
+
+async def _ask_group(event, repo: RequestsRepo, state: FSMContext, user):
+    """Спросить группу кнопками из известных групп."""
+    # Группы из обоих источников: из пар с сайта и из базового расписания
+    base_groups = await repo.base_lessons.get_groups()
+    site_groups = await repo.college_lessons.get_groups()
+    groups = sorted(set(base_groups) | set(site_groups))
+    rows = []
+    for i in range(0, len(groups), 3):
+        rows.append([InlineKeyboardButton(text=g, callback_data=f"adm:ed_grp:{g}")
+                     for g in groups[i:i + 3]])
+    rows.append([InlineKeyboardButton(text="⬅️ Отмена", callback_data="adm:editors")])
+    await state.update_data(editor_user_id=user.id)
+    text = (f"👤 <b>{_user_option(user)}</b>\n\n"
+            "На какую группу дать права? 👇")
+    kb = InlineKeyboardMarkup(inline_keyboard=rows)
+    if isinstance(event, CallbackQuery):
+        await event.message.edit_text(text, reply_markup=kb)
+    else:
+        await event.answer(text, reply_markup=kb)
+
+
+@admin_router.callback_query(lambda cb: cb.data.startswith("adm:ed_pick:"))
+async def cb_editor_pick(cb: CallbackQuery, repo: RequestsRepo, config: Config,
+                         state: FSMContext):
+    if not _is_admin_cb(cb, config):
+        return
+    user_id = int(cb.data.split(":")[2])
+    user = await repo.users.get(user_id)
+    if not user:
+        await cb.answer("Пользователь не найден", show_alert=True)
+        return
+    await _ask_group(cb, repo, state, user)
+    await cb.answer()
+
+
+@admin_router.callback_query(lambda cb: cb.data.startswith("adm:ed_grp:"))
+async def cb_editor_group(cb: CallbackQuery, repo: RequestsRepo, config: Config,
+                          state: FSMContext):
+    if not _is_admin_cb(cb, config):
+        return
+    group = cb.data.split(":", 2)[2]
+    data = await state.get_data()
+    user_id = data.get("editor_user_id")
+    if not user_id:
+        await cb.answer("Начни заново", show_alert=True)
+        return
+
+    user = await repo.users.get(user_id)
+    await repo.editors.grant(user_id, group, granted_by=cb.from_user.id)
     await state.clear()
+
     editors = await repo.editors.get_all()
     users = await repo.users.get_all()
     users_by_id = {u.id: u for u in users}
-    await message.answer(
-        f"✅ <b>{user_id}</b> теперь может править расписание группы <b>{group}</b>.\n\n"
+    who = _user_option(user) if user else str(user_id)
+    await cb.message.edit_text(
+        f"✅ <b>{who}</b> теперь может править расписание группы <b>{group}</b>.\n\n"
         + await _editors_text(repo),
         reply_markup=_editors_kb(editors, users_by_id))
+    await cb.answer("Права выданы")
+
+    # уведомим нового редактора, чтобы он знал, что делать
+    try:
+        from tgbot.services.broadcaster import send_message
+        await send_message(
+            cb.bot, user_id,
+            f"✏️ Тебе дали права редактора расписания группы <b>{group}</b>.\n\n"
+            "Открой /start — в меню появится «✏️ Редактор расписания».")
+    except Exception:
+        logging.exception("не удалось уведомить нового редактора")
