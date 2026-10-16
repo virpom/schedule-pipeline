@@ -125,6 +125,16 @@ class UserRepo(BaseRepo):
         )
         return list(result.scalars().all())
 
+    async def get_subscribed_by_group(self, group: str) -> list[User]:
+        """Подписчики конкретной группы — для уведомлений о правках старосты."""
+        result = await self.session.execute(
+            select(User).where(
+                User.subscribed == True,  # noqa: E712
+                User.group == group,
+            )
+        )
+        return list(result.scalars().all())
+
     async def get_all(self) -> list[User]:
         result = await self.session.execute(select(User))
         return list(result.scalars().all())

@@ -12,6 +12,7 @@ from infrastructure.database.repo.requests import RequestsRepo
 from parsers import polar
 from tgbot.services import photos
 from tgbot.services.broadcaster import broadcast_schedule
+from tgbot.services.notify_edits import snapshot_past_days
 
 
 _failed: dict[str, float] = {}
@@ -141,6 +142,7 @@ def _in_night(now: datetime.datetime, start_str: str, end_str: str) -> bool:
 async def poller_loop(bot, session_pool, config: Config) -> None:
     logging.info("poller started")
     last_poll = 0.0
+    last_snapshot = 0.0
     while True:
         try:
             async with session_pool() as db:
@@ -151,6 +153,16 @@ async def poller_loop(bot, session_pool, config: Config) -> None:
             rate = float(settings["notify_rate"])
             failed_cooldown = int(settings.get("failed_cooldown", 1800) or 1800)
             now = datetime.datetime.now()
+
+            # Архив прошедших дней: раз в час, чтобы зафиксировать, что было
+            # (сайт может обновить файл задним числом — история не потеряется).
+            if time.monotonic() - last_snapshot >= 3600:
+                try:
+                    async with session_pool() as db:
+                        await snapshot_past_days(RequestsRepo(db))
+                except Exception:
+                    logging.exception("snapshot failed")
+                last_snapshot = time.monotonic()
 
             if not _in_night(now, settings["night_start"], settings["night_end"]):
                 if time.monotonic() - last_poll >= interval:

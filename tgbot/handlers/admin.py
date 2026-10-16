@@ -33,6 +33,7 @@ class AdminState(StatesGroup):
     set_group_broadcast = State()
     confirm_broadcast = State()
     upload_photo = State()
+    set_editor = State()
 
 
 def _is_admin(message: Message, config: Config) -> bool:
@@ -66,8 +67,9 @@ def _admin_kb() -> InlineKeyboardMarkup:
          InlineKeyboardButton(text="⏰ Звонки", callback_data="adm:bell")],
         [InlineKeyboardButton(text="🖼 Фото", callback_data="adm:photos"),
          InlineKeyboardButton(text="💬 Чаты", callback_data="adm:chats")],
-        [InlineKeyboardButton(text="📢 Рассылка", callback_data="adm:broadcast_menu"),
-         InlineKeyboardButton(text="🔔 Тест уведомления", callback_data="adm:notify")],
+        [InlineKeyboardButton(text="✏️ Редакторы", callback_data="adm:editors"),
+         InlineKeyboardButton(text="📢 Рассылка", callback_data="adm:broadcast_menu")],
+        [InlineKeyboardButton(text="🔔 Тест уведомления", callback_data="adm:notify")],
     ])
 
 
@@ -941,3 +943,96 @@ async def cb_photo_list(cb: CallbackQuery, config: Config):
     ])
     await cb.message.edit_text("\n".join(lines), reply_markup=kb)
     await cb.answer()
+
+
+# --- Редакторы расписания (старосты) --------------------------------------
+
+def _editors_kb(editors, users_by_id: dict) -> InlineKeyboardMarkup:
+    rows = []
+    for e in editors:
+        u = users_by_id.get(e.user_id)
+        name = (u.full_name if u else str(e.user_id))[:28]
+        rows.append([InlineKeyboardButton(
+            text=f"❌ {name} → {e.group}", callback_data=f"adm:ed_del:{e.user_id}")])
+    rows.append([InlineKeyboardButton(text="➕ Добавить редактора",
+                                      callback_data="adm:ed_add")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _editors_text(repo: RequestsRepo) -> str:
+    editors = await repo.editors.get_all()
+    lines = ["✏️ <b>Редакторы расписания</b>\n"]
+    if not editors:
+        lines.append("<i>Пока никого. Редактор может править только свою группу.</i>")
+    else:
+        lines.append(f"Всего: <b>{len(editors)}</b>")
+        lines.append("")
+        lines.append("Чтобы <b>отозвать</b> право — нажми на строку.")
+    return "\n".join(lines)
+
+
+@admin_router.callback_query(lambda cb: cb.data == "adm:editors")
+async def cb_editors(cb: CallbackQuery, repo: RequestsRepo, config: Config):
+    if not _is_admin_cb(cb, config):
+        return
+    editors = await repo.editors.get_all()
+    users = await repo.users.get_all()
+    users_by_id = {u.id: u for u in users}
+    await cb.message.edit_text(await _editors_text(repo),
+                               reply_markup=_editors_kb(editors, users_by_id))
+    await cb.answer()
+
+
+@admin_router.callback_query(lambda cb: cb.data.startswith("adm:ed_del:"))
+async def cb_editor_revoke(cb: CallbackQuery, repo: RequestsRepo, config: Config):
+    if not _is_admin_cb(cb, config):
+        return
+    user_id = int(cb.data.split(":")[2])
+    group = await repo.editors.get_group_for(user_id)
+    await repo.editors.revoke(user_id)
+    editors = await repo.editors.get_all()
+    users = await repo.users.get_all()
+    users_by_id = {u.id: u for u in users}
+    await cb.message.edit_text(
+        f"Право редактора отозвано (группа {group}).\n\n" + await _editors_text(repo),
+        reply_markup=_editors_kb(editors, users_by_id))
+    await cb.answer("Отозвано")
+
+
+@admin_router.callback_query(lambda cb: cb.data == "adm:ed_add")
+async def cb_editor_add(cb: CallbackQuery, repo: RequestsRepo, config: Config,
+                        state: FSMContext):
+    if not _is_admin_cb(cb, config):
+        return
+    await state.set_state(AdminState.set_editor)
+    await cb.message.edit_text(
+        "✏️ <b>Новый редактор</b>\n\n"
+        "Пришли <b>id пользователя</b> и <b>группу</b> через пробел.\n\n"
+        "Например: <code>494917175 ДП-26</code>\n\n"
+        "<i>id можно узнать в статистике или попросить старосту "
+        "нажать «⚙️ Настройки» — там виден его id.</i>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Отмена", callback_data="adm:editors")]]))
+    await cb.answer()
+
+
+@admin_router.message(AdminState.set_editor)
+async def set_editor(message: Message, repo: RequestsRepo, config: Config,
+                     state: FSMContext):
+    if not _is_admin(message, config):
+        return
+    parts = (message.text or "").split()
+    if len(parts) != 2 or not parts[0].isdigit():
+        await message.answer("Нужно два значения: <code>id группа</code>. Попробуй ещё раз.")
+        return
+    user_id, group = int(parts[0]), parts[1]
+    await repo.editors.grant(user_id, group, granted_by=message.from_user.id)
+    await state.clear()
+    editors = await repo.editors.get_all()
+    users = await repo.users.get_all()
+    users_by_id = {u.id: u for u in users}
+    await message.answer(
+        f"✅ <b>{user_id}</b> теперь может править расписание группы <b>{group}</b>.\n\n"
+        + await _editors_text(repo),
+        reply_markup=_editors_kb(editors, users_by_id))

@@ -67,7 +67,7 @@ def _on_off(value: bool) -> str:
     return "вкл" if value else "выкл"
 
 
-def menu_kb(user: User, support_link: str = "") -> InlineKeyboardMarkup:
+def menu_kb(user: User, support_link: str = "", is_editor: bool = False) -> InlineKeyboardMarkup:
     sub_text = "🔕 Отписаться" if user.subscribed else "🔔 Подписаться"
     detail_label = DETAIL_LABELS.get(user.bell_detail, "кратко")
     bell_label = BELL_LABELS.get(user.bell_mode, "выкл")
@@ -86,8 +86,11 @@ def menu_kb(user: User, support_link: str = "") -> InlineKeyboardMarkup:
          InlineKeyboardButton(text=second_search, callback_data=second_search_cb)],
         [InlineKeyboardButton(text=sub_text, callback_data="sub:toggle")],
         [InlineKeyboardButton(text=f"🔔 Звонки: {bell_label}", callback_data="bell_mode")],
-        [InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings")],
     ]
+    if is_editor:
+        rows.append([InlineKeyboardButton(text="✏️ Редактор расписания",
+                                          callback_data="ed:back")])
+    rows.append([InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings")])
     if support_link:
         rows.append([InlineKeyboardButton(text="📨 Поддержка", url=support_link)])
 
@@ -120,7 +123,8 @@ def menu_text(user: User) -> str:
 
 async def _render_menu(repo: RequestsRepo, user: User) -> tuple[str, InlineKeyboardMarkup]:
     s = await repo.settings.get_all()
-    return menu_text(user), menu_kb(user, s["support_link"])
+    is_editor = bool(await repo.editors.get_group_for(user.id))
+    return menu_text(user), menu_kb(user, s["support_link"], is_editor)
 
 
 async def _pick_kb(repo: RequestsRepo) -> InlineKeyboardMarkup:

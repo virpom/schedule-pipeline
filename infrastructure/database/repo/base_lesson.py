@@ -74,3 +74,10 @@ class BaseLessonRepo(BaseRepo):
         from sqlalchemy import func
         result = await self.session.execute(select(func.count()).select_from(BaseLesson))
         return result.scalar_one()
+
+    async def get_groups(self) -> list[str]:
+        """Группы, у которых есть базовое расписание."""
+        result = await self.session.execute(
+            select(BaseLesson.group).distinct().order_by(BaseLesson.group)
+        )
+        return [g for (g,) in result.all()]
