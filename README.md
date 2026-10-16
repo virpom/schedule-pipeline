@@ -227,3 +227,23 @@ BOT_TOKEN=... ADMINS=... .venv/bin/python main.py
 |---|---|
 | [`docs/EDITORS.md`](docs/EDITORS.md) | Редакторы расписания (старосты): модель данных, ввод, валидация |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | История изменений, что криво в коде, что доделать |
+
+## Схема БД и миграции
+
+Схема ведётся через **alembic** (`migrations/`) и применяется
+автоматически при старте бота — руками `ALTER TABLE` делать не нужно.
+Если база создана до внедрения alembic, она помечается как baseline и
+пересоздания таблиц не происходит.
+
+```bash
+alembic upgrade head      # применить миграции
+alembic current           # текущая версия
+alembic revision --autogenerate -m "описание"   # новая миграция
+```
+
+## Тесты
+
+```bash
+pip install -r requirements-dev.txt
+pytest                     # 27 тестов
+```
