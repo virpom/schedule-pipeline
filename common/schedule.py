@@ -24,6 +24,48 @@ BELL_LABELS = {
     BELL_FULL: "звонок+перемена+конец",
 }
 
+# --- Слои расписания: базовое (по чётности) + замены ----------------------
+
+PARITY_ODD = "ODD"     # нечётная неделя
+PARITY_EVEN = "EVEN"   # чётная неделя
+PARITY_ANY = "ANY"     # каждую неделю
+PARITY_LABELS = {PARITY_ODD: "нечётная", PARITY_EVEN: "чётная", PARITY_ANY: "любая"}
+
+SUB_REPLACE = "replace"
+SUB_CANCEL = "cancel"
+SUB_ADD = "add"
+
+SOURCE_SITE = "site"
+SOURCE_MANUAL = "manual"
+
+
+def week_parity(date: datetime.date, parity_offset: int = 0) -> str:
+    """Чётность учебной недели по ISO-номеру.
+
+    parity_offset сдвигает отсчёт, если колледж считает иначе, чем ISO
+    (например, первая учебная неделя семестра — нечётная).
+    """
+    week = date.isocalendar().week + parity_offset
+    return PARITY_EVEN if week % 2 == 0 else PARITY_ODD
+
+
+def merge_day(base_lessons, substitutions):
+    """Наложить замены на базовое расписание → итог дня.
+
+    base_lessons  — пары из BaseLesson (отфильтрованы по дню и чётности)
+    substitutions — замены из Substitution на конкретную дату
+
+    Возвращает слоты, отсортированные по номеру пары. Элемент — либо
+    базовая пара, либо замена (replace/add). Отменённые (cancel) исчезают.
+    """
+    by_para = {l.para: l for l in base_lessons}
+    for sub in substitutions:
+        if sub.action == SUB_CANCEL:
+            by_para.pop(sub.para, None)
+        else:  # replace | add
+            by_para[sub.para] = sub
+    return [by_para[p] for p in sorted(by_para)]
+
 
 def teacher_base(name: str) -> str:
     return (name or "").split(",")[0].strip()
@@ -95,7 +137,7 @@ def format_day(
 ) -> str:
     header = f"📅 <b>{WEEKDAY_FULL[date.weekday()]}, {date.day} {MONTHS_GEN[date.month]}</b>"
     if not lessons:
-        return f"{header}\n\nЗанятий нет 🙌"
+        return empty_day(date)
 
     lines = [header, ""]
     dt = day_type_from_date(date)
@@ -136,21 +178,33 @@ def format_day(
     return "\n".join(lines)
 
 
-def format_not_published(date: datetime.date) -> str:
-    return f"📅 <b>{WEEKDAY_FULL[date.weekday()]}, {date.day} {MONTHS_GEN[date.month]}</b>\n\nРасписание ещё не выложено ⏳"
+def day_header(date: datetime.date) -> str:
+    """Единый заголовок дня для всех состояний."""
+    return f"📅 <b>{WEEKDAY_FULL[date.weekday()]}, {date.day} {MONTHS_GEN[date.month]}</b>"
 
 
-def format_no_lessons(date: datetime.date, note: str | None = None) -> str:
-    header = f"📅 <b>{WEEKDAY_FULL[date.weekday()]}, {date.day} {MONTHS_GEN[date.month]}</b>"
-    text = f"{header}\n\nЗанятий нет 🙌"
+def empty_day(date: datetime.date, note: str | None = None) -> str:
+    """Единая точка для состояния «пар нет».
+
+    Используется и format_day (пустой список), и format_no_lessons,
+    чтобы текст не расходился между вызовами.
+    """
+    text = f"{day_header(date)}\n\nЗанятий нет 🙌"
     if note:
         text += f"\n<i>{note}</i>"
     return text
 
 
+def format_not_published(date: datetime.date) -> str:
+    return f"{day_header(date)}\n\nРасписание ещё не выложено ⏳"
+
+
+def format_no_lessons(date: datetime.date, note: str | None = None) -> str:
+    return empty_day(date, note)
+
+
 def format_site_down(date: datetime.date) -> str:
-    header = f"📅 <b>{WEEKDAY_FULL[date.weekday()]}, {date.day} {MONTHS_GEN[date.month]}</b>"
-    return f"{header}\n\n⚠️ Сайт колледжа недоступен — расписание проверить не удалось. Попробуй позже."
+    return f"{day_header(date)}\n\n⚠️ Сайт колледжа недоступен — расписание проверить не удалось. Попробуй позже."
 
 
 def format_week(entries, bell, lunches, detail: str = DETAIL_BRIEF, meta: str = "teacher", show_rov: bool = True, group_course_group: dict[str, str] | None = None) -> str:

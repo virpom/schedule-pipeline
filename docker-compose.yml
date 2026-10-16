@@ -1,7 +1,19 @@
 services:
   bot:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: schedule-bot:latest
+    container_name: schedule-bot
     restart: unless-stopped
     env_file: .env
     volumes:
+      # БД (SQLite) и фотографии по дням недели
       - ./data:/data
+    # Образ собирается локально (см. README → Деплой), поэтому не тянем с registry
+    pull_policy: never
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

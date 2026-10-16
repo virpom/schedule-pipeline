@@ -7,7 +7,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import load_config
 from infrastructure.database import models  # noqa: F401  (register tables)
-from infrastructure.database.models.base import Base
+from infrastructure.database.migrations_runner import run_migrations
 from infrastructure.database.repo.requests import RequestsRepo
 from infrastructure.database.setup import create_engine, create_session_pool
 from tgbot.handlers import routers_list
@@ -41,8 +41,8 @@ async def main() -> None:
     engine = create_engine(config.db)
     session_pool = create_session_pool(engine)
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # Схема БД ведётся миграциями alembic (см. migrations/).
+    await run_migrations(engine, config)
 
     bot = Bot(token=config.tg_bot.token, default=DefaultBotProperties(parse_mode="HTML"))
     dp = Dispatcher(storage=MemoryStorage())

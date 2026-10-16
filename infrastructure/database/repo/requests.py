@@ -2,13 +2,18 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from infrastructure.database.repo.base_lesson import BaseLessonRepo
 from infrastructure.database.repo.bell_reminder import BellReminderRepo
 from infrastructure.database.repo.bell_schedule import BellScheduleRepo
 from infrastructure.database.repo.chat import ChatRepo
 from infrastructure.database.repo.college_lesson import CollegeLessonRepo
+from infrastructure.database.repo.day_snapshot import DaySnapshotRepo
 from infrastructure.database.repo.no_lessons import NoLessonsRepo
+from infrastructure.database.repo.schedule_edit import ScheduleEditRepo
+from infrastructure.database.repo.schedule_editor import ScheduleEditorRepo
 from infrastructure.database.repo.schedule_file import ScheduleFileRepo
 from infrastructure.database.repo.setting import SettingRepo
+from infrastructure.database.repo.substitution import SubstitutionRepo
 from infrastructure.database.repo.user import UserRepo
 
 
@@ -47,3 +52,23 @@ class RequestsRepo:
     @property
     def reminders(self) -> BellReminderRepo:
         return BellReminderRepo(self.session)
+
+    @property
+    def base_lessons(self) -> BaseLessonRepo:
+        return BaseLessonRepo(self.session)
+
+    @property
+    def substitutions(self) -> SubstitutionRepo:
+        return SubstitutionRepo(self.session)
+
+    @property
+    def editors(self) -> ScheduleEditorRepo:
+        return ScheduleEditorRepo(self.session)
+
+    @property
+    def edit_log(self) -> ScheduleEditRepo:
+        return ScheduleEditRepo(self.session)
+
+    @property
+    def snapshots(self) -> DaySnapshotRepo:
+        return DaySnapshotRepo(self.session)

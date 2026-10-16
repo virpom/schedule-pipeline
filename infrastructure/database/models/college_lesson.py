@@ -1,15 +1,21 @@
 import datetime
 
-from sqlalchemy import Date, Integer, String, UniqueConstraint
+from sqlalchemy import Date, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, TableNameMixin
 
 
 class CollegeLesson(Base, TableNameMixin):
-    __table_args__ = (
-        UniqueConstraint('date', 'group', 'para', name='uc_college_lesson'),
-    )
+    """Пары, скачанные с сайта (режим «временного» расписания).
+
+    Остаётся как архив данных, собранных парсером до перехода на модель
+    BaseLesson + Substitution. Поле source отличает их от ручных правок.
+    """
+
+    # NB: в боевой БД уникального индекса нет; согласованность держит
+    # replace_date(), который сначала удаляет все пары за дату.
+    __table_args__ = ()
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     date: Mapped[datetime.date] = mapped_column(Date, index=True)
@@ -20,6 +26,7 @@ class CollegeLesson(Base, TableNameMixin):
     teacher: Mapped[str] = mapped_column(String(128), default="")
     room: Mapped[str] = mapped_column(String(64), default="")
     source_url: Mapped[str] = mapped_column(String(512), default="")
+    source: Mapped[str] = mapped_column(String(8), server_default=text("'site'"))
 
     def __repr__(self):
         return f"<CollegeLesson {self.date} {self.group} п{self.para} {self.subject}>"

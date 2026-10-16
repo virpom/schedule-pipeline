@@ -9,12 +9,6 @@ from infrastructure.database.repo.base import BaseRepo
 
 
 class CollegeLessonRepo(BaseRepo):
-    async def has_source(self, source_url: str) -> bool:
-        result = await self.session.execute(
-            select(CollegeLesson.id).where(CollegeLesson.source_url == source_url).limit(1)
-        )
-        return result.scalar_one_or_none() is not None
-
     async def bulk_upsert(self, lessons: list[dict]) -> None:
         if not lessons:
             return
@@ -100,17 +94,49 @@ class CollegeLessonRepo(BaseRepo):
             if len(n.split()) > 1 or n.split()[0] not in surnames_with_initials
         )
 
-    async def get_for_teacher_date(self, teacher_name: str, date: datetime.date) -> list[CollegeLesson]:
-        return [l for l in await self.get_all_lessons()
-                if l.date == date and teacher_matches(l.teacher, teacher_name)]
+    # --- Выборка по преподавателю -----------------------------------------
+    #
+    # В БД преподаватель хранится по-разному: «Ляшко Д.В.», «Ляшко»,
+    # «Ляшко Д.В., 1-ая подгруппа». Поэтому фильтруем по SQL (дата + фамилия),
+    # а точное совпадение проверяем в Python через teacher_matches.
+    # Раньше здесь грузилась вся таблица — на каждый тик bell-лупа.
 
-    async def get_for_teacher_range(self, teacher_name: str, start: datetime.date, end: datetime.date) -> list[CollegeLesson]:
-        return [l for l in await self.get_all_lessons()
-                if start <= l.date <= end and teacher_matches(l.teacher, teacher_name)]
+    async def get_for_teacher_date(self, teacher_name: str, date: datetime.date) -> list[CollegeLesson]:
+        surname = teacher_name.split()[0] if teacher_name.split() else teacher_name
+        result = await self.session.execute(
+            select(CollegeLesson)
+            .where(CollegeLesson.date == date,
+                   CollegeLesson.teacher.like(f"%{surname}%"))
+            .order_by(CollegeLesson.para)
+        )
+        return [l for l in result.scalars().all() if teacher_matches(l.teacher, teacher_name)]
+
+    async def get_for_teacher_range(self, teacher_name: str, start: datetime.date,
+                                    end: datetime.date) -> list[CollegeLesson]:
+        surname = teacher_name.split()[0] if teacher_name.split() else teacher_name
+        result = await self.session.execute(
+            select(CollegeLesson)
+            .where(CollegeLesson.date >= start, CollegeLesson.date <= end,
+                   CollegeLesson.teacher.like(f"%{surname}%"))
+            .order_by(CollegeLesson.date, CollegeLesson.para)
+        )
+        return [l for l in result.scalars().all() if teacher_matches(l.teacher, teacher_name)]
 
     async def get_dates_for_teacher(self, teacher_name: str) -> list[datetime.date]:
-        dates = {l.date for l in await self.get_all_lessons() if teacher_matches(l.teacher, teacher_name)}
+        surname = teacher_name.split()[0] if teacher_name.split() else teacher_name
+        result = await self.session.execute(
+            select(CollegeLesson.date, CollegeLesson.teacher)
+            .where(CollegeLesson.teacher.like(f"%{surname}%"))
+            .distinct()
+        )
+        dates = {d for d, t in result.all() if teacher_matches(t, teacher_name)}
         return sorted(dates, reverse=True)
 
     async def get_all_for_teacher(self, teacher_name: str) -> list[CollegeLesson]:
-        return [l for l in await self.get_all_lessons() if teacher_matches(l.teacher, teacher_name)]
+        surname = teacher_name.split()[0] if teacher_name.split() else teacher_name
+        result = await self.session.execute(
+            select(CollegeLesson)
+            .where(CollegeLesson.teacher.like(f"%{surname}%"))
+            .order_by(CollegeLesson.date, CollegeLesson.para)
+        )
+        return [l for l in result.scalars().all() if teacher_matches(l.teacher, teacher_name)]

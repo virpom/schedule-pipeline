@@ -1,0 +1,59 @@
+import datetime
+
+from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.sqlite import insert
+
+from infrastructure.database.models import Substitution
+from infrastructure.database.repo.base import BaseRepo
+
+
+class SubstitutionRepo(BaseRepo):
+    async def get_for_date(self, group: str, date: datetime.date) -> list[Substitution]:
+        result = await self.session.execute(
+            select(Substitution)
+            .where(Substitution.group == group, Substitution.date == date)
+            .order_by(Substitution.para)
+        )
+        return list(result.scalars().all())
+
+    async def get_for_dates(self, group: str, start: datetime.date,
+                            end: datetime.date) -> list[Substitution]:
+        result = await self.session.execute(
+            select(Substitution)
+            .where(Substitution.group == group,
+                   Substitution.date >= start, Substitution.date <= end)
+            .order_by(Substitution.date, Substitution.para)
+        )
+        return list(result.scalars().all())
+
+    async def set(self, date: datetime.date, group: str, para: int, action: str,
+                  subject: str = "", teacher: str = "", room: str = "",
+                  comment: str = "", source: str = "manual",
+                  created_by: int | None = None) -> None:
+        now = datetime.datetime.now()
+        await self.session.execute(
+            insert(Substitution)
+            .values(date=date, group=group, para=para, action=action,
+                    subject=subject, teacher=teacher, room=room, comment=comment,
+                    source=source, created_by=created_by, created_at=now)
+            .on_conflict_do_update(
+                index_elements=["date", "group", "para"],
+                set_=dict(action=action, subject=subject, teacher=teacher,
+                          room=room, comment=comment, source=source,
+                          created_by=created_by, created_at=now),
+            )
+        )
+        await self.session.commit()
+
+    async def delete(self, date: datetime.date, group: str, para: int) -> None:
+        await self.session.execute(
+            delete(Substitution).where(
+                Substitution.date == date, Substitution.group == group,
+                Substitution.para == para,
+            )
+        )
+        await self.session.commit()
+
+    async def count(self) -> int:
+        result = await self.session.execute(select(func.count()).select_from(Substitution))
+        return result.scalar_one()
