@@ -362,5 +362,14 @@ async def materialize(repo: RequestsRepo, days: int = MATERIALIZE_DAYS) -> int:
             )
         written += 1
 
+    # Помечаем дни как опубликованные: расписание пришло с сайта, значит
+    # «не опубликовано» показывать нельзя. Раньше schedule_file заполнял
+    # старый парсер, после перехода на ЭИОС её перестали обновлять, и студент
+    # на пустой день видел «расписание не опубликовано» вместо «занятий нет».
+    for offset in range(days):
+        date = today + datetime.timedelta(days=offset)
+        if await repo.schedule_files.get_hash(date) is None:
+            await repo.schedule_files.set_hash(date, f"eios-{date.isoformat()}")
+
     log.info("материализовано %d дней в college_lesson", written)
     return written

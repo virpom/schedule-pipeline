@@ -410,3 +410,25 @@ def test_manual_substitution_on_same_slot_does_not_crash(tmp_path):
             assert got[1].para == 3 and got[1].source == "site"
 
     _run(_with_repo(tmp_path, body))
+
+
+def test_materialize_marks_days_published(tmp_path):
+    """Материализация помечает дни опубликованными.
+
+    Регрессия: таблицу schedule_file заполнял старый парсер, после перехода
+    на ЭИОС её перестали обновлять. Из-за этого на пустой день студент видел
+    «расписание ещё не выложено» вместо «занятий нет».
+    """
+    async def body(repo):
+        import datetime as dt
+        await repo.base_lessons.upsert("ДП-26", PARITY_ANY, 1, 1, "Математика",
+                                       "Иванов И.И.", source="site")
+        await sync_eios.materialize(repo, days=3)
+
+        today = dt.date.today()
+        for offset in range(3):
+            date = today + dt.timedelta(days=offset)
+            assert await repo.schedule_files.get_hash(date) is not None, \
+                f"{date} должен считаться опубликованным"
+
+    _run(_with_repo(tmp_path, body))
