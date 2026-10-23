@@ -129,6 +129,41 @@ def test_replace_base_lessons_keeps_manual(tmp_path):
     _run(_with_repo(tmp_path, body))
 
 
+def test_manual_edit_on_same_slot_as_site_does_not_crash(tmp_path):
+    """Ручная правка на том же слоте, что и пара из файла, не роняет загрузку.
+
+    Регрессия: обе строки вставлялись на одно (group, parity, weekday, para),
+    и UNIQUE падал с IntegrityError. Ручная правка должна побеждать.
+    """
+    async def body(repo):
+        await repo.base_lessons.upsert("ДП-26", PARITY_ANY, 1, 1, "РУЧНАЯ",
+                                       "Староста С.С.", source="manual")
+        # В файле на этот же слот есть пара.
+        lessons = [ParsedLesson("ДП-26", 1, 1, 1, "С сайта")]
+
+        for _ in range(2):  # повторная загрузка тоже не должна падать
+            await sync_eios.replace_base_lessons(repo, lessons)
+            day = await repo.base_lessons.get_day("ДП-26", 1, PARITY_ANY)
+            assert [l.subject for l in day] == ["РУЧНАЯ"]
+            assert [l.source for l in day] == ["manual"]
+
+    _run(_with_repo(tmp_path, body))
+
+
+def test_replace_base_lessons_idempotent_count(tmp_path):
+    """Повторная загрузка не размножает строки."""
+    async def body(repo):
+        lessons = [
+            ParsedLesson("ДП-26", 1, 1, 1, "Математика"),
+            ParsedLesson("ДП-26", 1, 1, 2, "Физика"),
+        ]
+        for _ in range(3):
+            await sync_eios.replace_base_lessons(repo, lessons)
+            assert await repo.base_lessons.count() == 2
+
+    _run(_with_repo(tmp_path, body))
+
+
 # --- замены ------------------------------------------------------------------
 
 class ParsedSub:
@@ -347,5 +382,31 @@ def test_substitution_dates_skip_past(tmp_path):
         dates = await repo.substitutions.get_dates(today)
         assert past not in dates
         assert future in dates
+
+    _run(_with_repo(tmp_path, body))
+
+
+def test_manual_substitution_on_same_slot_does_not_crash(tmp_path):
+    """Ручная замена на том же слоте, что и замена с сайта, не роняет загрузку.
+
+    Регрессия: UNIQUE по (date, group, para) падал, потому что обе строки
+    вставлялись. Ручная правка должна побеждать.
+    """
+    async def body(repo):
+        import datetime as dt
+        d = dt.date(2026, 10, 26)
+        await repo.substitutions.set(d, "ДП-26", 2, "replace", "РУЧНАЯ",
+                                     "Староста С.С.", source="manual")
+        subs = [
+            ParsedSub(d, "ДП-26", 2, "replace", "С САЙТА", "Т.Т."),
+            ParsedSub(d, "ДП-26", 3, "cancel"),
+        ]
+        for _ in range(2):
+            await sync_eios.replace_substitutions(repo, subs)
+            got = await repo.substitutions.get_for_date("ДП-26", d)
+            assert len(got) == 2
+            assert got[0].para == 2 and got[0].source == "manual"
+            assert got[0].subject == "РУЧНАЯ"
+            assert got[1].para == 3 and got[1].source == "site"
 
     _run(_with_repo(tmp_path, body))

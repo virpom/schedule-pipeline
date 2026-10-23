@@ -72,6 +72,15 @@ async def replace_base_lessons(repo: RequestsRepo, lessons: list[ParsedLesson]) 
             select(BaseLesson).where(BaseLesson.source != SOURCE_SITE)
         )
     ]
+    # Ручная правка важнее сайта: её слот не должен достаться данным из файла,
+    # иначе на одно (group, parity, weekday, para) будет две строки и UNIQUE
+    # упадёт с IntegrityError. Сами ручные строки НЕ удаляем и заново не
+    # вставляем — delete ниже сносит только source='site'.
+    manual_keys = {(r.group, r.week_parity, r.weekday, r.para) for r in manual}
+    # Отвязываем от сессии, чтобы последующий flush не трогал их.
+    for row in manual:
+        repo.session.expunge(row)
+
     await repo.session.execute(delete(BaseLesson).where(BaseLesson.source == SOURCE_SITE))
 
     now = datetime.datetime.now()
@@ -82,6 +91,9 @@ async def replace_base_lessons(repo: RequestsRepo, lessons: list[ParsedLesson]) 
         key = (lesson.group, parity, lesson.day, lesson.para)
         if key in seen:
             log.warning("дубль в базовом расписании: %s", key)
+            continue
+        if key in manual_keys:
+            # Здесь уже есть ручная правка — не перетираем её.
             continue
         seen.add(key)
         repo.session.add(
@@ -99,16 +111,8 @@ async def replace_base_lessons(repo: RequestsRepo, lessons: list[ParsedLesson]) 
         )
         added += 1
 
-    # Вернуть ручные правки, которые не перекрыты свежими данными.
-    for row in manual:
-        key = (row.group, row.week_parity, row.weekday, row.para)
-        if key in seen:
-            continue
-        repo.session.add(row)
-        added += 1
-
     await repo.session.commit()
-    return added
+    return added + len(manual)
 
 
 async def replace_substitutions(repo: RequestsRepo, subs: list[ParsedSub]) -> int:
@@ -119,6 +123,12 @@ async def replace_substitutions(repo: RequestsRepo, subs: list[ParsedSub]) -> in
             select(Substitution).where(Substitution.source != SOURCE_SITE)
         )
     ]
+    # Как и в базовом расписании: ручная замена на том же слоте не должна
+    # конфликтовать с пришедшей с сайта (UNIQUE по date+group+para).
+    manual_keys = {(r.date, r.group, r.para) for r in manual}
+    for row in manual:
+        repo.session.expunge(row)
+
     await repo.session.execute(
         delete(Substitution).where(Substitution.source == SOURCE_SITE)
     )
@@ -128,7 +138,7 @@ async def replace_substitutions(repo: RequestsRepo, subs: list[ParsedSub]) -> in
     added = 0
     for sub in subs:
         key = (sub.date, sub.group, sub.para)
-        if key in seen:
+        if key in seen or key in manual_keys:
             continue
         seen.add(key)
         repo.session.add(
@@ -147,15 +157,8 @@ async def replace_substitutions(repo: RequestsRepo, subs: list[ParsedSub]) -> in
         )
         added += 1
 
-    for row in manual:
-        key = (row.date, row.group, row.para)
-        if key in seen:
-            continue
-        repo.session.add(row)
-        added += 1
-
     await repo.session.commit()
-    return added
+    return added + len(manual)
 
 
 async def replace_bells(repo: RequestsRepo, slots: list[eios.BellSlot]) -> int:

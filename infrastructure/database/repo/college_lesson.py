@@ -21,10 +21,6 @@ class CollegeLessonRepo(BaseRepo):
         await self.session.execute(insert(CollegeLesson).values(lessons))
         await self.session.commit()
 
-    async def bulk_upsert(self, lessons: list[dict]) -> None:
-        """Устаревшее имя, оставлено для совместимости."""
-        await self.bulk_insert(lessons)
-
     async def replace_date(self, date: datetime.date, lessons: list[dict]) -> None:
         await self.session.execute(delete(CollegeLesson).where(CollegeLesson.date == date))
         await self.session.commit()

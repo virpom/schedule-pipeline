@@ -5,12 +5,7 @@
 """
 import datetime
 
-from common.schedule import (
-    PARITY_ANY,
-    SUB_CANCEL,
-    merge_day,
-    week_parity,
-)
+from common.schedule import PARITY_ANY, SUB_CANCEL, week_parity
 from infrastructure.database.repo.requests import RequestsRepo
 
 

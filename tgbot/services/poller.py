@@ -1,6 +1,5 @@
 import asyncio
 import datetime
-import hashlib
 import logging
 import time
 
@@ -44,10 +43,15 @@ async def poll_once(session_pool, config: Config, failed_cooldown: int = 1800) -
         # Материализуем ВСЕГДА, даже если файлы не менялись: окно дат должно
         # сдвигаться вперёд каждый день, иначе через две недели расписание
         # «кончится» — файлы те же, а новых дат в college_lesson нет.
+        # Ошибку здесь не пробрасываем: расписание уже загружено, и ронять
+        # из-за неё весь цикл (с ретраем каждые 10 секунд) незачем.
         async with session_pool() as db:
             repo = RequestsRepo(db)
             had_lessons = await repo.college_lessons.count_lessons()
-            await sync_eios.materialize(repo)
+            try:
+                await sync_eios.materialize(repo)
+            except Exception:
+                logging.exception("материализация не удалась")
 
         # Рассылаем, только если источник реально изменился.
         if not (result["ochoe"] or result["zameny"]):

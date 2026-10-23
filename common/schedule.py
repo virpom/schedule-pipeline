@@ -57,6 +57,11 @@ def merge_day(base_lessons, substitutions):
 
     Возвращает слоты, отсортированные по номеру пары. Элемент — либо
     базовая пара, либо замена (replace/add). Отменённые (cancel) исчезают.
+
+    Чистая функция без БД — удобна для тестов. В боте используется её
+    аналог ``tgbot.services.schedule_layer.get_day_slots()``: он делает то же
+    самое, но сразу ходит в базу и возвращает ``Slot``. Поведение обоих
+    проверено на одинаковых краевых случаях.
     """
     by_para = {l.para: l for l in base_lessons}
     for sub in substitutions:
