@@ -51,8 +51,9 @@ DAY_NAMES = {
 }
 
 _NAME = r"[А-ЯЁ][а-яё\-]+"
+# Хвостовые точки бывают лишними: «Балакшина О.П..», «Городиский В..»
 _TEACHER_RE = re.compile(
-    rf"^(?:{_NAME}(?:\s*[–-]\s*{_NAME})?\s+[А-ЯЁ]\.\s*[А-ЯЁ]?\.?"
+    rf"^(?:{_NAME}(?:\s*[–-]\s*{_NAME})?\s+[А-ЯЁ]\.\s*[А-ЯЁ]?\.*"
     rf"|{_NAME}\s+{_NAME}|[Вв]акансия)$"
 )
 _TIME_HEAD_RE = re.compile(
@@ -204,11 +205,17 @@ def split_subject_teacher(value: object) -> tuple[str, str]:
 
 
 def _strip_time_note(subject: str) -> tuple[str, str | None]:
-    """Отрезать префикс времени вида «5-я пара - » или «с 18.00 до 21.00 - »."""
+    """Отрезать префикс времени вида «5-я пара - » или «с 18.00 до 21.00 - ».
+
+    В источнике встречаются опечатки (``«с 18.05 до .19:30»``), поэтому
+    убираем точку, ошибочно поставленную перед цифрой после «до».
+    """
     m = _TIME_HEAD_RE.match(subject)
     if not m:
         return subject, None
     note = subject[: m.end()].strip(" -")
+    note = re.sub(r"\bдо\s*\.(?=\d)", "до ", note)  # «до .19:30» -> «до 19:30»
+    note = re.sub(r"\s+", " ", note).strip()
     return subject[m.end() :].strip(), note or None
 
 
@@ -446,8 +453,12 @@ def split_substitution_text(text: str) -> tuple[str, str, str]:
 def parse_bells(data: bytes, day_type: str) -> list[BellSlot]:
     """Разобрать файл расписания звонков.
 
-    Таблица: первая колонка — номер пары, далее пары колонок
-    «I и IV курс» и «II и III курс» (начало / конец).
+    Таблица ``14×7``: первая колонка — «N пара», далее по три колонки на
+    поток («I и IV курс» и «II и III курс») в формате «начало | - | конец».
+
+    Каждая пара занимает **две строки** (первая и вторая половина), между ними
+    может стоять строка с обедом. Поэтому строки с обедом пропускаем, а пары
+    собираем попарно.
     """
     try:
         document = Document(BytesIO(data))
@@ -459,40 +470,48 @@ def parse_bells(data: bytes, day_type: str) -> list[BellSlot]:
         return slots
 
     for table in document.tables:
+        # para -> {"I_IV": [(start,end), ...], "II_III": [...]}
+        halves: dict[int, dict[str, list[tuple[datetime.time, datetime.time]]]] = {}
+
         for row in table.rows:
             cells = [c.text.strip() for c in row.cells]
-            if len(cells) < 5:
+            if len(cells) < 7:
                 continue
-            para_match = re.fullmatch(r"\s*(\d)\s*", cells[0])
-            if not para_match:
+            m = re.match(r"\s*(\d)\s*пара", cells[0])
+            if not m:
                 continue
-            para = int(para_match.group(1))
-            times = [parse_time(c) for c in cells[1:]]
-            if len(times) < 4 or not all(times[:4]):
-                continue
-            slots.append(
-                BellSlot(
-                    day_type=day_type,
-                    course_group="I_IV",
-                    para=para,
-                    start=times[0],
-                    end1=times[1],
-                    start2=times[2],
-                    end2=times[3],
-                )
-            )
-            if len(times) >= 8 and times[4] and times[5] and times[6] and times[7]:
+            para = int(m.group(1))
+
+            for group_key, offset in (("I_IV", 1), ("II_III", 4)):
+                start_cell, end_cell = cells[offset], cells[offset + 2]
+                # Строка обеда тоже содержит время — её надо пропустить.
+                if "обед" in start_cell.lower() or "обед" in end_cell.lower():
+                    continue
+                start = parse_time(start_cell)
+                end = parse_time(end_cell)
+                if start and end:
+                    halves.setdefault(para, {}).setdefault(group_key, []).append((start, end))
+
+        for para, per_group in sorted(halves.items()):
+            for group_key, pairs in per_group.items():
+                if len(pairs) >= 2:
+                    (s1, e1), (s2, e2) = pairs[0], pairs[1]
+                else:
+                    # одна половина — считаем её единственной
+                    (s1, e1) = pairs[0]
+                    s2, e2 = s1, e1
                 slots.append(
                     BellSlot(
                         day_type=day_type,
-                        course_group="II_III",
+                        course_group=group_key,
                         para=para,
-                        start=times[4],
-                        end1=times[5],
-                        start2=times[6],
-                        end2=times[7],
+                        start=s1,
+                        end1=e1,
+                        start2=s2,
+                        end2=e2,
                     )
                 )
+
     return slots
 
 
@@ -522,9 +541,40 @@ def normalize_group(name: str) -> str:
 
 
 def match_group(name: str, known: list[str]) -> str | None:
-    """Найти известную группу по «грязному» имени из листка замен."""
+    """Найти известную группу по «грязному» имени из листка замен.
+
+    Сначала точное совпадение по нормализованному ключу. Если его нет —
+    пробуем «похожие» имена: в листке встречаются опечатки вроде ``ЭОф-26``
+    вместо ``ЭО-26ФП`` (переставлены буквы).
+    """
     key = normalize_group(name)
     by_key = {normalize_group(g): g for g in known}
     if key in by_key:
         return by_key[key]
-    return None
+
+    # Похожесть: те же символы в другом порядке либо одно вхождение в другое.
+    candidates: list[tuple[float, str]] = []
+    for other_key, original in by_key.items():
+        if sorted(key) == sorted(other_key):
+            score = 1.0
+        elif key in other_key or other_key in key:
+            score = 0.9
+        else:
+            score = _similarity(key, other_key)
+            if score < 0.75:
+                continue
+        candidates.append((score, original))
+
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)
+    # Если два кандидата одинаково хороши — не угадываем.
+    if len(candidates) > 1 and abs(candidates[0][0] - candidates[1][0]) < 0.05:
+        return None
+    return candidates[0][1]
+
+
+def _similarity(a: str, b: str) -> float:
+    from difflib import SequenceMatcher
+
+    return SequenceMatcher(None, a, b).ratio()

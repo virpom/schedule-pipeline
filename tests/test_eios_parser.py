@@ -27,6 +27,7 @@ from parsers.eios import (
     match_group,
     normalize_group,
     parse_ochoe,
+    parse_bells,
     parse_substitutions,
     parse_time,
     split_subject_teacher,
@@ -306,6 +307,14 @@ def test_room_variants():
         assert room == expected_room
 
 
+def test_teacher_with_extra_dot_in_substitution():
+    """В листке встречается «Балакшина О.П..» — лишняя точка не должна ломать разбор."""
+    subject, teacher, room = split_substitution_text("Охрана труда – Балакшина О.П.., ауд. 223")
+    assert subject == "Охрана труда"
+    assert teacher == "Балакшина О.П.."
+    assert room == "ауд. 223"
+
+
 # --- нормализация групп ------------------------------------------------------
 
 
@@ -356,3 +365,85 @@ def test_parse_time_variants():
     assert parse_time("09:45") == datetime.time(9, 45)
     assert parse_time("18.05") == datetime.time(18, 5)
     assert parse_time("мусор") is None
+
+
+# --- разбор файла звонков ----------------------------------------------------
+
+
+def _make_bells_docx(rows):
+    """rows — список из 7 ячеек: [пара, s1, '-', e1, s2, '-', e2]."""
+    doc = Document()
+    table = doc.add_table(rows=1, cols=7)
+    head = table.rows[0].cells
+    head[0].text = ""
+    for i, label in enumerate(
+        ["I и IV курс"] * 3 + ["II и III курс"] * 3, start=1
+    ):
+        head[i].text = label
+    for cells in rows:
+        row = table.add_row().cells
+        for i, value in enumerate(cells):
+            row[i].text = value
+    buf = BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def test_bells_two_halves_per_para():
+    data = _make_bells_docx([
+        ["1 пара", "09.00", "-", "09.45", "09.00", "-", "09.45"],
+        ["1 пара", "09.50", "-", "10.35", "09.50", "-", "10.35"],
+    ])
+    slots = parse_bells(data, "OTHER")
+    assert len(slots) == 2  # два потока
+    first = next(s for s in slots if s.course_group == "I_IV")
+    assert first.para == 1
+    assert first.start == datetime.time(9, 0)
+    assert first.end1 == datetime.time(9, 45)
+    assert first.start2 == datetime.time(9, 50)
+    assert first.end2 == datetime.time(10, 35)
+
+
+def test_bells_lunch_row_is_skipped():
+    """Строка обеда содержит время, но это не пара — её надо пропустить."""
+    data = _make_bells_docx([
+        ["2 пара", "10.45", "-", "11.30", "10.45", "-", "11.30"],
+        ["2 пара", "с 11.30 до 11.55 - Обед", "с 11.30 до 11.55 - Обед",
+         "с 11.30 до 11.55 - Обед", "11.35", "-", "12.20"],
+        ["2 пара", "11.55", "-", "12.40", "с 12.20 до 12.50 - Обед",
+         "с 12.20 до 12.50 - Обед", "с 12.20 до 12.50 - Обед"],
+    ])
+    slots = parse_bells(data, "OTHER")
+    i_iv = next(s for s in slots if s.course_group == "I_IV")
+    ii_iii = next(s for s in slots if s.course_group == "II_III")
+    # обед не должен попасть во вторую половину пары
+    assert i_iv.start2 == datetime.time(11, 55)
+    assert i_iv.end2 == datetime.time(12, 40)
+    assert ii_iii.start2 == datetime.time(11, 35)
+    assert ii_iii.end2 == datetime.time(12, 20)
+
+
+def test_bells_sixth_para_present():
+    data = _make_bells_docx([
+        ["6 пара", "18.05", "-", "18.50", "18.05", "-", "18.50"],
+        ["6 пара", "18.55", "-", "19.40", "18.55", "-", "19.40"],
+    ])
+    slots = parse_bells(data, "OTHER")
+    sixth = [s for s in slots if s.para == 6]
+    assert len(sixth) == 2
+    assert sixth[0].end2 == datetime.time(19, 40)
+
+
+def test_time_note_with_typo_dot():
+    """В источнике бывает «с 18.05 до .19:30» — лишняя точка перед часом."""
+    data = _make_xlsx(
+        rows=[
+            (5, "ВТОРНИК", 5, {3: "5-я пара - Информатика\nЕвсеев Т.А."}),
+            (6, None, None, {3: "с 18.05 до .19:30 - Охрана труда\nБалакшина О.П."}),
+        ],
+        groups={3: "СМф-24"},
+    )
+    lessons = parse_ochoe(data)
+    odd = next(x for x in lessons if x.parity == PARITY_ODD)
+    assert odd.time_note == "с 18.05 до 19:30"
+    assert odd.subject == "Охрана труда"
