@@ -20,12 +20,14 @@ from common.schedule import (
     format_day,
     format_no_lessons,
     format_not_published,
-    format_site_down,
+    format_stale_warning,
     format_teacher_results,
+    format_unverified,
     format_week,
 )
 from infrastructure.database.models import User
 from infrastructure.database.repo.requests import RequestsRepo
+from tgbot.services import source_state
 
 user_router = Router()
 
@@ -346,26 +348,40 @@ async def _day_text(repo: RequestsRepo, user: User, date: datetime.date) -> str:
     bell, lunches = await repo.bell_schedule.get_context()
     gcg = await _course_group_map(repo, user)
     lessons = await _user_lessons(repo, user, date)
+
+    # Замены могли не доехать, если сайт лежит. Постоянное расписание при
+    # этом верное, поэтому не скрываем его — только предупреждаем.
+    stale = await source_state.is_stale(repo)
+    last_ok = await source_state.last_ok(repo) if stale else None
+
     if lessons:
         text = _fmt(user, date, lessons, bell, lunches, gcg)
+        if stale:
+            text += format_stale_warning(last_ok)
     else:
         note = None
         if not _is_teacher(user):
             note = await repo.no_lessons.get_note(date, user.group)
         published = await repo.schedule_files.get_hash(date) is not None
-        if note or published:
+        if note:
             text = format_no_lessons(date, note)
+        elif published:
+            # День был опубликован — значит на момент публикации пар не было.
+            text = format_no_lessons(date)
+            if stale:
+                text += format_stale_warning(last_ok)
+        elif stale:
+            # Ни пары, ни публикации, ни связи с сайтом — утверждать
+            # «занятий нет» нельзя.
+            text = format_unverified(date, last_ok)
         else:
             s = await repo.settings.get_all()
-            if s.get("site_down") == "1":
-                text = format_site_down(date)
+            deadline = int(s.get("deadline_hour", 20) or 20)
+            now = datetime.datetime.now()
+            if 0 <= deadline <= 23 and now.hour >= deadline:
+                text = format_no_lessons(date)
             else:
-                deadline = int(s.get("deadline_hour", 20) or 20)
-                now = datetime.datetime.now()
-                if 0 <= deadline <= 23 and now.hour >= deadline:
-                    text = format_no_lessons(date)
-                else:
-                    text = format_not_published(date)
+                text = format_not_published(date)
         for i in range(1, 8):
             d = date + datetime.timedelta(days=i)
             nxt = await _user_lessons(repo, user, d)

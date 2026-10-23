@@ -15,7 +15,7 @@ from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, Inli
 from common.schedule import course_group_from_course, format_bell, format_day
 from config import Config
 from infrastructure.database.repo.requests import RequestsRepo
-from tgbot.services import photos
+from tgbot.services import photos, source_state
 from tgbot.services.broadcaster import broadcast_many
 from tgbot.services.poller import notify_new_schedule
 
@@ -139,6 +139,15 @@ async def _build_stats(repo: RequestsRepo) -> tuple[str, InlineKeyboardMarkup]:
     lines.append("")
     lines.append("📚 <b>Расписание в базе</b>")
     lines.append(f"Занятий: {lessons} · Дней: {days} · Групп: {groups}")
+
+    # Состояние источника: без него владелец не узнает, что замены
+    # перестали приезжать, пока студенты не начнут жаловаться.
+    ok_at = await source_state.last_ok(repo)
+    if await source_state.is_stale(repo):
+        when = f"с {ok_at:%d.%m %H:%M}" if ok_at else "никогда"
+        lines.append(f"⚠️ <b>ЭИОС не отвечает</b> (успех: {when})")
+    elif ok_at:
+        lines.append(f"✅ ЭИОС: {ok_at:%d.%m %H:%M}")
     lines.append("")
     lines.append("👥 <b>По группам</b> (нажми, чтобы раскрыть)")
 

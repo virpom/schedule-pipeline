@@ -235,30 +235,25 @@ async def sync_once(
     """
     changed = {"ochoe": False, "zameny": False, "bells": False}
     links = await _fetch_links(session, config)
+    failed: list[str] = []
+
+    # Каждый файл обновляем независимо: если листок замен вернул 404,
+    # звонки всё равно должны обновиться. Иначе один битый файл из трёх
+    # останавливает весь проход и сайт выглядит «лежащим», хотя он жив.
+    async def _step(name: str, coro) -> None:
+        try:
+            await coro
+        except Exception as exc:  # noqa: BLE001
+            log.warning("не удалось обновить %s: %s", name, exc)
+            failed.append(name)
 
     # --- базовое расписание ---
     if links.ochoe:
-        data = await _download(session, links.ochoe)
-        digest = _sha(data)
-        if force or await repo.settings.get(_HASH_KEY.format(kind="ochoe")) != digest:
-            lessons = await asyncio.to_thread(eios.parse_ochoe, data)
-            count = await replace_base_lessons(repo, lessons)
-            await repo.settings.set(_HASH_KEY.format(kind="ochoe"), digest)
-            log.info("базовое расписание обновлено: %d пар", count)
-            changed["ochoe"] = True
+        await _step("очное расписание", _sync_ochoe(session, repo, links.ochoe, force, changed))
 
     # --- замены ---
     if links.zameny:
-        data = await _download(session, links.zameny)
-        digest = _sha(data)
-        if force or await repo.settings.get(_HASH_KEY.format(kind="zameny")) != digest:
-            subs = await asyncio.to_thread(eios.parse_substitutions, data)
-            known = await repo.base_lessons.get_groups()
-            subs = _resolve_groups(subs, known)
-            count = await replace_substitutions(repo, subs)
-            await repo.settings.set(_HASH_KEY.format(kind="zameny"), digest)
-            log.info("замены обновлены: %d записей", count)
-            changed["zameny"] = True
+        await _step("замены", _sync_zameny(session, repo, links.zameny, force, changed))
 
     # --- звонки ---
     slots = []
@@ -281,7 +276,33 @@ async def sync_once(
             log.info("звонки обновлены: %d слотов", count)
             changed["bells"] = True
 
+    if failed:
+        changed["failed"] = failed
     return changed
+
+
+async def _sync_ochoe(session, repo, url: str, force: bool, changed: dict) -> None:
+    data = await _download(session, url)
+    digest = _sha(data)
+    if force or await repo.settings.get(_HASH_KEY.format(kind="ochoe")) != digest:
+        lessons = await asyncio.to_thread(eios.parse_ochoe, data)
+        count = await replace_base_lessons(repo, lessons)
+        await repo.settings.set(_HASH_KEY.format(kind="ochoe"), digest)
+        log.info("базовое расписание обновлено: %d пар", count)
+        changed["ochoe"] = True
+
+
+async def _sync_zameny(session, repo, url: str, force: bool, changed: dict) -> None:
+    data = await _download(session, url)
+    digest = _sha(data)
+    if force or await repo.settings.get(_HASH_KEY.format(kind="zameny")) != digest:
+        subs = await asyncio.to_thread(eios.parse_substitutions, data)
+        known = await repo.base_lessons.get_groups()
+        subs = _resolve_groups(subs, known)
+        count = await replace_substitutions(repo, subs)
+        await repo.settings.set(_HASH_KEY.format(kind="zameny"), digest)
+        log.info("замены обновлены: %d записей", count)
+        changed["zameny"] = True
 
 
 # --- материализация слоёв в college_lesson ----------------------------------

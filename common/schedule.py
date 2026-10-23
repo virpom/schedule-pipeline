@@ -185,8 +185,29 @@ def format_no_lessons(date: datetime.date, note: str | None = None) -> str:
     return empty_day(date, note)
 
 
-def format_site_down(date: datetime.date) -> str:
-    return f"{day_header(date)}\n\n⚠️ Сайт колледжа недоступен — расписание проверить не удалось. Попробуй позже."
+def format_stale_warning(when: datetime.datetime | None) -> str:
+    """Предупреждение, что замены давно не проверялись.
+
+    Не заменяет расписание, а дописывается к нему: постоянное расписание
+    у нас есть и оно верное, но замены с сайта могли появиться, а мы о них
+    не знаем. Молчать об этом нельзя — студент придёт не туда.
+    """
+    if when is None:
+        return ("\n\n⚠️ <i>Расписание с сайта ни разу не загрузилось. "
+                "Замены не проверены.</i>")
+    return (f"\n\n⚠️ <i>Сайт колледжа не отвечает с {when:%d.%m %H:%M}. "
+            f"Замены с тех пор не проверены — они могли появиться.</i>")
+
+
+def format_unverified(date: datetime.date, when: datetime.datetime | None) -> str:
+    """Пар нет, но и сайт недоступен — нельзя утверждать, что их нет.
+
+    Отличается от format_no_lessons принципиально: там мы уверены, что
+    занятий нет, здесь — просто не знаем.
+    """
+    return (f"{day_header(date)}\n\n"
+            f"Занятий нет по постоянному расписанию 📋"
+            f"{format_stale_warning(when)}")
 
 
 def format_week(entries, bell, lunches, detail: str = DETAIL_BRIEF, meta: str = "teacher", show_rov: bool = True, group_course_group: dict[str, str] | None = None) -> str:

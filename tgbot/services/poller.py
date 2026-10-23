@@ -8,7 +8,7 @@ from aiohttp import ClientSession
 from common.schedule import course_group_from_course, format_day, format_no_lessons
 from config import Config
 from infrastructure.database.repo.requests import RequestsRepo
-from tgbot.services import photos, sync_eios
+from tgbot.services import photos, source_state, sync_eios
 from tgbot.services.broadcaster import broadcast_schedule
 from tgbot.services.notify_edits import snapshot_past_days
 
@@ -29,19 +29,27 @@ async def poll_once(session_pool, config: Config) -> list[tuple[datetime.date, b
                 repo = RequestsRepo(db)
                 result = await sync_eios.sync_once(session, repo, config)
         except Exception as e:
-            async with session_pool() as db:
-                await RequestsRepo(db).settings.set("site_down", "1")
+            # Сайт недоступен целиком. Данные в слоях не тронуты — sync_once
+            # бросает исключение до записи, — поэтому расписание продолжает
+            # работать на последних известных данных. Просто не отмечаем
+            # успех: is_stale() покажет, что свежесть под вопросом.
             logging.warning("ЭИОС недоступен: %s", e)
-            return changes
+            result = None
 
-        async with session_pool() as db:
-            await RequestsRepo(db).settings.set("site_down", "0")
+        # Успехом считаем только проход без единой ошибки. Если не доехали
+        # замены — это именно то, о чём надо предупредить: постоянное
+        # расписание верно, а изменений на день мы не знаем.
+        if result is not None and not result.get("failed"):
+            async with session_pool() as db:
+                await source_state.mark_ok(RequestsRepo(db))
+        elif result and result.get("failed"):
+            logging.warning("частичный сбой синхронизации: %s", result["failed"])
 
-        # Материализуем ВСЕГДА, даже если файлы не менялись: окно дат должно
-        # сдвигаться вперёд каждый день, иначе через две недели расписание
-        # «кончится» — файлы те же, а новых дат в college_lesson нет.
-        # Ошибку не пробрасываем: иначе цикл уйдёт в ретрай каждые 10 секунд
-        # и будет заново качать файлы.
+        # Материализуем ВСЕГДА, даже при сбое сайта и даже если файлы не
+        # менялись: окно дат должно сдвигаться вперёд каждый день, иначе
+        # через две недели расписание «кончится» — файлы те же, а новых
+        # дат в college_lesson нет. Слои при сбое целы, так что
+        # материализация соберёт те же данные на новые даты.
         async with session_pool() as db:
             repo = RequestsRepo(db)
             had_lessons = await repo.college_lessons.count_lessons()
@@ -51,7 +59,7 @@ async def poll_once(session_pool, config: Config) -> list[tuple[datetime.date, b
                 logging.exception("материализация не удалась")
 
         # Рассылаем, только если источник реально изменился.
-        if not (result["ochoe"] or result["zameny"]):
+        if result is None or not (result["ochoe"] or result["zameny"]):
             return changes
 
         today = datetime.date.today()
