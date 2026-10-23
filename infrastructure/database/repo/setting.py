@@ -23,6 +23,13 @@ class SettingRepo(BaseRepo):
         stored = {s.key: s.value for s in result.scalars().all()}
         return {**DEFAULTS, **stored}
 
+    async def get(self, key: str) -> str | None:
+        """Одно сохранённое значение; None, если ключа ещё нет."""
+        result = await self.session.execute(
+            select(Setting.value).where(Setting.key == key)
+        )
+        return result.scalar_one_or_none()
+
     async def set(self, key: str, value: str) -> None:
         await self.session.execute(
             insert(Setting)

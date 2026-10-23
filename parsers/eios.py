@@ -174,12 +174,35 @@ def _lines(value: object) -> list[str]:
     return [re.sub(r"\s+", " ", part).strip() for part in str(value).split("\n") if part.strip()]
 
 
+def clean_teacher(name: str) -> str:
+    """Убрать опечатки в ФИО: ``Балакшина О.П..`` → ``Балакшина О.П.``.
+
+    В источнике встречаются лишние точки (``Городиский В..``,
+    ``Кудрявцев С.И..``), а также ФИО без точки после инициала
+    (``Борисенко А.Д``) — приводим к единому виду.
+    """
+    name = re.sub(r"\s+", " ", (name or "")).strip()
+    if not name:
+        return ""
+    # Инициалы: одна заглавная буква с точкой, допускаем опечатки.
+    m = re.match(r"^(.+?)\s+([А-ЯЁ])\.?\s*([А-ЯЁ])?\.*$", name)
+    if m:
+        surname, first, second = m.group(1), m.group(2), m.group(3)
+        return f"{surname} {first}.{second + '.' if second else ''}"
+    return name
+
+
 def split_subject_teacher(value: object) -> tuple[str, str]:
     """Разделить содержимое ячейки на предмет и преподавателя.
 
     Преподаватель — последняя строка (или хвост единственной строки).
     Предмет может занимать несколько строк.
     """
+    subject, teacher = _split_subject_teacher(value)
+    return subject, clean_teacher(teacher)
+
+
+def _split_subject_teacher(value: object) -> tuple[str, str]:
     lines = _lines(value)
     if not lines:
         return "", ""
@@ -443,7 +466,7 @@ def split_substitution_text(text: str) -> tuple[str, str, str]:
 
     parts = _SUBJECT_TEACHER_SEP.split(text)
     if len(parts) >= 2 and _TEACHER_RE.match(parts[-1]):
-        return " – ".join(parts[:-1]).strip(), parts[-1].strip(), room
+        return " – ".join(parts[:-1]).strip(), clean_teacher(parts[-1]), room
     return text, "", room
 
 

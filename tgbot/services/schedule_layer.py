@@ -42,9 +42,11 @@ async def get_day_slots(repo: RequestsRepo, group: str, date: datetime.date,
 
     sub_by_para = {s.para: s for s in subs}
     slots: list[Slot] = []
+    used: set[int] = set()
 
     for lesson in base:
         sub = sub_by_para.get(lesson.para)
+        used.add(lesson.para)
         if sub and sub.action == SUB_CANCEL:
             continue
         if sub and sub.action in ("replace", "add"):
@@ -53,8 +55,10 @@ async def get_day_slots(repo: RequestsRepo, group: str, date: datetime.date,
         else:
             slots.append(Slot(lesson.para, lesson.subject, lesson.teacher, lesson.room))
 
+    # «Добавить» на пару, которая уже есть в базе, — это фактически замена:
+    # второй слот на тот же номер пары создавать нельзя.
     for para, sub in sorted(sub_by_para.items()):
-        if sub.action == "add":
+        if sub.action == "add" and para not in used:
             slots.append(Slot(para, sub.subject, sub.teacher, sub.room,
                               changed=True, action=sub.action, comment=sub.comment))
 

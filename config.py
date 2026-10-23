@@ -41,9 +41,9 @@ def load_config(path: str = ".env") -> Config:
         db=Db(path=env.str("SQLITE_PATH", "database.db")),
         schedule_url=env.str(
             "SCHEDULE_URL",
-            "https://polaruniversity.ru/obuchayushchimsya/raspisanie-zanyatiy/",
+            "https://eios.norvuz.ru/mod/page/view.php?id=49960",
         ),
-        base_url=env.str("BASE_URL", "https://polaruniversity.ru"),
+        base_url=env.str("BASE_URL", "https://norvuz.ru"),
         poll_interval=env.int("POLL_INTERVAL", 1800),
         mode=env.str("MODE", "daily"),
         notify_rate=env.float("NOTIFY_RATE", 20.0),

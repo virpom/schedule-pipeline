@@ -9,8 +9,7 @@ from aiohttp import ClientSession
 from common.schedule import course_group_from_course, format_day, format_no_lessons
 from config import Config
 from infrastructure.database.repo.requests import RequestsRepo
-from parsers import polar
-from tgbot.services import photos
+from tgbot.services import photos, sync_eios
 from tgbot.services.broadcaster import broadcast_schedule
 from tgbot.services.notify_edits import snapshot_past_days
 
@@ -19,52 +18,42 @@ _failed: dict[str, float] = {}
 
 
 async def poll_once(session_pool, config: Config, failed_cooldown: int = 1800) -> list[tuple[datetime.date, bool]]:
+    """Синхронизировать расписание СПО из ЭИОС.
+
+    Скачивает файлы колледжа, раскладывает их в слои ``base_lesson`` +
+    ``substitution`` и материализует ближайшие дни в ``college_lesson``,
+    откуда их читают все остальные части бота.
+
+    Возвращает список изменившихся дней (для рассылки): ``(дата, новое_ли)``.
+    """
     changes: list[tuple[datetime.date, bool]] = []
-    today = datetime.date.today()
     async with ClientSession() as session:
         try:
-            html = await polar.fetch_html(session, config.schedule_url)
+            async with session_pool() as db:
+                repo = RequestsRepo(db)
+                result = await sync_eios.sync_once(session, repo, config)
         except Exception as e:
             async with session_pool() as db:
-                repo = RequestsRepo(db)
-                await repo.settings.set("site_down", "1")
-            logging.warning("site unreachable: %s", e)
+                await RequestsRepo(db).settings.set("site_down", "1")
+            logging.warning("ЭИОС недоступен: %s", e)
             return changes
+
+        async with session_pool() as db:
+            await RequestsRepo(db).settings.set("site_down", "0")
+
+        if not (result["ochoe"] or result["zameny"]):
+            return changes
+
         async with session_pool() as db:
             repo = RequestsRepo(db)
-            await repo.settings.set("site_down", "0")
-        links = polar.extract_daily_links(html, config.base_url)
-        now = time.monotonic()
-        for date, url in links:
-            if date < today:
-                continue
-            if url in _failed and now - _failed[url] < failed_cooldown:
-                continue
-            try:
-                async with session.get(url, raise_for_status=True) as resp:
-                    data = await resp.read()
-            except Exception as e:
-                _failed[url] = time.monotonic()
-                logging.warning("download failed %s: %s (cooldown %ss)", url, e, failed_cooldown)
-                continue
-            _failed.pop(url, None)
+            had_lessons = await repo.college_lessons.count_lessons()
+            await sync_eios.materialize(repo)
 
-            digest = hashlib.md5(data).hexdigest()
-            async with session_pool() as db:
-                repo = RequestsRepo(db)
-                prev = await repo.schedule_files.get_hash(date)
-                if prev == digest:
-                    continue
-
-                lessons, no_lessons = polar.parse_docx(data, date)
-                for lesson in lessons:
-                    lesson["source_url"] = url
-                await repo.college_lessons.replace_date(date, lessons)
-                await repo.no_lessons.replace_date(date, no_lessons)
-                await repo.schedule_files.set_hash(date, digest)
-                logging.info("parsed %s (%s) -> %d lessons, %d no-lessons", url, date, len(lessons), len(no_lessons))
-
-                changes.append((date, prev is None))
+        # Рассылаем про ближайшие дни, где что-то есть.
+        today = datetime.date.today()
+        for offset in range(3):
+            changes.append((today + datetime.timedelta(days=offset),
+                            had_lessons == 0 and offset == 0))
     return changes
 
 

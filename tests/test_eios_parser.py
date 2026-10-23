@@ -108,13 +108,15 @@ def test_subject_spanning_several_lines():
 
 
 def test_teacher_without_final_dot():
-    assert split_subject_teacher("Геология\nБорисенко А.Д") == ("Геология", "Борисенко А.Д")
+    # ФИО без точки после инициала нормализуется до единого вида.
+    assert split_subject_teacher("Геология\nБорисенко А.Д") == ("Геология", "Борисенко А.Д.")
 
 
 def test_teacher_with_double_dot():
     subject, teacher = split_subject_teacher("Общая энергетика\nГородиский В..")
     assert subject == "Общая энергетика"
-    assert teacher == "Городиский В.."
+    # Двойная точка в источнике — опечатка, нормализуем.
+    assert teacher == "Городиский В."
 
 
 def test_double_surname_teacher():
@@ -311,7 +313,8 @@ def test_teacher_with_extra_dot_in_substitution():
     """В листке встречается «Балакшина О.П..» — лишняя точка не должна ломать разбор."""
     subject, teacher, room = split_substitution_text("Охрана труда – Балакшина О.П.., ауд. 223")
     assert subject == "Охрана труда"
-    assert teacher == "Балакшина О.П.."
+    # «Балакшина О.П..» в источнике — лишняя точка, нормализуем.
+    assert teacher == "Балакшина О.П."
     assert room == "ауд. 223"
 
 

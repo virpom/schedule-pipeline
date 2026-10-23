@@ -111,3 +111,28 @@ if __name__ == "__main__":
             fn()
             print(f"  ok  {name}")
     print("OK")
+
+
+def test_add_over_existing_base_does_not_duplicate():
+    """«Добавить» на пару, которая уже есть в базе, не должен давать два слота.
+
+    Так бывает, когда замена помечена как add, хотя базовая пара существует
+    (например, ПРк-25 в субботу).
+    """
+    repo = FakeRepo([lesson(1, "Геология")], [sub(1, WED_ODD, SUB_ADD, "Электротехника")])
+    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD))
+    assert len(slots) == 1
+    assert slots[0].para == 1
+    assert slots[0].subject == "Электротехника"
+    assert slots[0].changed is True
+
+
+def test_no_duplicate_paras_ever():
+    """Номер пары в итоговом дне не должен повторяться ни при каких заменах."""
+    repo = FakeRepo(
+        [lesson(1, "А"), lesson(2, "Б"), lesson(3, "В")],
+        [sub(1, WED_ODD, SUB_ADD, "X"), sub(2, WED_ODD, SUB_REPLACE, "Y"),
+         sub(3, WED_ODD, SUB_CANCEL)],
+    )
+    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD))
+    assert len(slots) == len({s.para for s in slots})
