@@ -23,8 +23,7 @@ class Config:
     db: Db
     schedule_url: str
     base_url: str
-    poll_interval: int
-    mode: str  # daily | permanent
+    poll_interval: int  # стартовое значение; дальше живёт в БД (команда /setpoll)
     notify_rate: float  # messages per second for broadcasts
     photos_path: str  # dir with per-weekday photo folders
 
@@ -44,8 +43,7 @@ def load_config(path: str = ".env") -> Config:
             "https://eios.norvuz.ru/mod/page/view.php?id=49960",
         ),
         base_url=env.str("BASE_URL", "https://norvuz.ru"),
-        poll_interval=env.int("POLL_INTERVAL", 1800),
-        mode=env.str("MODE", "daily"),
+        poll_interval=env.int("POLL_INTERVAL", 300),
         notify_rate=env.float("NOTIFY_RATE", 20.0),
         photos_path=env.str("PHOTOS_PATH", "/data/photos"),
     )
