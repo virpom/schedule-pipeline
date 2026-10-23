@@ -9,20 +9,26 @@ from infrastructure.database.repo.base import BaseRepo
 
 
 class CollegeLessonRepo(BaseRepo):
-    async def bulk_upsert(self, lessons: list[dict]) -> None:
+    async def bulk_insert(self, lessons: list[dict]) -> None:
+        """Вставить пары как есть.
+
+        Без ``ON CONFLICT``: у ``college_lesson`` нет уникального индекса
+        (см. модель), а согласованность держит ``replace_date()`` — он
+        сначала удаляет все пары за дату.
+        """
         if not lessons:
             return
-        await self.session.execute(
-            insert(CollegeLesson)
-            .values(lessons)
-            .on_conflict_do_nothing(index_elements=["date", "group", "para"])
-        )
+        await self.session.execute(insert(CollegeLesson).values(lessons))
         await self.session.commit()
+
+    async def bulk_upsert(self, lessons: list[dict]) -> None:
+        """Устаревшее имя, оставлено для совместимости."""
+        await self.bulk_insert(lessons)
 
     async def replace_date(self, date: datetime.date, lessons: list[dict]) -> None:
         await self.session.execute(delete(CollegeLesson).where(CollegeLesson.date == date))
         await self.session.commit()
-        await self.bulk_upsert(lessons)
+        await self.bulk_insert(lessons)
 
     async def get_for_group_date(
             self, group: str, date: datetime.date

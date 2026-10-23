@@ -41,15 +41,18 @@ async def poll_once(session_pool, config: Config, failed_cooldown: int = 1800) -
         async with session_pool() as db:
             await RequestsRepo(db).settings.set("site_down", "0")
 
-        if not (result["ochoe"] or result["zameny"]):
-            return changes
-
+        # Материализуем ВСЕГДА, даже если файлы не менялись: окно дат должно
+        # сдвигаться вперёд каждый день, иначе через две недели расписание
+        # «кончится» — файлы те же, а новых дат в college_lesson нет.
         async with session_pool() as db:
             repo = RequestsRepo(db)
             had_lessons = await repo.college_lessons.count_lessons()
             await sync_eios.materialize(repo)
 
-        # Рассылаем про ближайшие дни, где что-то есть.
+        # Рассылаем, только если источник реально изменился.
+        if not (result["ochoe"] or result["zameny"]):
+            return changes
+
         today = datetime.date.today()
         for offset in range(3):
             changes.append((today + datetime.timedelta(days=offset),

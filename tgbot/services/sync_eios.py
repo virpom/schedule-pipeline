@@ -341,20 +341,23 @@ async def materialize(repo: RequestsRepo, days: int = MATERIALIZE_DAYS) -> int:
 
         await repo.college_lessons.replace_date(date, rows)
 
-        # Вернуть ручные правки, которые не перекрыты.
-        kept = [r for r in manual if not any(
-            x["group"] == r.group and x["para"] == r.para for x in rows
-        )]
-        if kept:
-            await repo.college_lessons.bulk_upsert([
-                {
-                    "date": r.date, "group": r.group, "para": r.para,
-                    "para_end": r.para_end, "subject": r.subject,
-                    "teacher": r.teacher, "room": r.room,
-                    "source_url": r.source_url, "source": r.source,
-                }
-                for r in kept
-            ])
+        # Ручные правки старосты важнее данных с сайта: кладём их поверх,
+        # вытесняя сгенерированную пару на том же слоте.
+        if manual:
+            manual_keys = {(r.group, r.para) for r in manual}
+            await repo.college_lessons.replace_date(
+                date,
+                [x for x in rows if (x["group"], x["para"]) not in manual_keys]
+                + [
+                    {
+                        "date": r.date, "group": r.group, "para": r.para,
+                        "para_end": r.para_end, "subject": r.subject,
+                        "teacher": r.teacher, "room": r.room,
+                        "source_url": r.source_url, "source": r.source,
+                    }
+                    for r in manual
+                ],
+            )
         written += 1
 
     log.info("материализовано %d дней в college_lesson", written)

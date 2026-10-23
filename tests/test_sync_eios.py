@@ -215,3 +215,94 @@ def test_base_plus_substitution_end_to_end(tmp_path):
         assert slots[1].room == "ауд. 7"
 
     _run(_with_repo(tmp_path, body))
+
+
+# --- окно дат должно сдвигаться ---------------------------------------------
+
+def test_materialize_writes_all_days(tmp_path):
+    """Материализация должна заполнять всё окно, а не только «сегодня».
+
+    Если её вызывать только при изменении файлов, окно не сдвигается вперёд
+    и через две недели расписание «кончается».
+    """
+    async def body(repo):
+        await sync_eios.replace_base_lessons(repo, [
+            ParsedLesson("ДП-26", 1, 1, 1, "Математика", "Иванов И.И."),
+        ])
+        days = await sync_eios.materialize(repo, days=14)
+        assert days == 14
+
+        import datetime as dt
+        today = dt.date.today()
+        for offset in (0, 7, 13):
+            date = today + dt.timedelta(days=offset)
+            rows = await repo.college_lessons.get_for_group_date("ДП-26", date)
+            # Понедельник есть только раз в неделю, поэтому проверяем
+            # не наличие пар, а что дата вообще обработана.
+            assert date.isoweekday() != 1 or rows
+
+        # Дальше окна данных быть не должно.
+        far = today + dt.timedelta(days=20)
+        assert await repo.college_lessons.get_for_group_date("ДП-26", far) == []
+
+    _run(_with_repo(tmp_path, body))
+
+
+def test_materialize_applies_substitutions(tmp_path):
+    """В материализованные дни попадают замены, а не только база."""
+    async def body(repo):
+        import datetime as dt
+        today = dt.date.today()
+        # Берём ближайший понедельник в пределах окна.
+        offset = (7 - today.weekday()) % 7
+        date = today + dt.timedelta(days=offset)
+
+        await sync_eios.replace_base_lessons(repo, [
+            ParsedLesson("ДП-26", 1, 1, 1, "Математика", "Иванов И.И."),
+            ParsedLesson("ДП-26", 1, 1, 2, "Физика", "Петров П.П."),
+        ])
+        await sync_eios.replace_substitutions(repo, [
+            ParsedSub(date, "ДП-26", 2, "replace", "История", "Новый Н.Н.", "ауд. 9"),
+        ])
+        await sync_eios.materialize(repo, days=14)
+
+        rows = await repo.college_lessons.get_for_group_date("ДП-26", date)
+        by_para = {r.para: r for r in rows}
+        assert by_para[1].subject == "Математика"
+        assert by_para[2].subject == "История"
+        assert by_para[2].room == "ауд. 9"
+
+    _run(_with_repo(tmp_path, body))
+
+
+def test_materialize_keeps_manual_edits(tmp_path):
+    """Ручная правка старосты переживает повторную материализацию.
+
+    Раньше она отбрасывалась, если на том же слоте была пара из базы.
+    """
+    async def body(repo):
+        import datetime as dt
+        today = dt.date.today()
+        offset = (7 - today.weekday()) % 7
+        date = today + dt.timedelta(days=offset)
+
+        await sync_eios.replace_base_lessons(repo, [
+            ParsedLesson("ДП-26", 1, 1, 1, "Математика", "Иванов И.И."),
+        ])
+        await repo.college_lessons.bulk_insert([{
+            "date": date, "group": "ДП-26", "para": 1, "para_end": 1,
+            "subject": "РУЧНАЯ", "teacher": "Староста С.С.", "room": "",
+            "source_url": "", "source": "manual",
+        }])
+
+        # Дважды: правка не должна «съедаться» ни первым, ни вторым прогоном.
+        for _ in range(2):
+            await sync_eios.materialize(repo, days=14)
+            rows = await repo.college_lessons.get_for_group_date("ДП-26", date)
+            manual = [r for r in rows if r.source == "manual"]
+            assert len(manual) == 1
+            assert manual[0].subject == "РУЧНАЯ"
+            # На слоте 1 не должно быть двух пар.
+            assert [r.para for r in rows].count(1) == 1
+
+    _run(_with_repo(tmp_path, body))
