@@ -35,10 +35,9 @@ log = logging.getLogger(__name__)
 SOURCE_SITE = "site"
 _HASH_KEY = "eios_hash_{kind}"
 
-# Колледж считает чётность иначе, чем ISO: 26.10.2026 — это ISO-неделя 44
-# (чётная), а у колледжа она **нечётная**. Проверено на двух датах,
-# см. docs/SOURCE-EIOS.md.
-PARITY_OFFSET = 1
+# Сдвиг чётности колледжа относительно ISO. Живёт в schedule_layer, чтобы
+# все вызовы get_day_slots() по умолчанию видели ту же неделю, что и студент.
+from tgbot.services.schedule_layer import PARITY_OFFSET  # noqa: E402
 
 
 def _sha(data: bytes) -> str:

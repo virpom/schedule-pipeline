@@ -3,7 +3,7 @@ import datetime
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert
 
-from common.schedule import PARITY_ANY, week_parity
+from common.schedule import PARITY_ANY
 from infrastructure.database.models import BaseLesson
 from infrastructure.database.repo.base import BaseRepo
 

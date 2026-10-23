@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from common.schedule import PARITY_ANY, PARITY_EVEN, PARITY_ODD
-from infrastructure.database.models import Base, BaseLesson, Substitution
+from infrastructure.database.models import Base
 from infrastructure.database.repo.requests import RequestsRepo
 from parsers.eios import PARITY_BOTH, PARITY_EVEN as PARSER_EVEN, PARITY_ODD as PARSER_ODD
 from tgbot.services import sync_eios

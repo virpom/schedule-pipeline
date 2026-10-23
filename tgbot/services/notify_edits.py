@@ -9,7 +9,7 @@ import logging
 
 from aiogram import Bot
 
-from common.schedule import WEEKDAY_FULL, week_parity
+from common.schedule import WEEKDAY_FULL
 from infrastructure.database.repo.requests import RequestsRepo
 from tgbot.services.broadcaster import broadcast_many
 from tgbot.services.schedule_layer import Slot, get_day_slots

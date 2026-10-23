@@ -8,6 +8,12 @@ import datetime
 from common.schedule import PARITY_ANY, SUB_CANCEL, week_parity
 from infrastructure.database.repo.requests import RequestsRepo
 
+# Колледж считает чётность иначе, чем ISO: 26.10.2026 — это ISO-неделя 44
+# (чётная), а у колледжа она нечётная. Сдвиг вынесен сюда как значение по
+# умолчанию, чтобы его не забыли передать: раньше хендлеры старосты вызывали
+# get_day_slots() без аргумента и показывали не ту неделю.
+PARITY_OFFSET = 1
+
 
 class Slot:
     """Итоговая пара дня — то, что видит студент."""
@@ -29,8 +35,11 @@ class Slot:
 
 
 async def get_day_slots(repo: RequestsRepo, group: str, date: datetime.date,
-                        parity_offset: int = 0) -> list[Slot]:
-    """Итоговое расписание группы на дату."""
+                        parity_offset: int = PARITY_OFFSET) -> list[Slot]:
+    """Итоговое расписание группы на дату.
+
+    parity_offset по умолчанию — сдвиг колледжа, а не ISO.
+    """
     parity = week_parity(date, parity_offset)
     base = await repo.base_lessons.get_day(group, date.isoweekday(), parity)
     subs = await repo.substitutions.get_for_date(group, date)

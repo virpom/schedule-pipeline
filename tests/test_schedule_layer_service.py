@@ -2,7 +2,7 @@
 import asyncio
 import datetime
 
-from common.schedule import PARITY_EVEN, PARITY_ODD, SUB_ADD, SUB_CANCEL, SUB_REPLACE
+from common.schedule import PARITY_ODD, SUB_ADD, SUB_CANCEL, SUB_REPLACE
 from tgbot.services.schedule_layer import get_day_slots
 
 
@@ -51,7 +51,7 @@ WED_EVEN = datetime.date(2026, 10, 14)   # среда, неделя 42 (чётн
 
 def test_base_only():
     repo = FakeRepo([lesson(1, "Математика"), lesson(2, "Физика")])
-    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD))
+    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD, 0))
     assert [(s.para, s.subject) for s in slots] == [(1, "Математика"), (2, "Физика")]
     assert all(not s.changed for s in slots)
 
@@ -59,14 +59,14 @@ def test_base_only():
 def test_parity_filters_out_other_week():
     """Нечётная база не должна показываться в чётную неделю."""
     repo = FakeRepo([lesson(1, "Математика", parity=PARITY_ODD)])
-    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_EVEN))
+    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_EVEN, 0))
     assert slots == []
 
 
 def test_replace_marks_changed():
     repo = FakeRepo([lesson(1, "Математика")],
                     [sub(1, WED_ODD, SUB_REPLACE, "Химия", "Сидоров С.С.")])
-    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD))
+    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD, 0))
     assert len(slots) == 1
     assert slots[0].subject == "Химия"
     assert slots[0].changed is True
@@ -76,32 +76,32 @@ def test_replace_marks_changed():
 def test_cancel_removes_base_lesson():
     repo = FakeRepo([lesson(1, "Математика"), lesson(2, "Физика")],
                     [sub(1, WED_ODD, SUB_CANCEL)])
-    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD))
+    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD, 0))
     assert [(s.para, s.subject) for s in slots] == [(2, "Физика")]
 
 
 def test_add_inserts_without_base():
     repo = FakeRepo([], [sub(3, WED_ODD, SUB_ADD, "История")])
-    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD))
+    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD, 0))
     assert [(s.para, s.subject, s.changed) for s in slots] == [(3, "История", True)]
 
 
 def test_cancel_all_is_empty_day():
     repo = FakeRepo([lesson(1, "Математика")], [sub(1, WED_ODD, SUB_CANCEL)])
-    assert asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD)) == []
+    assert asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD, 0)) == []
 
 
 def test_slots_sorted_by_para():
     repo = FakeRepo([lesson(3, "Третья"), lesson(1, "Первая")],
                     [sub(2, WED_ODD, SUB_ADD, "Вторая")])
-    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD))
+    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD, 0))
     assert [s.para for s in slots] == [1, 2, 3]
 
 
 def test_other_date_substitution_ignored():
     other = datetime.date(2026, 10, 22)
     repo = FakeRepo([lesson(1, "Математика")], [sub(1, other, SUB_REPLACE, "Химия")])
-    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD))
+    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD, 0))
     assert slots[0].subject == "Математика"
 
 
@@ -120,7 +120,7 @@ def test_add_over_existing_base_does_not_duplicate():
     (например, ПРк-25 в субботу).
     """
     repo = FakeRepo([lesson(1, "Геология")], [sub(1, WED_ODD, SUB_ADD, "Электротехника")])
-    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD))
+    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD, 0))
     assert len(slots) == 1
     assert slots[0].para == 1
     assert slots[0].subject == "Электротехника"
@@ -134,5 +134,22 @@ def test_no_duplicate_paras_ever():
         [sub(1, WED_ODD, SUB_ADD, "X"), sub(2, WED_ODD, SUB_REPLACE, "Y"),
          sub(3, WED_ODD, SUB_CANCEL)],
     )
-    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD))
+    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD, 0))
     assert len(slots) == len({s.para for s in slots})
+
+
+def test_default_offset_is_college_parity():
+    """По умолчанию берётся чётность колледжа, а не ISO.
+
+    Регрессия: хендлеры старосты вызывали get_day_slots() без аргумента и
+    показывали не ту неделю — на 26.10.2026 (нечётная у колледжа) пропадала
+    пара, стоящая только на нечётной неделе.
+    """
+    from tgbot.services.schedule_layer import PARITY_OFFSET
+
+    assert PARITY_OFFSET == 1
+    # 26.10.2026 — ISO-неделя 44 (чётная), у колледжа нечётная.
+    d = datetime.date(2026, 10, 26)
+    repo = FakeRepo([lesson(1, "Только нечётная", weekday=1, parity=PARITY_ODD)])
+    slots = asyncio.run(get_day_slots(repo, "ДП-26", d))
+    assert [s.para for s in slots] == [1], "пара нечётной недели должна быть видна"

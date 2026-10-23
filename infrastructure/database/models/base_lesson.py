@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import Date, DateTime, Integer, String, UniqueConstraint
+from sqlalchemy import DateTime, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, TableNameMixin

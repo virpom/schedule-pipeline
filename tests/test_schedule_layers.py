@@ -2,7 +2,6 @@
 import datetime
 
 from common.schedule import (
-    PARITY_ANY,
     PARITY_EVEN,
     PARITY_ODD,
     SUB_ADD,

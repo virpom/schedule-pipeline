@@ -32,11 +32,10 @@ from common.schedule import (
     WEEKDAY_FULL,
     week_parity,
 )
-from config import Config
 from infrastructure.database.models import User
 from infrastructure.database.repo.requests import RequestsRepo
 from tgbot.services.notify_edits import notify_group_about_edit
-from tgbot.services.schedule_layer import Slot, get_day_slots
+from tgbot.services.schedule_layer import PARITY_OFFSET, Slot, get_day_slots
 
 editor_router = Router()
 
@@ -141,7 +140,7 @@ def sub_dates_kb(group: str, today: datetime.date) -> InlineKeyboardMarkup:
             label += " (сегодня)"
         elif delta == 1:
             label += " (завтра)"
-        parity = "🔵" if week_parity(d) == PARITY_EVEN else "🔴"
+        parity = "🔵" if week_parity(d, PARITY_OFFSET) == PARITY_EVEN else "🔴"
         rows.append([InlineKeyboardButton(
             text=f"{parity} {label}", callback_data=f"ed:sd:{d.isoformat()}")])
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="ed:back")])
@@ -194,7 +193,8 @@ def cancel_kb(back: str) -> InlineKeyboardMarkup:
 # --- тексты ---------------------------------------------------------------
 
 def _parity_mark(date: datetime.date) -> str:
-    return "🔵 чётная" if week_parity(date) == PARITY_EVEN else "🔴 нечётная"
+    return ("🔵 чётная" if week_parity(date, PARITY_OFFSET) == PARITY_EVEN
+            else "🔴 нечётная")
 
 
 def base_day_text(group: str, weekday: int, parity: str, slots: list[Slot]) -> str:
@@ -410,12 +410,11 @@ async def cb_subject_suggestion(cb: CallbackQuery, repo: RequestsRepo, state: FS
         await cb.answer("Устарело", show_alert=True)
         return
     subject = suggestions[idx]
-    para = int(para_s)
     await state.update_data(subject=subject)
     await cb.message.edit_text(
         f"{EDITOR_TITLE}\n\nПредмет: <b>{subject}</b>\n\n"
         "👨‍🏫 Теперь напиши <b>фамилию преподавателя</b> или нажми «Пропустить».",
-        reply_markup=_skip_kb(f"ed:skip_teacher"),
+        reply_markup=_skip_kb("ed:skip_teacher"),
     )
     await state.set_state(EditorState.teacher)
     await cb.answer()
@@ -482,9 +481,9 @@ async def _save_base(event, repo: RequestsRepo, state: FSMContext, via_cb: bool)
 
     lessons = await repo.base_lessons.get_day(group, weekday, parity)
     slots = [Slot(l.para, l.subject, l.teacher, l.room) for l in lessons]
-    text = (f"✅ <b>Сохранено</b>"
+    text = ("✅ <b>Сохранено</b>"
             + (f" · уведомлено: {notified}" if notified else "")
-            + f"\n\n"
+            + "\n\n"
             f"{WEEKDAY_FULL[weekday - 1]}, {PARITY_LABELS.get(parity, parity)} неделя, "
             f"{para} пара → <b>{subject}</b>\n\n" + base_day_text(group, weekday, parity, slots))
     if via_cb:
@@ -512,7 +511,7 @@ async def cb_del_base(cb: CallbackQuery, repo: RequestsRepo):
     lessons = await repo.base_lessons.get_day(group, weekday, parity)
     slots = [Slot(l.para, l.subject, l.teacher, l.room) for l in lessons]
     await cb.message.edit_text(
-        f"🗑 Пара убрана.\n\n" + base_day_text(group, weekday, parity, slots),
+        "🗑 Пара убрана.\n\n" + base_day_text(group, weekday, parity, slots),
         reply_markup=paras_kb(weekday, parity, slots),
     )
     await cb.answer("Убрано")
@@ -735,7 +734,7 @@ async def _save_sub(event, repo: RequestsRepo, state: FSMContext, via_cb: bool):
     slots = await get_day_slots(repo, group, date)
     subs = await repo.substitutions.get_for_date(group, date)
     subs_by_para = {s.para: s for s in subs}
-    text = (f"✅ <b>Сохранено</b>"
+    text = ("✅ <b>Сохранено</b>"
             + (f" · уведомлено: {notified}" if notified else "")
             + f"\n\n{date.strftime('%d.%m.%Y')}, {para} пара → "
             f"<b>{subject}</b>\n\n" + sub_day_text(group, date, slots))
@@ -842,7 +841,7 @@ async def cb_undo(cb: CallbackQuery, repo: RequestsRepo):
                                                updated_by=cb.from_user.id)
             msg = f"↩️ Возвращено: <b>{old['subject']}</b>"
         else:
-            await repo.base_lessons.upsert  # nothing to restore
+            # Пара была удалена — из журнала её содержимое не восстановить.
             msg = "↩️ Откат: пара была удалена (восстанови вручную)"
     else:
         await repo.substitutions.delete(last.date, group, last.para)
@@ -895,8 +894,6 @@ async def on_subject(message: Message, repo: RequestsRepo, state: FSMContext):
         return
     await state.update_data(subject=subject)
     data = await state.get_data()
-    back = (f"ed:ss:{data['date']}:{data['para']}" if data.get("layer") == "sub"
-            else f"ed:bs:{data['weekday']}:{data['parity']}:{data['para']}")
     await message.answer(
         f"{EDITOR_TITLE}\n\nПредмет: <b>{subject}</b>\n\n"
         "👨‍🏫 Напиши <b>фамилию преподавателя</b> или нажми «Пропустить».",
