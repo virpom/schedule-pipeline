@@ -63,29 +63,33 @@ def _has_identity(user: User) -> bool:
     return bool(user.teacher_name) if _is_teacher(user) else bool(user.group)
 
 
+SETTINGS_TEXT = "⚙️ <b>Настройки</b>\n\nВыбери действие 👇"
+
+
 def _on_off(value: bool) -> str:
     return "вкл" if value else "выкл"
 
 
 def menu_kb(user: User, support_link: str = "", is_editor: bool = False) -> InlineKeyboardMarkup:
-    sub_text = "🔕 Отписаться" if user.subscribed else "🔔 Подписаться"
-    detail_label = DETAIL_LABELS.get(user.bell_detail, "кратко")
-    bell_label = BELL_LABELS.get(user.bell_mode, "выкл")
+    """Главное меню: только то, что нужно каждый день.
 
+    Тонкие настройки (детализация звонков, режим уведомлений) убраны
+    в «Настройки» — иначе меню разрастается до 8 рядов и в нём теряется
+    главное действие.
+    """
+    sub_icon = "🔕" if user.subscribed else "🔔"
     second_search = "👥 Группа" if _is_teacher(user) else "👨‍🏫 Преподаватель"
     second_search_cb = "find_group" if _is_teacher(user) else "find_teacher"
 
     rows = [
         [InlineKeyboardButton(text="📅 Сегодня", callback_data="day:today"),
          InlineKeyboardButton(text="📅 Завтра", callback_data="day:tomorrow")],
-        [InlineKeyboardButton(text="🗓 Вся неделя", callback_data="week"),
+        [InlineKeyboardButton(text="🗓 Неделя", callback_data="week"),
          InlineKeyboardButton(text="📜 История", callback_data="hist")],
-        [InlineKeyboardButton(text="⏰ Расписание звонков", callback_data="bell"),
-         InlineKeyboardButton(text=f"🕒 Детализация: {detail_label}", callback_data="detail")],
         [InlineKeyboardButton(text="🔎 Предмет", callback_data="find"),
          InlineKeyboardButton(text=second_search, callback_data=second_search_cb)],
-        [InlineKeyboardButton(text=sub_text, callback_data="sub:toggle")],
-        [InlineKeyboardButton(text=f"🔔 Звонки: {bell_label}", callback_data="bell_mode")],
+        [InlineKeyboardButton(text="⏰ Звонки", callback_data="bell"),
+         InlineKeyboardButton(text=f"{sub_icon} Подписка", callback_data="sub:toggle")],
     ]
     if is_editor:
         rows.append([InlineKeyboardButton(text="✏️ Редактор расписания",
@@ -98,15 +102,22 @@ def menu_kb(user: User, support_link: str = "", is_editor: bool = False) -> Inli
 
 
 def settings_kb(user: User) -> InlineKeyboardMarkup:
+    detail_label = DETAIL_LABELS.get(user.bell_detail, "кратко")
+    bell_label = BELL_LABELS.get(user.bell_mode, "выкл")
     rows = []
     if _is_teacher(user):
         rows.append([InlineKeyboardButton(text="🎯 Сменить фамилию", callback_data="pick_teacher")])
     else:
         rows.append([InlineKeyboardButton(text="🎯 Сменить группу", callback_data="pick")])
         rows.append([InlineKeyboardButton(text="🎯 Сменить курс", callback_data="pick_course")])
-        rows.append([InlineKeyboardButton(text=f"🐱 Картинки: {_on_off(user.send_image)}", callback_data="image_toggle")])
+        rows.append([InlineKeyboardButton(text=f"🐱 Картинки: {_on_off(user.send_image)}",
+                                          callback_data="image_toggle")])
+    rows.append([InlineKeyboardButton(text=f"🕒 Детализация: {detail_label}",
+                                      callback_data="detail")])
+    rows.append([InlineKeyboardButton(text=f"🔔 Уведомления о парах: {bell_label}",
+                                      callback_data="bell_mode")])
     rows.append([InlineKeyboardButton(text="🎭 Сменить роль", callback_data="role_switch")])
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="menu")])
+    rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -257,7 +268,7 @@ async def cb_pick_course(cb: CallbackQuery):
 @user_router.callback_query(F.data == "settings")
 async def cb_settings(cb: CallbackQuery, user: User, repo: RequestsRepo, state: FSMContext):
     await state.clear()
-    await cb.message.edit_text("⚙️ <b>Настройки</b>\n\nВыбери действие 👇", reply_markup=settings_kb(user))
+    await cb.message.edit_text(SETTINGS_TEXT, reply_markup=settings_kb(user))
     await cb.answer()
 
 
@@ -441,8 +452,8 @@ async def cb_bell_mode(cb: CallbackQuery, repo: RequestsRepo, user: User):
     cur = user.bell_mode if user.bell_mode in BELL_ORDER else BELL_ORDER[0]
     nxt = BELL_ORDER[(BELL_ORDER.index(cur) + 1) % len(BELL_ORDER)]
     await repo.users.set_bell_mode(user.id, nxt)
-    text, kb = await _render_menu(repo, user)
-    await cb.message.edit_text(text, reply_markup=kb)
+    user.bell_mode = nxt
+    await cb.message.edit_text(SETTINGS_TEXT, reply_markup=settings_kb(user))
     await cb.answer(f"Звонки: {BELL_LABELS[nxt]}")
 
 
@@ -451,7 +462,7 @@ async def cb_image_toggle(cb: CallbackQuery, repo: RequestsRepo, user: User):
     new = not user.send_image
     await repo.users.set_send_image(user.id, new)
     user.send_image = new
-    await cb.message.edit_text("⚙️ <b>Настройки</b>\n\nВыбери действие 👇", reply_markup=settings_kb(user))
+    await cb.message.edit_text(SETTINGS_TEXT, reply_markup=settings_kb(user))
     await cb.answer("Картинки включены 🐱" if new else "Картинки отключены")
 
 
@@ -460,8 +471,8 @@ async def cb_detail(cb: CallbackQuery, repo: RequestsRepo, user: User):
     cur = user.bell_detail if user.bell_detail in DETAIL_ORDER else DETAIL_ORDER[0]
     nxt = DETAIL_ORDER[(DETAIL_ORDER.index(cur) + 1) % len(DETAIL_ORDER)]
     await repo.users.set_bell_detail(user.id, nxt)
-    text, kb = await _render_menu(repo, user)
-    await cb.message.edit_text(text, reply_markup=kb)
+    user.bell_detail = nxt
+    await cb.message.edit_text(SETTINGS_TEXT, reply_markup=settings_kb(user))
     await cb.answer(f"Детализация: {DETAIL_LABELS[nxt]}")
 
 

@@ -71,6 +71,7 @@ def _admin_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="✏️ Редакторы", callback_data="adm:editors"),
          InlineKeyboardButton(text="📢 Рассылка", callback_data="adm:broadcast_menu")],
         [InlineKeyboardButton(text="🔔 Тест уведомления", callback_data="adm:notify")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu")],
     ])
 
 
