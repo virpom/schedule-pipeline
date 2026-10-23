@@ -54,9 +54,20 @@ async def poll_once(session_pool, config: Config, failed_cooldown: int = 1800) -
             return changes
 
         today = datetime.date.today()
-        for offset in range(3):
-            changes.append((today + datetime.timedelta(days=offset),
-                            had_lessons == 0 and offset == 0))
+
+        # Замены приходят на конкретные даты (листок выдаётся сразу на
+        # несколько дней, например СБ + ПН). Фиксированное окно «сегодня + 2»
+        # их теряло: замена на понедельник, пришедшая в пятницу, не попадала.
+        async with session_pool() as db:
+            repo = RequestsRepo(db)
+            dates = set(await repo.substitutions.get_dates(today))
+
+        if result["ochoe"]:
+            # Сменилось базовое расписание — показываем ближайшие дни.
+            dates |= {today + datetime.timedelta(days=i) for i in range(3)}
+
+        for date in sorted(dates):
+            changes.append((date, had_lessons == 0 and date == today))
     return changes
 
 

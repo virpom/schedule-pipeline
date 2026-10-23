@@ -306,3 +306,46 @@ def test_materialize_keeps_manual_edits(tmp_path):
             assert [r.para for r in rows].count(1) == 1
 
     _run(_with_repo(tmp_path, body))
+
+
+# --- уведомления про замены --------------------------------------------------
+
+def test_substitution_dates_include_weekend_and_monday(tmp_path):
+    """Листок замен выдаётся сразу на несколько дней (СБ + ПН).
+
+    Раньше рассылка брала фиксированное окно «сегодня + 2 дня» и теряла
+    понедельник, если замены приходили в пятницу.
+    """
+    async def body(repo):
+        import datetime as dt
+        today = dt.date.today()
+        sat = today + dt.timedelta(days=1)
+        mon = today + dt.timedelta(days=3)
+        await sync_eios.replace_substitutions(repo, [
+            ParsedSub(sat, "ДП-26", 1, "replace", "A"),
+            ParsedSub(mon, "ДП-26", 1, "replace", "B"),
+        ])
+        dates = await repo.substitutions.get_dates(today)
+        assert sat in dates
+        assert mon in dates, "понедельник должен попасть в уведомление"
+        assert dates == sorted(dates)
+
+    _run(_with_repo(tmp_path, body))
+
+
+def test_substitution_dates_skip_past(tmp_path):
+    """Прошедшие даты не попадают в рассылку."""
+    async def body(repo):
+        import datetime as dt
+        today = dt.date.today()
+        past = today - dt.timedelta(days=5)
+        future = today + dt.timedelta(days=2)
+        await sync_eios.replace_substitutions(repo, [
+            ParsedSub(past, "ДП-26", 1, "replace", "A"),
+            ParsedSub(future, "ДП-26", 1, "replace", "B"),
+        ])
+        dates = await repo.substitutions.get_dates(today)
+        assert past not in dates
+        assert future in dates
+
+    _run(_with_repo(tmp_path, body))

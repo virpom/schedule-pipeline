@@ -57,3 +57,18 @@ class SubstitutionRepo(BaseRepo):
     async def count(self) -> int:
         result = await self.session.execute(select(func.count()).select_from(Substitution))
         return result.scalar_one()
+
+    async def get_dates(self, since: datetime.date) -> list[datetime.date]:
+        """Даты, на которые есть замены, начиная с указанной.
+
+        Нужно для рассылки: листок замен выдаётся сразу на несколько дней
+        вперёд (например, на субботу и понедельник), и уведомлять надо про
+        каждую из этих дат, а не про фиксированное окно «сегодня + 2 дня».
+        """
+        result = await self.session.execute(
+            select(Substitution.date)
+            .where(Substitution.date >= since)
+            .distinct()
+            .order_by(Substitution.date)
+        )
+        return [d for (d,) in result.all()]
