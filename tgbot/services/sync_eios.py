@@ -9,6 +9,7 @@ URL, поэтому ETag и Last-Modified ненадёжны.
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import hashlib
 import logging
@@ -240,7 +241,7 @@ async def sync_once(
         data = await _download(session, links.ochoe)
         digest = _sha(data)
         if force or await repo.settings.get(_HASH_KEY.format(kind="ochoe")) != digest:
-            lessons = eios.parse_ochoe(data)
+            lessons = await asyncio.to_thread(eios.parse_ochoe, data)
             count = await replace_base_lessons(repo, lessons)
             await repo.settings.set(_HASH_KEY.format(kind="ochoe"), digest)
             log.info("базовое расписание обновлено: %d пар", count)
@@ -251,7 +252,7 @@ async def sync_once(
         data = await _download(session, links.zameny)
         digest = _sha(data)
         if force or await repo.settings.get(_HASH_KEY.format(kind="zameny")) != digest:
-            subs = eios.parse_substitutions(data)
+            subs = await asyncio.to_thread(eios.parse_substitutions, data)
             known = await repo.base_lessons.get_groups()
             subs = _resolve_groups(subs, known)
             count = await replace_substitutions(repo, subs)
@@ -262,11 +263,11 @@ async def sync_once(
     # --- звонки ---
     slots = []
     if links.bells_monday:
-        slots += eios.parse_bells(await _download(session, links.bells_monday), "MONDAY")
+        data = await _download(session, links.bells_monday)
+        slots += await asyncio.to_thread(eios.parse_bells, data, "MONDAY")
     if links.bells_standard:
-        slots += eios.parse_bells(
-            await _download(session, links.bells_standard), "OTHER"
-        )
+        data = await _download(session, links.bells_standard)
+        slots += await asyncio.to_thread(eios.parse_bells, data, "OTHER")
     if slots:
         digest = hashlib.sha256(
             repr(sorted(

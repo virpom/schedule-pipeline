@@ -57,8 +57,13 @@ async def main() -> None:
     try:
         await dp.start_polling(bot)
     finally:
-        poller_task.cancel()
-        bell_task.cancel()
+        for task in (poller_task, bell_task):
+            task.cancel()
+        # Ждём отмену, иначе задачи могут дописать в БД уже после dispose.
+        await asyncio.gather(poller_task, bell_task, return_exceptions=True)
+        # Без этого aiohttp-сессия бота остаётся открытой: контейнер
+        # перезапускается, а соединения висят до таймаута Telegram.
+        await bot.session.close()
         await engine.dispose()
 
 

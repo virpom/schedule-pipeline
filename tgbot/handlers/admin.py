@@ -37,6 +37,24 @@ class AdminState(StatesGroup):
     set_editor = State()
 
 
+# Рассылки живут дольше обработчика, поэтому запускаются задачами. Ссылку
+# надо держать: asyncio хранит только слабую, и без этого задача может быть
+# собрана сборщиком мусора прямо во время отправки.
+_background: set[asyncio.Task] = set()
+
+
+def _spawn(coro) -> None:
+    task = asyncio.create_task(coro)
+    _background.add(task)
+
+    def _done(t: asyncio.Task) -> None:
+        _background.discard(t)
+        if not t.cancelled() and t.exception() is not None:
+            logging.exception("фоновая рассылка упала", exc_info=t.exception())
+
+    task.add_done_callback(_done)
+
+
 def _is_admin(message: Message, config: Config) -> bool:
     return message.from_user.id in config.tg_bot.admin_ids
 
@@ -484,7 +502,8 @@ async def cb_notify_confirm(cb: CallbackQuery, repo: RequestsRepo, config: Confi
     await cb.message.edit_text("Рассылка запущена")
     await cb.answer()
     rate = float((await repo.settings.get_all())["notify_rate"])
-    asyncio.create_task(notify_new_schedule(cb.message.bot, session_pool, [(latest, True)], rate, config.photos_path))
+    _spawn(notify_new_schedule(cb.message.bot, session_pool, [(latest, True)],
+                               rate, config.photos_path))
 
 
 @admin_router.callback_query(lambda cb: cb.data == "adm:notify_cancel")
@@ -530,7 +549,7 @@ async def cb_bc_send(cb: CallbackQuery, repo: RequestsRepo, config: Config, stat
     rate = float((await repo.settings.get_all())["notify_rate"])
     await cb.message.edit_text(f"Рассылка запущена ({len(items)} получателей)")
     await cb.answer()
-    asyncio.create_task(_report_broadcast(cb.message.bot, cb.message.chat.id, items, rate))
+    _spawn(_report_broadcast(cb.message.bot, cb.message.chat.id, items, rate))
 
 
 @admin_router.callback_query(lambda cb: cb.data == "adm:bc_cancel")

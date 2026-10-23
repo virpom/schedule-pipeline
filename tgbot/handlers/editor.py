@@ -487,6 +487,7 @@ async def _save_base(event, repo: RequestsRepo, state: FSMContext, via_cb: bool)
             f"{para} пара → <b>{subject}</b>\n\n" + base_day_text(group, weekday, parity, slots))
     if via_cb:
         await event.message.edit_text(text, reply_markup=paras_kb(weekday, parity, slots))
+        await event.answer()
     else:
         await event.answer(text, reply_markup=paras_kb(weekday, parity, slots))
 
@@ -740,6 +741,7 @@ async def _save_sub(event, repo: RequestsRepo, state: FSMContext, via_cb: bool):
     kb = sub_slots_kb(date.isoformat(), slots, subs_by_para)
     if via_cb:
         await event.message.edit_text(text, reply_markup=kb)
+        await event.answer()
     else:
         await event.answer(text, reply_markup=kb)
 
