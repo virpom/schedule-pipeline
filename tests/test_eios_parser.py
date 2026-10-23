@@ -447,3 +447,19 @@ def test_time_note_with_typo_dot():
     odd = next(x for x in lessons if x.parity == PARITY_ODD)
     assert odd.time_note == "с 18.05 до 19:30"
     assert odd.subject == "Охрана труда"
+
+
+def test_match_group_known_typo_eof26():
+    """В листке замен встречается «ЭОф-26» — это опечатка вместо «ЭО-26ФП».
+
+    Подтверждено данными: замена ссылается на «ОБиЗР – Боровик И.А.», а это
+    единственная группа 1 курса с таким предметом в понедельник 4 парой.
+    """
+    known = ["ЭО-26ФП", "ЭОк-26", "ЭОф-24", "ЭОф-23"]
+    assert match_group("ЭОф-26", known) == "ЭО-26ФП"
+
+
+def test_match_group_does_not_guess_when_ambiguous():
+    """Если похожих несколько и они равны — лучше вернуть None, чем угадать."""
+    known = ["ЭОф-24", "ЭОф-23"]
+    assert match_group("ЭОф-99", known) is None
