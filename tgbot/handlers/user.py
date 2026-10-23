@@ -356,7 +356,10 @@ async def _day_text(repo: RequestsRepo, user: User, date: datetime.date) -> str:
 
     if lessons:
         text = _fmt(user, date, lessons, bell, lunches, gcg)
-        if stale:
+        # Если сайт ещё ни разу не опрашивался (свежий запуск), не пугаем
+        # предупреждением на каждом экране — оно появится, если опрос
+        # действительно не пройдёт. Расписание и так есть.
+        if stale and last_ok is not None:
             text += format_stale_warning(last_ok)
     else:
         note = None
