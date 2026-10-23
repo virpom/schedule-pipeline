@@ -193,8 +193,7 @@ def cancel_kb(back: str) -> InlineKeyboardMarkup:
 # --- тексты ---------------------------------------------------------------
 
 def _parity_mark(date: datetime.date) -> str:
-    return ("🔵 чётная" if week_parity(date, PARITY_OFFSET) == PARITY_EVEN
-            else "🔴 нечётная")
+    return "🔵 чётная" if week_parity(date, PARITY_OFFSET) == PARITY_EVEN else "🔴 нечётная"
 
 
 def base_day_text(group: str, weekday: int, parity: str, slots: list[Slot]) -> str:

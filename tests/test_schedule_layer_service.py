@@ -44,6 +44,11 @@ def sub(para, date, action, subject="", teacher="", room="", comment=""):
                teacher=teacher, room=room, comment=comment)
 
 
+def day(repo, group="ДП-26", date=None):
+    """Слоты дня по ISO-чётности (тесты проверяют логику, не сдвиг колледжа)."""
+    return asyncio.run(get_day_slots(repo, group, date, 0))
+
+
 # 2026-10-21 — среда, ISO-неделя 43 (нечётная)
 WED_ODD = datetime.date(2026, 10, 21)
 WED_EVEN = datetime.date(2026, 10, 14)   # среда, неделя 42 (чётная)
@@ -51,7 +56,7 @@ WED_EVEN = datetime.date(2026, 10, 14)   # среда, неделя 42 (чётн
 
 def test_base_only():
     repo = FakeRepo([lesson(1, "Математика"), lesson(2, "Физика")])
-    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD, 0))
+    slots = day(repo, date=WED_ODD)
     assert [(s.para, s.subject) for s in slots] == [(1, "Математика"), (2, "Физика")]
     assert all(not s.changed for s in slots)
 
@@ -59,14 +64,14 @@ def test_base_only():
 def test_parity_filters_out_other_week():
     """Нечётная база не должна показываться в чётную неделю."""
     repo = FakeRepo([lesson(1, "Математика", parity=PARITY_ODD)])
-    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_EVEN, 0))
+    slots = day(repo, date=WED_EVEN)
     assert slots == []
 
 
 def test_replace_marks_changed():
     repo = FakeRepo([lesson(1, "Математика")],
                     [sub(1, WED_ODD, SUB_REPLACE, "Химия", "Сидоров С.С.")])
-    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD, 0))
+    slots = day(repo, date=WED_ODD)
     assert len(slots) == 1
     assert slots[0].subject == "Химия"
     assert slots[0].changed is True
@@ -76,32 +81,32 @@ def test_replace_marks_changed():
 def test_cancel_removes_base_lesson():
     repo = FakeRepo([lesson(1, "Математика"), lesson(2, "Физика")],
                     [sub(1, WED_ODD, SUB_CANCEL)])
-    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD, 0))
+    slots = day(repo, date=WED_ODD)
     assert [(s.para, s.subject) for s in slots] == [(2, "Физика")]
 
 
 def test_add_inserts_without_base():
     repo = FakeRepo([], [sub(3, WED_ODD, SUB_ADD, "История")])
-    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD, 0))
+    slots = day(repo, date=WED_ODD)
     assert [(s.para, s.subject, s.changed) for s in slots] == [(3, "История", True)]
 
 
 def test_cancel_all_is_empty_day():
     repo = FakeRepo([lesson(1, "Математика")], [sub(1, WED_ODD, SUB_CANCEL)])
-    assert asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD, 0)) == []
+    assert day(repo, date=WED_ODD) == []
 
 
 def test_slots_sorted_by_para():
     repo = FakeRepo([lesson(3, "Третья"), lesson(1, "Первая")],
                     [sub(2, WED_ODD, SUB_ADD, "Вторая")])
-    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD, 0))
+    slots = day(repo, date=WED_ODD)
     assert [s.para for s in slots] == [1, 2, 3]
 
 
 def test_other_date_substitution_ignored():
     other = datetime.date(2026, 10, 22)
     repo = FakeRepo([lesson(1, "Математика")], [sub(1, other, SUB_REPLACE, "Химия")])
-    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD, 0))
+    slots = day(repo, date=WED_ODD)
     assert slots[0].subject == "Математика"
 
 
@@ -120,7 +125,7 @@ def test_add_over_existing_base_does_not_duplicate():
     (например, ПРк-25 в субботу).
     """
     repo = FakeRepo([lesson(1, "Геология")], [sub(1, WED_ODD, SUB_ADD, "Электротехника")])
-    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD, 0))
+    slots = day(repo, date=WED_ODD)
     assert len(slots) == 1
     assert slots[0].para == 1
     assert slots[0].subject == "Электротехника"
@@ -134,7 +139,7 @@ def test_no_duplicate_paras_ever():
         [sub(1, WED_ODD, SUB_ADD, "X"), sub(2, WED_ODD, SUB_REPLACE, "Y"),
          sub(3, WED_ODD, SUB_CANCEL)],
     )
-    slots = asyncio.run(get_day_slots(repo, "ДП-26", WED_ODD, 0))
+    slots = day(repo, date=WED_ODD)
     assert len(slots) == len({s.para for s in slots})
 
 

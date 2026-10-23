@@ -49,29 +49,6 @@ def week_parity(date: datetime.date, parity_offset: int = 0) -> str:
     return PARITY_EVEN if week % 2 == 0 else PARITY_ODD
 
 
-def merge_day(base_lessons, substitutions):
-    """Наложить замены на базовое расписание → итог дня.
-
-    base_lessons  — пары из BaseLesson (отфильтрованы по дню и чётности)
-    substitutions — замены из Substitution на конкретную дату
-
-    Возвращает слоты, отсортированные по номеру пары. Элемент — либо
-    базовая пара, либо замена (replace/add). Отменённые (cancel) исчезают.
-
-    Чистая функция без БД — удобна для тестов. В боте используется её
-    аналог ``tgbot.services.schedule_layer.get_day_slots()``: он делает то же
-    самое, но сразу ходит в базу и возвращает ``Slot``. Поведение обоих
-    проверено на одинаковых краевых случаях.
-    """
-    by_para = {l.para: l for l in base_lessons}
-    for sub in substitutions:
-        if sub.action == SUB_CANCEL:
-            by_para.pop(sub.para, None)
-        else:  # replace | add
-            by_para[sub.para] = sub
-    return [by_para[p] for p in sorted(by_para)]
-
-
 def teacher_base(name: str) -> str:
     return (name or "").split(",")[0].strip()
 

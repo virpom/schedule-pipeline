@@ -13,6 +13,7 @@ from infrastructure.database.models import Base
 from infrastructure.database.repo.requests import RequestsRepo
 from parsers.eios import PARITY_BOTH, PARITY_EVEN as PARSER_EVEN, PARITY_ODD as PARSER_ODD
 from tgbot.services import sync_eios
+from tgbot.services.schedule_layer import PARITY_OFFSET
 
 
 @pytest.fixture()
@@ -62,7 +63,7 @@ def test_parity_offset_is_one():
 
     d = datetime.date(2026, 10, 26)
     assert week_parity(d, 0) == PARITY_EVEN
-    assert week_parity(d, sync_eios.PARITY_OFFSET) == PARITY_ODD
+    assert week_parity(d, PARITY_OFFSET) == PARITY_ODD
 
 
 # --- загрузка базового расписания -------------------------------------------
@@ -114,38 +115,28 @@ def test_replace_base_lessons_is_full_replace(tmp_path):
 
 
 def test_replace_base_lessons_keeps_manual(tmp_path):
-    """Ручные правки старосты не затираются загрузкой с сайта."""
-    async def body(repo):
-        await repo.base_lessons.upsert("ДП-26", PARITY_ANY, 2, 1, "Ручная пара",
-                                       "Ручной Р.Р.", source="manual")
-        lessons = [ParsedLesson("ДП-26", 1, 1, 1, "С сайта")]
-        await sync_eios.replace_base_lessons(repo, lessons)
+    """Ручные правки старосты переживают загрузку с сайта.
 
-        week = await repo.base_lessons.get_day("ДП-26", 2, PARITY_ODD)
-        assert [l.subject for l in week] == ["Ручная пара"]
-        day1 = await repo.base_lessons.get_day("ДП-26", 1, PARITY_ODD)
-        assert [l.subject for l in day1] == ["С сайта"]
-
-    _run(_with_repo(tmp_path, body))
-
-
-def test_manual_edit_on_same_slot_as_site_does_not_crash(tmp_path):
-    """Ручная правка на том же слоте, что и пара из файла, не роняет загрузку.
-
-    Регрессия: обе строки вставлялись на одно (group, parity, weekday, para),
-    и UNIQUE падал с IntegrityError. Ручная правка должна побеждать.
+    Регрессия: правка на том же слоте, что и пара из файла, вставлялась
+    дважды и роняла UNIQUE. Должна побеждать ручная.
     """
     async def body(repo):
-        await repo.base_lessons.upsert("ДП-26", PARITY_ANY, 1, 1, "РУЧНАЯ",
+        # Правка на свободном слоте — должна просто сохраниться.
+        await repo.base_lessons.upsert("ДП-26", PARITY_ANY, 2, 1, "Свободный слот",
+                                       "Ручной Р.Р.", source="manual")
+        # Правка на том же слоте, что и пара из файла — должна вытеснить её.
+        await repo.base_lessons.upsert("ДП-26", PARITY_ANY, 1, 1, "Тот же слот",
                                        "Староста С.С.", source="manual")
-        # В файле на этот же слот есть пара.
         lessons = [ParsedLesson("ДП-26", 1, 1, 1, "С сайта")]
 
         for _ in range(2):  # повторная загрузка тоже не должна падать
             await sync_eios.replace_base_lessons(repo, lessons)
-            day = await repo.base_lessons.get_day("ДП-26", 1, PARITY_ANY)
-            assert [l.subject for l in day] == ["РУЧНАЯ"]
-            assert [l.source for l in day] == ["manual"]
+
+            kept = await repo.base_lessons.get_day("ДП-26", 2, PARITY_ANY)
+            assert [(l.subject, l.source) for l in kept] == [("Свободный слот", "manual")]
+
+            won = await repo.base_lessons.get_day("ДП-26", 1, PARITY_ANY)
+            assert [(l.subject, l.source) for l in won] == [("Тот же слот", "manual")]
 
     _run(_with_repo(tmp_path, body))
 
@@ -241,7 +232,7 @@ def test_base_plus_substitution_end_to_end(tmp_path):
             ParsedSub(d, "ДП-26", 3, "cancel"),
         ])
 
-        slots = await get_day_slots(repo, "ДП-26", d, sync_eios.PARITY_OFFSET)
+        slots = await get_day_slots(repo, "ДП-26", d, PARITY_OFFSET)
         assert [(s.para, s.subject) for s in slots] == [
             (1, "Математика"),
             (2, "История"),

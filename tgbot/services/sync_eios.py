@@ -35,10 +35,6 @@ log = logging.getLogger(__name__)
 SOURCE_SITE = "site"
 _HASH_KEY = "eios_hash_{kind}"
 
-# Сдвиг чётности колледжа относительно ISO. Живёт в schedule_layer, чтобы
-# все вызовы get_day_slots() по умолчанию видели ту же неделю, что и студент.
-from tgbot.services.schedule_layer import PARITY_OFFSET  # noqa: E402
-
 
 def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -73,12 +69,9 @@ async def replace_base_lessons(repo: RequestsRepo, lessons: list[ParsedLesson]) 
     ]
     # Ручная правка важнее сайта: её слот не должен достаться данным из файла,
     # иначе на одно (group, parity, weekday, para) будет две строки и UNIQUE
-    # упадёт с IntegrityError. Сами ручные строки НЕ удаляем и заново не
-    # вставляем — delete ниже сносит только source='site'.
+    # упадёт с IntegrityError. Сами ручные строки не трогаем — delete ниже
+    # сносит только source='site'.
     manual_keys = {(r.group, r.week_parity, r.weekday, r.para) for r in manual}
-    # Отвязываем от сессии, чтобы последующий flush не трогал их.
-    for row in manual:
-        repo.session.expunge(row)
 
     await repo.session.execute(delete(BaseLesson).where(BaseLesson.source == SOURCE_SITE))
 
@@ -125,8 +118,6 @@ async def replace_substitutions(repo: RequestsRepo, subs: list[ParsedSub]) -> in
     # Как и в базовом расписании: ручная замена на том же слоте не должна
     # конфликтовать с пришедшей с сайта (UNIQUE по date+group+para).
     manual_keys = {(r.date, r.group, r.para) for r in manual}
-    for row in manual:
-        repo.session.expunge(row)
 
     await repo.session.execute(
         delete(Substitution).where(Substitution.source == SOURCE_SITE)
@@ -316,6 +307,8 @@ async def materialize(repo: RequestsRepo, days: int = MATERIALIZE_DAYS) -> int:
 
     for offset in range(days):
         date = today + datetime.timedelta(days=offset)
+        # Ручные правки старосты важнее данных с сайта: их слоты не заполняем
+        # сгенерированными парами, а сами строки переносим как есть.
         manual = [
             row
             for (row,) in await repo.session.execute(
@@ -325,10 +318,21 @@ async def materialize(repo: RequestsRepo, days: int = MATERIALIZE_DAYS) -> int:
                 )
             )
         ]
-        rows: list[dict] = []
+        manual_keys = {(r.group, r.para) for r in manual}
+
+        rows: list[dict] = [
+            {
+                "date": r.date, "group": r.group, "para": r.para,
+                "para_end": r.para_end, "subject": r.subject,
+                "teacher": r.teacher, "room": r.room,
+                "source_url": r.source_url, "source": r.source,
+            }
+            for r in manual
+        ]
         for group in groups:
-            slots = await get_day_slots(repo, group, date, PARITY_OFFSET)
-            for slot in slots:
+            for slot in await get_day_slots(repo, group, date):
+                if (group, slot.para) in manual_keys:
+                    continue
                 rows.append({
                     "date": date,
                     "group": group,
@@ -342,32 +346,11 @@ async def materialize(repo: RequestsRepo, days: int = MATERIALIZE_DAYS) -> int:
                 })
 
         await repo.college_lessons.replace_date(date, rows)
-
-        # Ручные правки старосты важнее данных с сайта: кладём их поверх,
-        # вытесняя сгенерированную пару на том же слоте.
-        if manual:
-            manual_keys = {(r.group, r.para) for r in manual}
-            await repo.college_lessons.replace_date(
-                date,
-                [x for x in rows if (x["group"], x["para"]) not in manual_keys]
-                + [
-                    {
-                        "date": r.date, "group": r.group, "para": r.para,
-                        "para_end": r.para_end, "subject": r.subject,
-                        "teacher": r.teacher, "room": r.room,
-                        "source_url": r.source_url, "source": r.source,
-                    }
-                    for r in manual
-                ],
-            )
         written += 1
 
-    # Помечаем дни как опубликованные: расписание пришло с сайта, значит
-    # «не опубликовано» показывать нельзя. Раньше schedule_file заполнял
-    # старый парсер, после перехода на ЭИОС её перестали обновлять, и студент
-    # на пустой день видел «расписание не опубликовано» вместо «занятий нет».
-    for offset in range(days):
-        date = today + datetime.timedelta(days=offset)
+        # Расписание пришло с сайта — значит день опубликован. Раньше
+        # schedule_file заполнял старый парсер, после перехода на ЭИОС её
+        # перестали обновлять, и студент на пустой день видел «не выложено».
         if await repo.schedule_files.get_hash(date) is None:
             await repo.schedule_files.set_hash(date, f"eios-{date.isoformat()}")
 

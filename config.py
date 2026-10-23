@@ -23,7 +23,7 @@ class Config:
     db: Db
     schedule_url: str
     base_url: str
-    poll_interval: int  # стартовое значение; дальше живёт в БД (команда /setpoll)
+    poll_interval: int
     notify_rate: float  # messages per second for broadcasts
     photos_path: str  # dir with per-weekday photo folders
 
