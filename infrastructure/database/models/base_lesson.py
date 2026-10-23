@@ -5,11 +5,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, TableNameMixin
 
-# week parity values
-PARITY_ODD = "ODD"     # нечётная неделя
-PARITY_EVEN = "EVEN"   # чётная неделя
-PARITY_ANY = "ANY"     # каждую неделю
-
 
 class BaseLesson(Base, TableNameMixin):
     """Базовое (постоянное) расписание группы.

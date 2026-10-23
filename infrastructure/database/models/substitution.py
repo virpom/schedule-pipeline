@@ -5,11 +5,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, TableNameMixin
 
-# substitution actions
-SUB_REPLACE = "replace"   # вместо базовой пары — другая
-SUB_CANCEL = "cancel"     # пары не будет
-SUB_ADD = "add"           # пары в базе не было, в этот день есть
-
 
 class Substitution(Base, TableNameMixin):
     """Замена — временное изменение на конкретную дату.

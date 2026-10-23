@@ -24,8 +24,3 @@ class BellReminderRepo(BaseRepo):
             .on_conflict_do_nothing(index_elements=["user_id", "date", "event_key"])
         )
         await self.session.commit()
-
-    async def cleanup(self, before: datetime.date) -> None:
-        from sqlalchemy import delete
-        await self.session.execute(delete(BellReminder).where(BellReminder.date < before))
-        await self.session.commit()

@@ -59,12 +59,6 @@ def test_empty_query_returns_empty():
     assert asyncio.run(repo.search("   ")) == []
 
 
-def test_find_by_username_empty():
-    repo = UserRepo(FakeSession([]))
-    assert asyncio.run(repo.find_by_username("")) == []
-    assert asyncio.run(repo.find_by_username("@")) == []
-
-
 def test_user_option_label():
     from tgbot.handlers.admin import _user_option
     label = _user_option(_u(1, "virp0m", "VirProm", "ДП-26"))

@@ -1,7 +1,7 @@
 import datetime
 import json
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert
 
 from infrastructure.database.models import DaySnapshot
@@ -30,21 +30,9 @@ class DaySnapshotRepo(BaseRepo):
         )
         await self.session.commit()
 
-    async def get(self, date: datetime.date, group: str) -> list[dict]:
-        result = await self.session.execute(
-            select(DaySnapshot.payload).where(
-                DaySnapshot.date == date, DaySnapshot.group == group)
-        )
-        payload = result.scalar_one_or_none()
-        return json.loads(payload) if payload else []
-
     async def exists(self, date: datetime.date, group: str) -> bool:
         result = await self.session.execute(
             select(DaySnapshot.id).where(
                 DaySnapshot.date == date, DaySnapshot.group == group).limit(1)
         )
         return result.scalar_one_or_none() is not None
-
-    async def count(self) -> int:
-        result = await self.session.execute(select(func.count()).select_from(DaySnapshot))
-        return result.scalar_one()

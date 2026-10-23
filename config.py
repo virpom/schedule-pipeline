@@ -1,6 +1,35 @@
+import os
 from dataclasses import dataclass
 
-from environs import Env
+
+def _read_env(path: str) -> None:
+    """Подхватить .env, не перетирая уже заданные переменные окружения.
+
+    В докере переменные приходят через --env-file, и файла в контейнере
+    может не быть — это не ошибка.
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+    except FileNotFoundError:
+        pass
+
+
+def _int(name: str, default: int) -> int:
+    return int(os.environ.get(name) or default)
+
+
+def _float(name: str, default: float) -> float:
+    return float(os.environ.get(name) or default)
+
+
+def _ids(name: str) -> list[int]:
+    return [int(x) for x in (os.environ.get(name) or "").replace(",", " ").split()]
 
 
 @dataclass
@@ -22,28 +51,19 @@ class Config:
     tg_bot: TgBot
     db: Db
     schedule_url: str
-    base_url: str
-    poll_interval: int
-    notify_rate: float  # messages per second for broadcasts
     photos_path: str  # dir with per-weekday photo folders
 
 
 def load_config(path: str = ".env") -> Config:
-    env = Env()
-    env.read_env(path)
+    _read_env(path)
 
     return Config(
         tg_bot=TgBot(
-            token=env.str("BOT_TOKEN"),
-            admin_ids=env.list("ADMINS", subcast=int),
+            token=os.environ["BOT_TOKEN"],
+            admin_ids=_ids("ADMINS"),
         ),
-        db=Db(path=env.str("SQLITE_PATH", "database.db")),
-        schedule_url=env.str(
-            "SCHEDULE_URL",
-            "https://eios.norvuz.ru/mod/page/view.php?id=49960",
-        ),
-        base_url=env.str("BASE_URL", "https://norvuz.ru"),
-        poll_interval=env.int("POLL_INTERVAL", 300),
-        notify_rate=env.float("NOTIFY_RATE", 20.0),
-        photos_path=env.str("PHOTOS_PATH", "/data/photos"),
+        db=Db(path=os.environ.get("SQLITE_PATH") or "database.db"),
+        schedule_url=os.environ.get("SCHEDULE_URL")
+        or "https://eios.norvuz.ru/mod/page/view.php?id=49960",
+        photos_path=os.environ.get("PHOTOS_PATH") or "/data/photos",
     )

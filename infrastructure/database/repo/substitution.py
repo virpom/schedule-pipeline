@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert
 
 from infrastructure.database.models import Substitution
@@ -13,16 +13,6 @@ class SubstitutionRepo(BaseRepo):
             select(Substitution)
             .where(Substitution.group == group, Substitution.date == date)
             .order_by(Substitution.para)
-        )
-        return list(result.scalars().all())
-
-    async def get_for_dates(self, group: str, start: datetime.date,
-                            end: datetime.date) -> list[Substitution]:
-        result = await self.session.execute(
-            select(Substitution)
-            .where(Substitution.group == group,
-                   Substitution.date >= start, Substitution.date <= end)
-            .order_by(Substitution.date, Substitution.para)
         )
         return list(result.scalars().all())
 
@@ -53,10 +43,6 @@ class SubstitutionRepo(BaseRepo):
             )
         )
         await self.session.commit()
-
-    async def count(self) -> int:
-        result = await self.session.execute(select(func.count()).select_from(Substitution))
-        return result.scalar_one()
 
     async def get_dates(self, since: datetime.date) -> list[datetime.date]:
         """Даты, на которые есть замены, начиная с указанной.

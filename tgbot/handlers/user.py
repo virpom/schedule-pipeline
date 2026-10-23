@@ -4,11 +4,15 @@ from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup,
+                           KeyboardButton, Message, ReplyKeyboardMarkup)
 
 from common.schedule import (
+    BELL_FULL,
     BELL_LABELS,
+    BELL_OFF,
     BELL_ORDER,
+    BELL_START_END,
     DETAIL_LABELS,
     DETAIL_ORDER,
     course_group_from_course,
@@ -63,7 +67,26 @@ def _has_identity(user: User) -> bool:
     return bool(user.teacher_name) if _is_teacher(user) else bool(user.group)
 
 
-SETTINGS_TEXT = "⚙️ <b>Настройки</b>\n\nВыбери действие 👇"
+def _settings_text(user: User) -> str:
+    """Экран настроек с примером того, что придёт при текущем режиме."""
+    mode = user.bell_mode if user.bell_mode in BELL_PREVIEW else BELL_OFF
+    return (f"⚙️ <b>Настройки</b>\n\n"
+            f"Уведомления: <b>{BELL_LABELS.get(mode, 'выкл')}</b>\n"
+            f"{BELL_PREVIEW[mode]}\n\n"
+            f"Выбери действие 👇")
+
+# Что именно придёт при каждом режиме. Показать пример дешевле, чем
+# объяснять словами «звонок+конец пары» — человек не понимает разницу,
+# пока не получит уведомление.
+BELL_PREVIEW = {
+    BELL_OFF: "<i>уведомления не приходят</i>",
+    BELL_START_END: "🔔 1 пара · Математика · 204\n"
+                    "🔔 Конец пары",
+    BELL_FULL: "🔔 1 пара · Математика · 204\n"
+               "🔔 Перемена\n"
+               "🔔 Перемена закончилась\n"
+               "🔔 Конец пары",
+}
 
 
 def _on_off(value: bool) -> str:
@@ -114,7 +137,7 @@ def settings_kb(user: User) -> InlineKeyboardMarkup:
                                           callback_data="image_toggle")])
     rows.append([InlineKeyboardButton(text=f"🕒 Детализация: {detail_label}",
                                       callback_data="detail")])
-    rows.append([InlineKeyboardButton(text=f"🔔 Уведомления о парах: {bell_label}",
+    rows.append([InlineKeyboardButton(text=f"🔔 Уведомления: {bell_label}",
                                       callback_data="bell_mode")])
     rows.append([InlineKeyboardButton(text="🎭 Сменить роль", callback_data="role_switch")])
     rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu")])
@@ -200,6 +223,10 @@ async def start(message: Message, user: User, repo: RequestsRepo, state: FSMCont
                 reply_markup=COURSE_KB,
             )
         else:
+            # Сразу показываем сегодняшний день — это то, за чем открывают бота.
+            # Меню остаётся кнопкой под сообщением.
+            await message.answer(await _day_text(repo, user, datetime.date.today()),
+                                 reply_markup=BOTTOM_KB)
             text, kb = await _render_menu(repo, user)
             await message.answer(text, reply_markup=kb)
     else:
@@ -268,7 +295,7 @@ async def cb_pick_course(cb: CallbackQuery):
 @user_router.callback_query(F.data == "settings")
 async def cb_settings(cb: CallbackQuery, user: User, repo: RequestsRepo, state: FSMContext):
     await state.clear()
-    await cb.message.edit_text(SETTINGS_TEXT, reply_markup=settings_kb(user))
+    await cb.message.edit_text(_settings_text(user), reply_markup=settings_kb(user))
     await cb.answer()
 
 
@@ -315,7 +342,7 @@ async def cb_menu(cb: CallbackQuery, user: User, repo: RequestsRepo, state: FSMC
     await cb.answer()
 
 
-async def _show_day(cb: CallbackQuery, repo: RequestsRepo, user: User, date: datetime.date):
+async def _day_text(repo: RequestsRepo, user: User, date: datetime.date) -> str:
     bell, lunches = await repo.bell_schedule.get_context()
     gcg = await _course_group_map(repo, user)
     lessons = await _user_lessons(repo, user, date)
@@ -345,7 +372,11 @@ async def _show_day(cb: CallbackQuery, repo: RequestsRepo, user: User, date: dat
             if nxt:
                 text += "\n\nБлижайшее —\n" + _fmt(user, d, nxt, bell, lunches, gcg)
                 break
-    await cb.message.edit_text(text, reply_markup=BACK_KB)
+    return text
+
+
+async def _show_day(cb: CallbackQuery, repo: RequestsRepo, user: User, date: datetime.date):
+    await cb.message.edit_text(await _day_text(repo, user, date), reply_markup=BACK_KB)
     await cb.answer()
 
 
@@ -363,10 +394,7 @@ async def cb_tomorrow(cb: CallbackQuery, repo: RequestsRepo, user: User):
     await _show_day(cb, repo, user, datetime.date.today() + datetime.timedelta(days=1))
 
 
-@user_router.callback_query(F.data == "week")
-async def cb_week(cb: CallbackQuery, repo: RequestsRepo, user: User):
-    if not await _require_identity(cb, user):
-        return
+async def _week_text(repo: RequestsRepo, user: User) -> str:
     bell, lunches = await repo.bell_schedule.get_context()
     gcg = await _course_group_map(repo, user)
     start = datetime.date.today()
@@ -378,10 +406,14 @@ async def cb_week(cb: CallbackQuery, repo: RequestsRepo, user: User):
     entries = [(d, by_date[d]) for d in sorted(by_date)]
     meta = "group" if _is_teacher(user) else "teacher"
     show_rov = not _is_teacher(user)
-    await cb.message.edit_text(
-        format_week(entries, bell, lunches, user.bell_detail, meta, show_rov, gcg),
-        reply_markup=BACK_KB,
-    )
+    return format_week(entries, bell, lunches, user.bell_detail, meta, show_rov, gcg)
+
+
+@user_router.callback_query(F.data == "week")
+async def cb_week(cb: CallbackQuery, repo: RequestsRepo, user: User):
+    if not await _require_identity(cb, user):
+        return
+    await cb.message.edit_text(await _week_text(repo, user), reply_markup=BACK_KB)
     await cb.answer()
 
 
@@ -392,29 +424,55 @@ async def cb_bell(cb: CallbackQuery, repo: RequestsRepo):
     await cb.answer()
 
 
-@user_router.callback_query(F.data == "hist")
-async def cb_hist(cb: CallbackQuery, repo: RequestsRepo, user: User):
-    if not await _require_identity(cb, user):
-        return
+HIST_PAGE = 5
+
+
+async def _hist_page(repo: RequestsRepo, user: User, before: datetime.date | None) -> tuple[str, InlineKeyboardMarkup]:
+    """Окно из пяти дат, начиная с самой свежей раньше ``before``.
+
+    Курсор лежит в callback_data, а не в FSM: переживает рестарт и не
+    путается, если человек листает с двух устройств.
+    """
     if _is_teacher(user):
         dates = await repo.college_lessons.get_dates_for_teacher(user.teacher_name)
     else:
         dates = await repo.college_lessons.get_dates_for_group(user.group)
-    past = [d for d in dates if d < datetime.date.today()]
+    past = sorted((d for d in dates if d < datetime.date.today()), reverse=True)
+    if before:
+        past = [d for d in past if d < before]
+
     if not past:
-        await cb.message.edit_text("📜 Истории расписания пока нет", reply_markup=BACK_KB)
-        await cb.answer()
-        return
-    buttons = [
-        InlineKeyboardButton(text=f"{d.day:02d}.{d.month:02d}", callback_data=f"hist:{d.isoformat()}")
-        for d in past[:28]
-    ]
-    rows = [buttons[i:i + 4] for i in range(0, len(buttons), 4)]
+        return "📜 Больше расписания нет", InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")]])
+
+    window = past[:HIST_PAGE]
+    buttons = [InlineKeyboardButton(text=f"{d.day:02d}.{d.month:02d}",
+                                    callback_data=f"hist:{d.isoformat()}")
+               for d in window]
+    rows = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
+    if len(past) > HIST_PAGE:
+        rows.append([InlineKeyboardButton(
+            text="⬅️ Раньше", callback_data=f"histpage:{window[-1].isoformat()}")])
     rows.append([InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")])
-    await cb.message.edit_text(
-        "📜 История расписания\n\nВыбери дату 👇",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
-    )
+    return "📜 История расписания\n\nВыбери дату 👇", InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@user_router.callback_query(F.data == "hist")
+async def cb_hist(cb: CallbackQuery, repo: RequestsRepo, user: User):
+    if not await _require_identity(cb, user):
+        return
+    text, kb = await _hist_page(repo, user, None)
+    await cb.message.edit_text(text, reply_markup=kb)
+    await cb.answer()
+
+
+@user_router.callback_query(F.data.startswith("histpage:"))
+async def cb_hist_page(cb: CallbackQuery, repo: RequestsRepo, user: User):
+    if not await _require_identity(cb, user):
+        return
+    before = datetime.date.fromisoformat(cb.data.split(":", 1)[1])
+    text, kb = await _hist_page(repo, user, before)
+    await cb.message.edit_text(text, reply_markup=kb)
     await cb.answer()
 
 
@@ -453,7 +511,7 @@ async def cb_bell_mode(cb: CallbackQuery, repo: RequestsRepo, user: User):
     nxt = BELL_ORDER[(BELL_ORDER.index(cur) + 1) % len(BELL_ORDER)]
     await repo.users.set_bell_mode(user.id, nxt)
     user.bell_mode = nxt
-    await cb.message.edit_text(SETTINGS_TEXT, reply_markup=settings_kb(user))
+    await cb.message.edit_text(_settings_text(user), reply_markup=settings_kb(user))
     await cb.answer(f"Звонки: {BELL_LABELS[nxt]}")
 
 
@@ -462,7 +520,7 @@ async def cb_image_toggle(cb: CallbackQuery, repo: RequestsRepo, user: User):
     new = not user.send_image
     await repo.users.set_send_image(user.id, new)
     user.send_image = new
-    await cb.message.edit_text(SETTINGS_TEXT, reply_markup=settings_kb(user))
+    await cb.message.edit_text(_settings_text(user), reply_markup=settings_kb(user))
     await cb.answer("Картинки включены 🐱" if new else "Картинки отключены")
 
 
@@ -472,7 +530,7 @@ async def cb_detail(cb: CallbackQuery, repo: RequestsRepo, user: User):
     nxt = DETAIL_ORDER[(DETAIL_ORDER.index(cur) + 1) % len(DETAIL_ORDER)]
     await repo.users.set_bell_detail(user.id, nxt)
     user.bell_detail = nxt
-    await cb.message.edit_text(SETTINGS_TEXT, reply_markup=settings_kb(user))
+    await cb.message.edit_text(_settings_text(user), reply_markup=settings_kb(user))
     await cb.answer(f"Детализация: {DETAIL_LABELS[nxt]}")
 
 
@@ -583,7 +641,48 @@ async def group_answer(message: Message, repo: RequestsRepo, state: FSMContext):
     )
 
 
+# Нижнее меню: три кнопки, которые нужны каждый день. Reply-клавиатура
+# всегда на экране, целиться в инлайн-кнопку под сообщением не надо.
+# Обработчики стоят ДО any_text — иначе он их перехватит.
+BOTTOM_KB = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text="📅 Сегодня"),
+               KeyboardButton(text="📅 Завтра"),
+               KeyboardButton(text="🗓 Неделя")]],
+    resize_keyboard=True,
+    is_persistent=True,
+)
+
+
+@user_router.message(F.text == "📅 Сегодня")
+async def btn_today(message: Message, repo: RequestsRepo, user: User):
+    if not _has_identity(user):
+        await message.answer("Сначала выбери группу или фамилию 🎯", reply_markup=ROLE_KB)
+        return
+    await message.answer(await _day_text(repo, user, datetime.date.today()),
+                         reply_markup=BACK_KB)
+
+
+@user_router.message(F.text == "📅 Завтра")
+async def btn_tomorrow(message: Message, repo: RequestsRepo, user: User):
+    if not _has_identity(user):
+        await message.answer("Сначала выбери группу или фамилию 🎯", reply_markup=ROLE_KB)
+        return
+    await message.answer(
+        await _day_text(repo, user, datetime.date.today() + datetime.timedelta(days=1)),
+        reply_markup=BACK_KB)
+
+
+@user_router.message(F.text == "🗓 Неделя")
+async def btn_week(message: Message, repo: RequestsRepo, user: User):
+    if not _has_identity(user):
+        await message.answer("Сначала выбери группу или фамилию 🎯", reply_markup=ROLE_KB)
+        return
+    await message.answer(await _week_text(repo, user), reply_markup=BACK_KB)
+
+
 @user_router.message(F.text, ~F.text.startswith("/"))
 async def any_text(message: Message, repo: RequestsRepo, user: User):
+    """Не молчим на непонятный текст — показываем меню и нижние кнопки."""
     text, kb = await _render_menu(repo, user)
     await message.answer(text, reply_markup=kb)
+    await message.answer("Кнопки внизу — быстрый доступ 👇", reply_markup=BOTTOM_KB)

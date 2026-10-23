@@ -13,10 +13,7 @@ from tgbot.services.broadcaster import broadcast_schedule
 from tgbot.services.notify_edits import snapshot_past_days
 
 
-_failed: dict[str, float] = {}
-
-
-async def poll_once(session_pool, config: Config, failed_cooldown: int = 1800) -> list[tuple[datetime.date, bool]]:
+async def poll_once(session_pool, config: Config) -> list[tuple[datetime.date, bool]]:
     """Синхронизировать расписание СПО из ЭИОС.
 
     Скачивает файлы колледжа, раскладывает их в слои ``base_lesson`` +
@@ -158,7 +155,6 @@ async def poller_loop(bot, session_pool, config: Config) -> None:
 
             interval = int(settings["poll_interval"])
             rate = float(settings["notify_rate"])
-            failed_cooldown = int(settings.get("failed_cooldown", 1800) or 1800)
             now = datetime.datetime.now()
 
             # Архив прошедших дней: раз в час, чтобы зафиксировать, что было
@@ -173,7 +169,7 @@ async def poller_loop(bot, session_pool, config: Config) -> None:
 
             if not _in_night(now, settings["night_start"], settings["night_end"]):
                 if time.monotonic() - last_poll >= interval:
-                    changes = await poll_once(session_pool, config, failed_cooldown)
+                    changes = await poll_once(session_pool, config)
                     if changes:
                         await notify_new_schedule(bot, session_pool, changes, rate, config.photos_path)
                     last_poll = time.monotonic()

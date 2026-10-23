@@ -3,6 +3,8 @@ import datetime
 import logging
 import os
 import time
+from dataclasses import dataclass
+from typing import Callable
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -29,7 +31,6 @@ class AdminState(StatesGroup):
     set_deadline = State()
     set_night = State()
     set_support = State()
-    set_cooldown = State()
     set_broadcast = State()
     set_group_broadcast = State()
     confirm_broadcast = State()
@@ -73,7 +74,6 @@ def _settings_text(s: dict) -> str:
         f"Скорость рассылки: <b>{s['notify_rate']} сообщ/сек</b>\n"
         f"Ночная пауза: <b>{night}</b>\n"
         f"Дедлайн «занятий нет»: <b>{s['deadline_hour']}:00</b>\n"
-        f"Кулдаун битых ссылок: <b>{s['failed_cooldown']} сек</b>\n"
         f"Ссылка поддержки: <b>{s['support_link'] or '—'}</b>"
     )
 
@@ -95,12 +95,11 @@ def _admin_kb() -> InlineKeyboardMarkup:
 
 def _settings_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Интервал опроса", callback_data="adm:set_poll")],
-        [InlineKeyboardButton(text="Скорость рассылки", callback_data="adm:set_rate")],
-        [InlineKeyboardButton(text="Ночная пауза", callback_data="adm:set_night")],
-        [InlineKeyboardButton(text="Дедлайн «занятий нет»", callback_data="adm:set_deadline")],
-        [InlineKeyboardButton(text="Кулдаун битых ссылок", callback_data="adm:set_cooldown")],
-        [InlineKeyboardButton(text="Ссылка поддержки", callback_data="adm:set_support")],
+        [InlineKeyboardButton(text="Интервал опроса", callback_data="adm:set:poll")],
+        [InlineKeyboardButton(text="Скорость рассылки", callback_data="adm:set:rate")],
+        [InlineKeyboardButton(text="Ночная пауза", callback_data="adm:set:night")],
+        [InlineKeyboardButton(text="Дедлайн «занятий нет»", callback_data="adm:set:deadline")],
+        [InlineKeyboardButton(text="Ссылка поддержки", callback_data="adm:set:support")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back")],
     ])
 
@@ -732,153 +731,87 @@ async def cb_adm_chats(cb: CallbackQuery, repo: RequestsRepo, config: Config):
     await cb.answer()
 
 
-# ---- settings editing via prompts ----
+# ---- настройки: ввод значением ----
+# Одна таблица вместо двенадцати обработчиков: для каждой настройки
+# отличается только вопрос, валидатор и текст подтверждения.
 
-@admin_router.callback_query(lambda cb: cb.data == "adm:set_poll")
-async def cb_set_poll(cb: CallbackQuery, config: Config, state: FSMContext):
-    if not _is_admin_cb(cb, config):
-        return
-    await state.set_state(AdminState.set_poll)
-    await cb.message.answer("Введи интервал опроса (секунд, мин. 10):")
-    await cb.answer()
-
-
-@admin_router.callback_query(lambda cb: cb.data == "adm:set_rate")
-async def cb_set_rate(cb: CallbackQuery, config: Config, state: FSMContext):
-    if not _is_admin_cb(cb, config):
-        return
-    await state.set_state(AdminState.set_rate)
-    await cb.message.answer("Введи скорость рассылки (сообщений/сек, 0–30):")
-    await cb.answer()
+@dataclass(frozen=True)
+class _Setting:
+    state: State
+    prompt: str
+    keys: tuple[str, ...]            # один или два ключа в setting
+    parse: Callable[[str], tuple[str, ...]]   # сырой ввод -> значения
+    ok: str                          # шаблон подтверждения
 
 
-@admin_router.callback_query(lambda cb: cb.data == "adm:set_deadline")
-async def cb_set_deadline(cb: CallbackQuery, config: Config, state: FSMContext):
-    if not _is_admin_cb(cb, config):
-        return
-    await state.set_state(AdminState.set_deadline)
-    await cb.message.answer("Введи час дедлайна (0–23) или «off»:")
-    await cb.answer()
+def _num(text: str, lo: int, hi: int) -> tuple[str, ...]:
+    value = int(text)
+    if not lo <= value <= hi:
+        raise ValueError
+    return (str(value),)
 
 
-@admin_router.callback_query(lambda cb: cb.data == "adm:set_night")
-async def cb_set_night(cb: CallbackQuery, config: Config, state: FSMContext):
-    if not _is_admin_cb(cb, config):
-        return
-    await state.set_state(AdminState.set_night)
-    await cb.message.answer("Введи ночное окно «HH:MM HH:MM» или «off»:")
-    await cb.answer()
+def _rate(text: str) -> tuple[str, ...]:
+    value = float(text)
+    if not 0 < value <= 30:
+        raise ValueError
+    return (str(value),)
 
 
-@admin_router.callback_query(lambda cb: cb.data == "adm:set_support")
-async def cb_set_support(cb: CallbackQuery, config: Config, state: FSMContext):
-    if not _is_admin_cb(cb, config):
-        return
-    await state.set_state(AdminState.set_support)
-    await cb.message.answer("Отправь ссылку на группу поддержки:")
-    await cb.answer()
-
-
-@admin_router.callback_query(lambda cb: cb.data == "adm:set_cooldown")
-async def cb_set_cooldown(cb: CallbackQuery, config: Config, state: FSMContext):
-    if not _is_admin_cb(cb, config):
-        return
-    await state.set_state(AdminState.set_cooldown)
-    await cb.message.answer("Введи кулдаун битых ссылок (секунд, мин. 60):")
-    await cb.answer()
-
-
-@admin_router.message(AdminState.set_poll)
-async def m_set_poll(message: Message, repo: RequestsRepo, state: FSMContext):
-    await state.clear()
-    try:
-        sec = int(message.text.strip())
-        if sec < 10:
-            raise ValueError
-    except ValueError:
-        await message.answer("Неверно. Целое число секунд (мин. 10).")
-        return
-    await repo.settings.set("poll_interval", str(sec))
-    await message.answer(f"Интервал опроса: {sec} сек")
-
-
-@admin_router.message(AdminState.set_rate)
-async def m_set_rate(message: Message, repo: RequestsRepo, state: FSMContext):
-    await state.clear()
-    try:
-        rate = float(message.text.strip())
-        if not 0 < rate <= 30:
-            raise ValueError
-    except ValueError:
-        await message.answer("Неверно. Число 0–30.")
-        return
-    await repo.settings.set("notify_rate", str(rate))
-    await message.answer(f"Скорость рассылки: {rate} сообщ/сек")
-
-
-@admin_router.message(AdminState.set_deadline)
-async def m_set_deadline(message: Message, repo: RequestsRepo, state: FSMContext):
-    await state.clear()
-    raw = message.text.strip().lower()
-    if raw == "off":
-        await repo.settings.set("deadline_hour", "-1")
-        await message.answer("Дедлайн отключён (всегда «ещё не выложено» до появления файла)")
-        return
-    try:
-        h = int(raw)
-        if not 0 <= h <= 23:
-            raise ValueError
-    except ValueError:
-        await message.answer("Неверно. Час 0–23 или «off».")
-        return
-    await repo.settings.set("deadline_hour", str(h))
-    await message.answer(f"Дедлайн «занятий нет»: {h}:00")
-
-
-@admin_router.message(AdminState.set_night)
-async def m_set_night(message: Message, repo: RequestsRepo, state: FSMContext):
-    await state.clear()
-    raw = message.text.strip()
-    if raw.lower() == "off":
-        await repo.settings.set("night_start", "")
-        await repo.settings.set("night_end", "")
-        await message.answer("Ночная пауза выключена")
-        return
-    parts = raw.split()
+def _night(text: str) -> tuple[str, ...]:
+    parts = text.split()
     if len(parts) != 2:
-        await message.answer("Формат: «HH:MM HH:MM» или «off»")
+        raise ValueError
+    datetime.time.fromisoformat(parts[0])
+    datetime.time.fromisoformat(parts[1])
+    return (parts[0], parts[1])
+
+
+SETTINGS: dict[str, _Setting] = {
+    "poll": _Setting(AdminState.set_poll, "Введи интервал опроса (секунд, мин. 10):",
+                     ("poll_interval",), lambda t: _num(t, 10, 86_400),
+                     "Интервал опроса: {} сек"),
+    "rate": _Setting(AdminState.set_rate, "Введи скорость рассылки (сообщений/сек, 0–30):",
+                     ("notify_rate",), _rate,
+                     "Скорость рассылки: {} сообщ/сек"),
+    "deadline": _Setting(AdminState.set_deadline, "Введи час дедлайна (0–23):",
+                         ("deadline_hour",), lambda t: _num(t, 0, 23),
+                         "Дедлайн «занятий нет»: {}:00"),
+    "night": _Setting(AdminState.set_night, "Введи ночное окно «HH:MM HH:MM»:",
+                      ("night_start", "night_end"), _night, "Ночная пауза: {}–{}"),
+    "support": _Setting(AdminState.set_support, "Отправь ссылку на группу поддержки:",
+                        ("support_link",), lambda t: (t,), "Ссылка поддержки: {}"),
+}
+
+
+@admin_router.callback_query(F.data.startswith("adm:set:"))
+async def cb_setting(cb: CallbackQuery, config: Config, state: FSMContext):
+    if not _is_admin_cb(cb, config):
+        return
+    item = SETTINGS.get(cb.data.split(":")[-1])
+    if not item:
+        await cb.answer("Неизвестная настройка", show_alert=True)
+        return
+    await state.set_state(item.state)
+    await cb.message.answer(item.prompt)
+    await cb.answer()
+
+
+@admin_router.message(*[s.state for s in SETTINGS.values()])
+async def m_setting(message: Message, repo: RequestsRepo, state: FSMContext):
+    current = await state.get_state()
+    item = next((s for s in SETTINGS.values() if s.state.state == current), None)
+    await state.clear()
+    if item is None:
         return
     try:
-        datetime.time.fromisoformat(parts[0])
-        datetime.time.fromisoformat(parts[1])
-    except ValueError:
-        await message.answer("Формат времени: HH:MM")
+        value = item.parse(message.text.strip())
+    except (ValueError, TypeError):
+        await message.answer("Неверное значение. Попробуй ещё раз.")
         return
-    await repo.settings.set("night_start", parts[0])
-    await repo.settings.set("night_end", parts[1])
-    await message.answer(f"Ночная пауза: {parts[0]}–{parts[1]}")
-
-
-@admin_router.message(AdminState.set_support)
-async def m_set_support(message: Message, repo: RequestsRepo, state: FSMContext):
-    await state.clear()
-    link = message.text.strip()
-    await repo.settings.set("support_link", link)
-    await message.answer(f"Ссылка поддержки: {link}")
-
-
-@admin_router.message(AdminState.set_cooldown)
-async def m_set_cooldown(message: Message, repo: RequestsRepo, state: FSMContext):
-    await state.clear()
-    try:
-        sec = int(message.text.strip())
-        if sec < 60:
-            raise ValueError
-    except ValueError:
-        await message.answer("Неверно. Целое число секунд (мин. 60).")
-        return
-    await repo.settings.set("failed_cooldown", str(sec))
-    await message.answer(f"Кулдаун битых ссылок: {sec} сек")
+    for key, val in zip(item.keys, value):
+        await repo.settings.set(key, val)
+    await message.answer(item.ok.format(*value))
 
 
 # ---- photo management ----

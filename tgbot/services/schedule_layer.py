@@ -5,7 +5,7 @@
 """
 import datetime
 
-from common.schedule import PARITY_ANY, SUB_CANCEL, week_parity
+from common.schedule import SUB_CANCEL, week_parity
 from infrastructure.database.repo.requests import RequestsRepo
 
 # Колледж считает чётность на 1 иначе, чем ISO (26.10.2026 — ISO чётная,
@@ -63,26 +63,3 @@ async def get_day_slots(repo: RequestsRepo, group: str, date: datetime.date,
 
     slots.sort(key=lambda s: s.para)
     return slots
-
-
-async def get_week_slots(repo: RequestsRepo, group: str,
-                         start: datetime.date | None = None,
-                         parity_offset: int = 0) -> list[tuple[datetime.date, list[Slot]]]:
-    """Расписание группы на 7 дней начиная с понедельника."""
-    if start is None:
-        today = datetime.date.today()
-        start = today - datetime.timedelta(days=today.weekday())
-    result = []
-    for i in range(7):
-        d = start + datetime.timedelta(days=i)
-        slots = await get_day_slots(repo, group, d, parity_offset)
-        result.append((d, slots))
-    return result
-
-
-async def has_base(repo: RequestsRepo, group: str) -> bool:
-    """Есть ли у группы вообще базовое расписание."""
-    for parity in ("ODD", "EVEN", PARITY_ANY):
-        if await repo.base_lessons.get_week(group, parity):
-            return True
-    return False

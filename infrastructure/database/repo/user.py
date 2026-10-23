@@ -139,16 +139,6 @@ class UserRepo(BaseRepo):
         result = await self.session.execute(select(User).where(User.id == user_id))
         return result.scalar_one_or_none()
 
-    async def find_by_username(self, username: str) -> list[User]:
-        """Найти пользователя по @нику (регистр и ведущий @ не важны)."""
-        clean = username.lstrip("@").strip()
-        if not clean:
-            return []
-        result = await self.session.execute(
-            select(User).where(func.lower(User.username) == clean.lower())
-        )
-        return list(result.scalars().all())
-
     async def search(self, query: str, limit: int = 8) -> list[User]:
         """Поиск по @нику, имени или id — для выдачи прав редактора."""
         q = query.strip()
