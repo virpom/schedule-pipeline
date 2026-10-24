@@ -60,6 +60,7 @@ async def poll_once(bot, session_pool, config: Config) -> list[tuple[datetime.da
     Возвращает список изменившихся дней (для рассылки): ``(дата, новое_ли)``.
     """
     changes: list[tuple[datetime.date, bool]] = []
+    vuz_changed = False
     async with ClientSession() as session:
         # Вуз обновляем отдельным шагом: у него свой источник и свой файл.
         # Сбой вуза не должен ломать колледж — и наоборот.
@@ -73,6 +74,13 @@ async def poll_once(bot, session_pool, config: Config) -> list[tuple[datetime.da
                     # Свой признак свежести: у вуза свой источник, и он
                     # может быть жив, когда сайт колледжа лежит.
                     await source_state.mark_ok_vuz(repo)
+                # Файл вуза обновился — его замены тоже надо разослать.
+                # Раньше здесь смотрели только на флаги колледжа, и
+                # студент вуза не получал уведомлений вообще.
+                vuz_changed = bool(vuz_result.get("full") or vuz_result.get("part"))
+                for form in vuz_result.get("anchor_off") or []:
+                    logging.error("якорь недель вуза не сходится (%s), "
+                                  "проверь /setvuzanchor", form)
         except Exception:
             logging.exception("синхронизация вуза не удалась")
 
@@ -112,7 +120,8 @@ async def poll_once(bot, session_pool, config: Config) -> list[tuple[datetime.da
                 logging.exception("материализация не удалась")
 
         # Рассылаем, только если источник реально изменился.
-        if result is None or not (result["ochoe"] or result["zameny"]):
+        college_changed = result is not None and (result["ochoe"] or result["zameny"])
+        if not college_changed and not vuz_changed:
             return changes
 
         today = datetime.date.today()
@@ -124,8 +133,10 @@ async def poll_once(bot, session_pool, config: Config) -> list[tuple[datetime.da
             repo = RequestsRepo(db)
             dates = set(await repo.substitutions.get_dates(today))
 
-        if result["ochoe"]:
+        if (result and result["ochoe"]) or vuz_changed:
             # Сменилось базовое расписание — показываем ближайшие дни.
+            # Для вуза это обязательно: его замены лежат в substitution
+            # с датами, но базовое расписание тоже могло поменяться.
             dates |= {today + datetime.timedelta(days=i) for i in range(3)}
 
         for date in sorted(dates):
