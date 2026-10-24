@@ -181,18 +181,27 @@ async def replace_vuz_groups(
 
 
 async def replace_vuz_changes(
-    repo: RequestsRepo, changes: list[vuz.VuzChange],
+    repo: RequestsRepo, changes: list[vuz.VuzChange], form: str,
 ) -> int:
     """Записать замены, найденные внутри файла расписания.
 
     У вуза отдельного листка замен нет: замены и переносы стоят прямо
     в клетках с датой. Пишем их в ту же таблицу, что и колледж, чтобы
     показ и уведомления работали одинаково.
+
+    Чистим только группы своей формы: иначе второй файл сносит замены
+    первого — та же ошибка, что была с уроками.
     """
     from infrastructure.database.models import Substitution
 
     if not changes:
         return 0
+
+    own_groups = [
+        g for (g,) in await repo.session.execute(
+            select(VuzGroup.name).where(VuzGroup.form == form)
+        )
+    ]
 
     manual = [
         row for (row,) in await repo.session.execute(
@@ -201,9 +210,17 @@ async def replace_vuz_changes(
     ]
     manual_keys = {(r.date, r.group, r.para) for r in manual}
 
-    await repo.session.execute(
-        delete(Substitution).where(Substitution.source == SOURCE_VUZ)
-    )
+    if own_groups:
+        await repo.session.execute(
+            delete(Substitution).where(
+                Substitution.source == SOURCE_VUZ,
+                Substitution.group.in_(own_groups),
+            )
+        )
+    else:
+        await repo.session.execute(
+            delete(Substitution).where(Substitution.source == SOURCE_VUZ)
+        )
 
     now = datetime.datetime.now()
     seen: set[tuple] = set()
@@ -299,7 +316,7 @@ async def sync_once(
         # какие группы относятся к этой форме, и не сносит чужой файл.
         await replace_vuz_groups(repo, parsed.groups, form)
         count = await replace_vuz_lessons(repo, parsed.lessons, form)
-        await replace_vuz_changes(repo, parsed.changes)
+        await replace_vuz_changes(repo, parsed.changes, form)
         await repo.settings.set(key, digest)
         log.info("расписание вуза (%s) обновлено: %d пар, %d замен",
                  form, count, len(parsed.changes))

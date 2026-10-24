@@ -192,7 +192,7 @@ def test_changes_saved_as_substitutions():
                 await sync_vuz.replace_vuz_changes(repo, [
                     vuz.VuzChange("ЭК-23@vuz", datetime.date(2026, 11, 9), 1,
                                   "История", "Иванов И.И."),
-                ])
+                ], "full")
                 rows = (await db.execute(select(Substitution))).scalars().all()
                 assert len(rows) == 1
                 assert rows[0].source == "vuz"
@@ -410,6 +410,38 @@ def test_materialize_does_not_crash_on_para_clash():
                 assert all(" / " in r.subject or r.subject in ("Физкультура",
                                                               "Иностранный")
                            for r in rows)
+        finally:
+            await env.close()
+    run(scenario())
+
+
+def test_changes_of_both_forms_survive():
+    """Замены одной формы не должны сносить замены другой.
+
+    Тот же баг, что был с уроками: общий delete по source='vuz'
+    оставлял только замены последнего загруженного файла.
+    """
+    async def scenario():
+        env = await make_env()
+        try:
+            async with env.pool() as db:
+                repo = RequestsRepo(db)
+                await sync_vuz.replace_vuz_groups(
+                    repo, [vuz.VuzGroup("ЭК-23@vuz", "FEU", 2, "full")], "full")
+                await sync_vuz.replace_vuz_groups(
+                    repo, [vuz.VuzGroup("ЭК-23оз@vuz", "FEU", 2, "part")], "part")
+
+                await sync_vuz.replace_vuz_changes(repo, [
+                    vuz.VuzChange("ЭК-23@vuz", datetime.date(2026, 11, 9), 1,
+                                  "Очная замена"),
+                ], "full")
+                await sync_vuz.replace_vuz_changes(repo, [
+                    vuz.VuzChange("ЭК-23оз@vuz", datetime.date(2026, 11, 9), 1,
+                                  "Заочная замена"),
+                ], "part")
+
+                rows = (await db.execute(select(Substitution))).scalars().all()
+                assert {r.subject for r in rows} == {"Очная замена", "Заочная замена"}
         finally:
             await env.close()
     run(scenario())
