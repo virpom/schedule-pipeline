@@ -3,7 +3,7 @@ import asyncio
 import datetime
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from infrastructure.database.models import Base, BaseLesson, Substitution, VuzGroup
@@ -74,7 +74,7 @@ def test_replace_lessons_writes_and_counts():
                     vuz.VuzLesson("ЭК-23@vuz", 1, 1, "ANY", "Физика",
                                   "Петров П.П.", weeks=(5, 7)),
                 ]
-                n = await sync_vuz.replace_vuz_lessons(repo, lessons)
+                n = await sync_vuz.replace_vuz_lessons(repo, lessons, "full")
                 assert n == 2
                 rows = (await db.execute(select(BaseLesson))).scalars().all()
                 assert len(rows) == 2
@@ -96,7 +96,7 @@ def test_same_slot_different_weeks_both_stored():
                                   weeks=(6, 8, 10)),
                     vuz.VuzLesson("ЭК-23@vuz", 1, 7, "ANY", "Презентации",
                                   weeks=(5, 7, 9)),
-                ])
+                ], "full")
                 rows = (await db.execute(select(BaseLesson))).scalars().all()
                 assert len(rows) == 2, "одна пара затёрла другую"
         finally:
@@ -113,10 +113,10 @@ def test_replace_removes_stale_site_rows():
                 repo = RequestsRepo(db)
                 await sync_vuz.replace_vuz_lessons(repo, [
                     vuz.VuzLesson("ЭК-23@vuz", 1, 1, "ANY", "Старая", weeks=(1,)),
-                ])
+                ], "full")
                 await sync_vuz.replace_vuz_lessons(repo, [
                     vuz.VuzLesson("ЭК-23@vuz", 1, 1, "ANY", "Новая", weeks=(1,)),
-                ])
+                ], "full")
                 rows = (await db.execute(select(BaseLesson))).scalars().all()
                 assert [r.subject for r in rows] == ["Новая"]
         finally:
@@ -136,7 +136,7 @@ def test_manual_edit_survives_sync():
                     source="manual")
                 await sync_vuz.replace_vuz_lessons(repo, [
                     vuz.VuzLesson("ЭК-23@vuz", 1, 1, "ANY", "Сайт", weeks=(1,)),
-                ])
+                ], "full")
                 rows = (await db.execute(select(BaseLesson))).scalars().all()
                 assert [r.subject for r in rows] == ["Ручная"]
         finally:
@@ -155,7 +155,7 @@ def test_vuz_sync_does_not_touch_college():
                     "ЭК-23", "ODD", 1, 1, "Колледж", source="site")
                 await sync_vuz.replace_vuz_lessons(repo, [
                     vuz.VuzLesson("ЭК-23@vuz", 1, 1, "ANY", "Вуз", weeks=(1,)),
-                ])
+                ], "full")
                 rows = (await db.execute(select(BaseLesson))).scalars().all()
                 groups = {r.group for r in rows}
                 assert groups == {"ЭК-23", "ЭК-23@vuz"}
@@ -173,7 +173,7 @@ def test_groups_saved_with_faculty():
                 n = await sync_vuz.replace_vuz_groups(repo, [
                     vuz.VuzGroup("ЭК-23@vuz", "FEU", 2, "full"),
                     vuz.VuzGroup("ГТ-23@vuz", "GTF", 2, "full"),
-                ])
+                ], "full")
                 assert n == 2
                 rows = (await db.execute(select(VuzGroup))).scalars().all()
                 assert {r.faculty for r in rows} == {"FEU", "GTF"}
@@ -215,7 +215,7 @@ def test_get_day_filters_by_week():
                                   weeks=(6, 8)),
                     vuz.VuzLesson("ЭК-23@vuz", 1, 7, "ANY", "Презентации",
                                   weeks=(5, 7)),
-                ])
+                ], "full")
                 week5 = await repo.base_lessons.get_day("ЭК-23@vuz", 1, "ANY", week=5)
                 week6 = await repo.base_lessons.get_day("ЭК-23@vuz", 1, "ANY", week=6)
                 assert [r.subject for r in week5] == ["Презентации"]
@@ -237,7 +237,7 @@ def test_get_day_without_week_returns_all():
                                   weeks=(6, 8)),
                     vuz.VuzLesson("ЭК-23@vuz", 1, 7, "ANY", "Презентации",
                                   weeks=(5, 7)),
-                ])
+                ], "full")
                 rows = await repo.base_lessons.get_day("ЭК-23@vuz", 1, "ANY")
                 assert len(rows) == 2
         finally:
@@ -268,6 +268,73 @@ def test_broken_anchor_falls_back_to_default():
                 repo = RequestsRepo(db)
                 await repo.settings.set(sync_vuz.ANCHOR_KEY, "не дата")
                 assert await sync_vuz.get_anchor(repo) == sync_vuz.DEFAULT_ANCHOR
+        finally:
+            await env.close()
+    run(scenario())
+
+
+# --- формы обучения ----------------------------------------------------------
+
+def test_forms_do_not_wipe_each_other():
+    """Очная и очно-заочная лежат в одной таблице.
+
+    Первый прогон на проде: после загрузки второго файла осталась только
+    очно-заочная — общий delete снёс очную. Формы должны чистить только
+    свои строки.
+    """
+    async def scenario():
+        env = await make_env()
+        try:
+            async with env.pool() as db:
+                repo = RequestsRepo(db)
+                full_groups = [vuz.VuzGroup("ЭК-23@vuz", "FEU", 2, "full")]
+                part_groups = [vuz.VuzGroup("ЭК-23оз@vuz", "FEU", 2, "part")]
+
+                await sync_vuz.replace_vuz_groups(repo, full_groups, "full")
+                await sync_vuz.replace_vuz_lessons(repo, [
+                    vuz.VuzLesson("ЭК-23@vuz", 1, 1, "ANY", "Очная", weeks=(1,)),
+                ], "full")
+
+                await sync_vuz.replace_vuz_groups(repo, part_groups, "part")
+                await sync_vuz.replace_vuz_lessons(repo, [
+                    vuz.VuzLesson("ЭК-23оз@vuz", 1, 1, "ANY", "Заочная",
+                                  weeks=(1,)),
+                ], "part")
+
+                rows = (await db.execute(select(BaseLesson))).scalars().all()
+                subjects = {r.subject for r in rows}
+                assert subjects == {"Очная", "Заочная"}, (
+                    f"одна форма снесла другую: {subjects}")
+        finally:
+            await env.close()
+    run(scenario())
+
+
+def test_resync_one_form_keeps_other():
+    """Повторная загрузка очной не должна трогать очно-заочную."""
+    async def scenario():
+        env = await make_env()
+        try:
+            async with env.pool() as db:
+                repo = RequestsRepo(db)
+                await sync_vuz.replace_vuz_groups(
+                    repo, [vuz.VuzGroup("ЭК-23@vuz", "FEU", 2, "full")], "full")
+                await sync_vuz.replace_vuz_groups(
+                    repo, [vuz.VuzGroup("ЭК-23оз@vuz", "FEU", 2, "part")], "part")
+                await sync_vuz.replace_vuz_lessons(repo, [
+                    vuz.VuzLesson("ЭК-23оз@vuz", 1, 1, "ANY", "Заочная",
+                                  weeks=(1,)),
+                ], "part")
+
+                # Очную залили дважды — заочная должна остаться.
+                for _ in range(2):
+                    await sync_vuz.replace_vuz_lessons(repo, [
+                        vuz.VuzLesson("ЭК-23@vuz", 1, 1, "ANY", "Очная",
+                                      weeks=(1,)),
+                    ], "full")
+
+                rows = (await db.execute(select(BaseLesson))).scalars().all()
+                assert {r.subject for r in rows} == {"Очная", "Заочная"}
         finally:
             await env.close()
     run(scenario())

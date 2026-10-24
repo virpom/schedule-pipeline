@@ -75,14 +75,27 @@ def vuz_week(date: datetime.date, anchor: datetime.date | None = None) -> int:
 # --- запись в базу -----------------------------------------------------------
 
 async def replace_vuz_lessons(
-    repo: RequestsRepo, lessons: list[vuz.VuzLesson],
+    repo: RequestsRepo, lessons: list[vuz.VuzLesson], form: str,
 ) -> int:
-    """Заменить базовое расписание вуза.
+    """Заменить базовое расписание вуза для одной формы обучения.
 
     Перезаписываем целиком, как и у колледжа: файл содержит весь семестр,
     и «хвосты» от прошлой версии (убрали пару) иначе останутся висеть.
+
+    Важно: чистим только строки своей формы. Очная и очно-заочная лежат
+    в одной таблице, и общий delete снёс бы чужой файл — так и случилось
+    на первом прогоне: после второго файла осталась только очно-заочная.
+
     Ручные правки (``source != 'vuz'``) сохраняются.
     """
+    # Группы своей формы: справочник vuz_group знает, кто к какой относится.
+    own_groups = [
+        g for (g,) in await repo.session.execute(
+            select(VuzGroup.name).where(VuzGroup.form == form)
+        )
+    ]
+    own = set(own_groups)
+
     manual = [
         row for (row,) in await repo.session.execute(
             select(BaseLesson).where(
@@ -94,12 +107,22 @@ async def replace_vuz_lessons(
     manual_keys = {(r.group, r.week_parity, r.weekday, r.para, r.weeks or "")
                    for r in manual}
 
-    await repo.session.execute(
-        delete(BaseLesson).where(
-            BaseLesson.source == SOURCE_VUZ,
-            BaseLesson.group.like(f"%{vuz.VUZ_SUFFIX}"),
+    # Чистим только свою форму. Если справочника ещё нет (первый запуск),
+    # берём группы из самого файла.
+    if own:
+        await repo.session.execute(
+            delete(BaseLesson).where(
+                BaseLesson.source == SOURCE_VUZ,
+                BaseLesson.group.in_(own),
+            )
         )
-    )
+    else:
+        await repo.session.execute(
+            delete(BaseLesson).where(
+                BaseLesson.source == SOURCE_VUZ,
+                BaseLesson.group.like(f"%{vuz.VUZ_SUFFIX}"),
+            )
+        )
 
     now = datetime.datetime.now()
     seen: set[tuple] = set()
@@ -134,14 +157,16 @@ async def replace_vuz_lessons(
 
 
 async def replace_vuz_groups(
-    repo: RequestsRepo, groups: list[vuz.VuzGroup],
+    repo: RequestsRepo, groups: list[vuz.VuzGroup], form: str,
 ) -> int:
-    """Обновить справочник групп вуза.
+    """Обновить справочник групп вуза для одной формы обучения.
 
     Нужен для навигации: студент выбирает факультет, потом курс, потом
     группу. По имени группы факультет не определить.
+
+    Чистим только свою форму: очная и очно-заочная живут в одной таблице.
     """
-    await repo.session.execute(delete(VuzGroup))
+    await repo.session.execute(delete(VuzGroup).where(VuzGroup.form == form))
     for group in groups:
         repo.session.add(
             VuzGroup(
@@ -270,7 +295,10 @@ async def sync_once(
             result["failed"].append(form)
             raise
 
-        count = await replace_vuz_lessons(repo, parsed.lessons)
+        # Справочник пишем первым: replace_vuz_lessons по нему понимает,
+        # какие группы относятся к этой форме, и не сносит чужой файл.
+        await replace_vuz_groups(repo, parsed.groups, form)
+        count = await replace_vuz_lessons(repo, parsed.lessons, form)
         await replace_vuz_changes(repo, parsed.changes)
         await repo.settings.set(key, digest)
         log.info("расписание вуза (%s) обновлено: %d пар, %d замен",
@@ -278,7 +306,5 @@ async def sync_once(
         result[form] = True
         all_groups.extend(parsed.groups)
 
-    if all_groups:
-        result["groups"] = await replace_vuz_groups(repo, all_groups)
-
+    result["groups"] = len(all_groups)
     return result
