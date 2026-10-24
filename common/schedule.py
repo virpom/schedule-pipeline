@@ -74,13 +74,24 @@ def teacher_base(name: str) -> str:
 
 
 def teacher_matches(lesson_teacher: str, selected_name: str) -> bool:
+    """Совпадает ли преподаватель пары с выбранным.
+
+    Сравнение идёт по фамилии: в расписании она записана по-разному
+    («Коленова В.А.» и «Коленова В. А.»), а человек ищет просто
+    «Коленова». Раньше обрабатывался только обратный случай — в паре
+    одна фамилия, а выбрано полное имя, — поэтому поиск по фамилии
+    не находил ничего ни у вуза, ни у колледжа.
+    """
     lb = teacher_base(lesson_teacher)
     if lb == selected_name:
         return True
     ls = lb.split()
     ss = selected_name.split()
-    # surname-only lesson («Ляшко») matches selected «Ляшко Д.В.»
-    return len(ls) == 1 and len(ss) > 1 and ls[0].casefold() == ss[0].casefold()
+    if not ls or not ss:
+        return False
+    # Сравниваем первые слова (фамилии) без учёта регистра. Инициалы
+    # могут быть записаны по-разному или отсутствовать.
+    return ls[0].casefold() == ss[0].casefold()
 
 
 def course_from_group(group: str) -> int:

@@ -131,11 +131,12 @@ def menu_kb(user: User, support_link: str = "", is_editor: bool = False) -> Inli
         [InlineKeyboardButton(text="⏰ Звонки", callback_data="bell"),
          InlineKeyboardButton(text=f"{sub_icon} Подписка", callback_data="sub:toggle")],
     ]
-    # У вуза нет справочника преподавателей, поэтому поиск по фамилии
-    # показывал бы пустоту. Кнопку убираем, а не оставляем битой.
+    # Поиск по преподавателю работает и для вуза: в его файлах есть
+    # фамилии (142 человека), а запрос идёт по college_lesson, где лежат
+    # пары обоих подразделений.
     if _is_teacher(user):
         rows[2].append(InlineKeyboardButton(text="👥 Группа", callback_data="find_group"))
-    elif not is_vuz(user.group):
+    else:
         rows[2].append(InlineKeyboardButton(text="👨‍🏫 Преподаватель",
                                             callback_data="find_teacher"))
     if is_editor:

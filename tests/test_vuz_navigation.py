@@ -313,3 +313,65 @@ def test_college_picker_excludes_vuz_groups():
             await engine.dispose()
 
     asyncio.get_event_loop_policy().new_event_loop().run_until_complete(scenario())
+
+
+# --- поиск преподавателя -----------------------------------------------------
+
+def test_teacher_search_by_surname():
+    """Человек ищет фамилию, а в расписании она с инициалами.
+
+    Раньше teacher_matches обрабатывал только обратный случай
+    (в паре одна фамилия, выбрано полное имя), поэтому поиск
+    «Коленова» не находил ничего ни у вуза, ни у колледжа.
+    """
+    from common.schedule import teacher_matches
+
+    assert teacher_matches("Коленова В.А.", "Коленова")
+    assert teacher_matches("Коленова В. А.", "Коленова")   # пробел после точки
+    assert teacher_matches("Коленова В.А.", "Коленова В.А.")
+    assert teacher_matches("Ляшко", "Ляшко Д.В.")          # обратный случай
+
+
+def test_teacher_search_does_not_match_others():
+    """Совпадение по фамилии не должно склеивать разных людей."""
+    from common.schedule import teacher_matches
+
+    assert not teacher_matches("Коленова В.А.", "Кабышева")
+    assert not teacher_matches("Коленова В.А.", "")
+    assert not teacher_matches("", "Коленова")
+
+
+def test_teacher_search_finds_vuz_lessons():
+    """Пары вуза ищутся тем же запросом, что и колледжа."""
+    import asyncio
+    import datetime as dt
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from infrastructure.database.models import Base, CollegeLesson
+    from infrastructure.database.repo.requests import RequestsRepo
+
+    async def scenario():
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        pool = async_sessionmaker(engine, expire_on_commit=False)
+        try:
+            async with pool() as db:
+                db.add_all([
+                    CollegeLesson(date=dt.date(2026, 10, 26), group="ЭК-26-1@vuz",
+                                  para=3, para_end=3, subject="Презентации",
+                                  teacher="Коленова В.А.", room="",
+                                  source_url="", source="site", changed=False),
+                    CollegeLesson(date=dt.date(2026, 10, 26), group="ТЭ-26ФП",
+                                  para=1, para_end=1, subject="Физика",
+                                  teacher="Ивасишина Е.Е.", room="",
+                                  source_url="", source="site", changed=False),
+                ])
+                await db.commit()
+                repo = RequestsRepo(db)
+                found = await repo.college_lessons.get_all_for_teacher("Коленова")
+                assert len(found) == 1
+                assert found[0].group == "ЭК-26-1@vuz"
+        finally:
+            await engine.dispose()
+
+    asyncio.get_event_loop_policy().new_event_loop().run_until_complete(scenario())
