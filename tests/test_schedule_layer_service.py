@@ -158,3 +158,40 @@ def test_default_offset_is_college_parity():
     repo = FakeRepo([lesson(1, "Только нечётная", weekday=1, parity=PARITY_ODD)])
     slots = asyncio.run(get_day_slots(repo, "ДП-26", d))
     assert [s.para for s in slots] == [1], "пара нечётной недели должна быть видна"
+
+
+def test_replace_without_base_lesson_is_shown():
+    """Замена на пару, которой нет в базовом расписании, должна быть видна.
+
+    У вуза такие часты: перенос на субботу, разовая консультация.
+    Раньше учитывался только action='add', и замена молча пропадала —
+    студент видел пустой день, хотя пара есть.
+    """
+    from tgbot.services.schedule_layer import get_day_slots
+
+    async def scenario():
+        import datetime as dt
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+        from infrastructure.database.models import Base
+        from infrastructure.database.repo.requests import RequestsRepo
+
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        pool = async_sessionmaker(engine, expire_on_commit=False)
+        try:
+            async with pool() as db:
+                repo = RequestsRepo(db)
+                date = dt.date(2026, 11, 7)
+                # Базовой пары нет — только замена.
+                await repo.substitutions.set(
+                    date=date, group="ЭК-23@vuz", para=3,
+                    action="replace", subject="Перенос", source="vuz")
+                slots = await get_day_slots(repo, "ЭК-23@vuz", date)
+                assert [s.para for s in slots] == [3]
+                assert slots[0].subject == "Перенос"
+                assert slots[0].changed
+        finally:
+            await engine.dispose()
+
+    asyncio.get_event_loop_policy().new_event_loop().run_until_complete(scenario())

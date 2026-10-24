@@ -67,10 +67,15 @@ async def get_day_slots(repo: RequestsRepo, group: str, date: datetime.date,
         else:
             slots.append(Slot(lesson.para, lesson.subject, lesson.teacher, lesson.room))
 
+    # Замена на пару, которой нет в базовом расписании, — это новая пара,
+    # а не «добавление». У вуза такие часты: перенос на субботу, разовая
+    # консультация. Раньше учитывался только action='add', и такая замена
+    # молча пропадала — студент видел пустой день.
+    #
     # «Добавить» на пару, которая уже есть в базе, — это фактически замена:
     # второй слот на тот же номер пары создавать нельзя.
     for para, sub in sorted(sub_by_para.items()):
-        if sub.action == "add" and para not in used:
+        if sub.action in ("add", "replace") and para not in used:
             slots.append(Slot(para, sub.subject, sub.teacher, sub.room,
                               changed=True, action=sub.action, comment=sub.comment))
 
