@@ -47,6 +47,9 @@ async def get_day_slots(repo: RequestsRepo, group: str, date: datetime.date,
 
     base = await repo.base_lessons.get_day(group, date.isoweekday(), parity,
                                            week=week)
+    # Для вуза week всегда задан, поэтому в base остаются только пары,
+    # идущие на этой неделе, — по одной на номер пары. Склейка ниже
+    # нужна колледжу, где на слот бывает и ODD, и ANY.
     subs = await repo.substitutions.get_for_date(group, date)
 
     sub_by_para = {s.para: s for s in subs}

@@ -6,7 +6,8 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from infrastructure.database.models import Base, BaseLesson, Substitution, VuzGroup
+from infrastructure.database.models import (Base, BaseLesson, CollegeLesson,
+                                    Substitution, VuzGroup)
 from infrastructure.database.repo.requests import RequestsRepo
 from parsers import vuz
 from tgbot.services import sync_vuz
@@ -335,6 +336,80 @@ def test_resync_one_form_keeps_other():
 
                 rows = (await db.execute(select(BaseLesson))).scalars().all()
                 assert {r.subject for r in rows} == {"Очная", "Заочная"}
+        finally:
+            await env.close()
+    run(scenario())
+
+
+# --- наложения пар -----------------------------------------------------------
+
+def test_merge_para_clash_keeps_both_subjects():
+    """Две пары на один номер — обе должны остаться видимыми.
+
+    У вуза физкультура идёт потоком все недели, а иностранный язык —
+    по подгруппам. На одной неделе они совпадают. В college_lesson ключ
+    (дата, группа, пара) уникален, поэтому склеиваем через « / ».
+    """
+    from tgbot.services.schedule_layer import Slot
+    from tgbot.services.sync_eios import _merge_para_clash
+
+    merged = _merge_para_clash([
+        Slot(7, "Физкультура", "Кабышева М.И."),
+        Slot(7, "Иностранный", "Ольбик Н.И."),
+    ])
+    assert len(merged) == 1
+    assert "Физкультура" in merged[0].subject
+    assert "Иностранный" in merged[0].subject
+
+
+def test_merge_para_clash_skips_duplicates():
+    """Одна и та же пара дважды — не повод клеить «X / X»."""
+    from tgbot.services.schedule_layer import Slot
+    from tgbot.services.sync_eios import _merge_para_clash
+
+    merged = _merge_para_clash([Slot(3, "Физика"), Slot(3, "Физика")])
+    assert len(merged) == 1
+    assert merged[0].subject == "Физика"
+
+
+def test_merge_para_clash_keeps_distinct_paras():
+    from tgbot.services.schedule_layer import Slot
+    from tgbot.services.sync_eios import _merge_para_clash
+
+    merged = _merge_para_clash([Slot(1, "А"), Slot(2, "Б"), Slot(3, "В")])
+    assert [s.para for s in merged] == [1, 2, 3]
+
+
+def test_materialize_does_not_crash_on_para_clash():
+    """Материализация не должна падать на UNIQUE (дата, группа, пара)."""
+    async def scenario():
+        env = await make_env()
+        try:
+            async with env.pool() as db:
+                repo = RequestsRepo(db)
+                # Две пары на один слот: ровно то, что ломало вставку.
+                # Недели РАЗНЫЕ, но пересекаются — как в реальном файле,
+                # где физкультура идёт все недели, а иностранный только
+                # по нечётным. Ключ (группа, чётность, день, пара, недели)
+                # у них разный, поэтому обе попадают в базу.
+                every = tuple(range(1, 53))
+                odd = tuple(w for w in range(1, 53) if w % 2)
+                await sync_vuz.replace_vuz_lessons(repo, [
+                    vuz.VuzLesson("ЭК-23@vuz", 1, 7, "ANY", "Физкультура",
+                                  "Кабышева М.И.", weeks=every),
+                    vuz.VuzLesson("ЭК-23@vuz", 1, 7, "ANY", "Иностранный",
+                                  "Ольбик Н.И.", weeks=odd),
+                ], "full")
+                from tgbot.services import sync_eios
+                await sync_eios.materialize(repo, days=7)
+                rows = (await db.execute(
+                    select(CollegeLesson).where(
+                        CollegeLesson.group == "ЭК-23@vuz",
+                        CollegeLesson.para == 7))).scalars().all()
+                assert rows, "пары не материализовались"
+                assert all(" / " in r.subject or r.subject in ("Физкультура",
+                                                              "Иностранный")
+                           for r in rows)
         finally:
             await env.close()
     run(scenario())

@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import Boolean, Date, Integer, String, text
+from sqlalchemy import Boolean, Date, Integer, String, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, TableNameMixin
@@ -13,9 +13,13 @@ class CollegeLesson(Base, TableNameMixin):
     BaseLesson + Substitution. Поле source отличает их от ручных правок.
     """
 
-    # NB: в боевой БД уникального индекса нет; согласованность держит
-    # replace_date(), который сначала удаляет все пары за дату.
-    __table_args__ = ()
+    # В боевой БД этот индекс есть (создан до перехода на слои). Держим его
+    # и в модели: иначе тесты на in-memory SQLite не воспроизводят главное
+    # ограничение — одну пару на (дата, группа, номер). Из-за этого
+    # наложение двух пар вуза роняло материализацию только на проде.
+    __table_args__ = (
+        UniqueConstraint("date", "group", "para", name="uc_college_lesson"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     date: Mapped[datetime.date] = mapped_column(Date, index=True)

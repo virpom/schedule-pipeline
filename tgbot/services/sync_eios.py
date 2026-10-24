@@ -312,6 +312,41 @@ async def _sync_zameny(session, repo, url: str, force: bool, changed: dict) -> N
 MATERIALIZE_DAYS = 14
 
 
+def _merge_para_clash(slots: list) -> list:
+    """Склеить пары, оказавшиеся на одном номере.
+
+    У вуза бывает, что на одну пару приходятся два предмета: физкультура
+    идёт потоком все недели, а иностранный язык — по подгруппам на
+    отдельных. В ``college_lesson`` уникален ключ (дата, группа, пара),
+    поэтому две строки туда не влезут. Показываем обе через « / »:
+    студент увидит, что в это время у него два варианта.
+
+    ponytail: склейка теряет структуру (какой предмет чей). Если вуз
+    начнёт делить группы по подгруппам всерьёз — нужна колонка subgroup.
+    """
+    from tgbot.services.schedule_layer import Slot
+
+    seen: dict[int, Slot] = {}
+    for slot in slots:
+        prev = seen.get(slot.para)
+        if prev is None:
+            seen[slot.para] = slot
+            continue
+        subjects = {prev.subject, slot.subject}
+        if len(subjects) == 1:
+            continue
+        seen[slot.para] = Slot(
+            para=slot.para,
+            subject=f"{prev.subject} / {slot.subject}"[:256],
+            teacher=f"{prev.teacher} / {slot.teacher}"[:128] if prev.teacher or slot.teacher else "",
+            room=prev.room or slot.room,
+            changed=prev.changed or slot.changed,
+            action=prev.action or slot.action,
+            comment=prev.comment,
+        )
+    return [seen[p] for p in sorted(seen)]
+
+
 async def materialize(repo: RequestsRepo, days: int = MATERIALIZE_DAYS) -> int:
     """Собрать итоговое расписание из слоёв и положить в ``college_lesson``.
 
@@ -355,7 +390,8 @@ async def materialize(repo: RequestsRepo, days: int = MATERIALIZE_DAYS) -> int:
             for r in manual
         ]
         for group in groups:
-            for slot in await get_day_slots(repo, group, date):
+            slots = await get_day_slots(repo, group, date)
+            for slot in _merge_para_clash(slots):
                 if (group, slot.para) in manual_keys:
                     continue
                 rows.append({

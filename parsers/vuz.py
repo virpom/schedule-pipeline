@@ -65,7 +65,7 @@ PARITY_RE = re.compile(r"^\s*(н|ч)\s*\.", re.I)
 # Одинокая «ч» без точки тоже встречается как пометка чётности.
 LONE_PARITY_RE = re.compile(r"^\s*[нч]\s*$", re.I)
 # «№н. 5-13», «№н.5,7,9», «№нед. 9-12» — это номера недель.
-WEEK_LIST_RE = re.compile(r"№\s*(?:нед\.?|н\.)\s*([\d\s,;\-–]+)", re.I)
+WEEK_LIST_RE = re.compile(r"№\s*(?:нед\.?|н\.?)\s*([\d\s,;\-–]+)", re.I)
 # Дата в ячейке: 26.10.2026, 09.11.2026. — признак переноса/замены.
 DATE_RE = re.compile(r"(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?")
 # «перенос на 13.50», «замена», «отмена» — пометки о движении пары.
@@ -261,8 +261,14 @@ def parse_date(text: str, year: int) -> datetime.date | None:
 
 
 def is_move(text: str) -> bool:
-    """Ячейка описывает перенос/замену, а не постоянную пару."""
-    return bool(MOVE_RE.search(text))
+    """Ячейка привязана к дате, а не к неделе семестра.
+
+    Вуз не выкладывает листок замен отдельно: замена или перенос стоят
+    прямо в клетке расписания с датой. Признак — дата в тексте, а не
+    слово «перенос»: бывает «03.11.2026 - Неорганическая химия» без
+    пояснений, и это всё равно разовая пара на дату.
+    """
+    return bool(DATE_RE.search(text) or MOVE_RE.search(text))
 
 
 def unspace(text: str) -> str:
@@ -317,7 +323,15 @@ def clean_subject(text: str) -> str:
     t = WEEK_LIST_RE.sub("", t).strip(" ,;")
     t = re.sub(r"^[\s.,;]+", "", t)
     # Дата и пометка о переносе — не часть названия: «09.11.2026 - Основы...».
-    t = re.sub(r"^\d{1,2}\.\d{1,2}(?:\.\d{2,4})?\.?\s*[-–—]?\s*", "", t)
+    # Дат бывает несколько подряд: «14, 28.11; 12.12.2026 - Химия».
+    # Дат в начале бывает несколько: «14, 28.11; 12.12.2026 - Химия».
+    for _ in range(4):
+        stripped = re.sub(
+            r"^[\d\s,;.]*?\d{1,2}\.\d{1,2}(?:\.\d{2,4})?\.?\s*[-–—]?\s*",
+            "", t)
+        if stripped == t:
+            break
+        t = stripped
     t = re.sub(r"\s*\d{1,2}\.\d{1,2}(?:\.\d{2,4})?\.?\s*[-–—]\s*перенос.*$", "", t)
     t = re.sub(r"^[\s.,;]+", "", t)
     # После удаления «№н. 5-13» от скобки остаётся «(лек» без закрывающей.
@@ -497,6 +511,12 @@ def _cell_lessons(
     if not text or not text.strip():
         return []
 
+    # Клетка с датой — это перенос или разовая замена, а не постоянная
+    # пара. В базовое расписание ей нельзя: она либо задвоит слот, либо
+    # повиснет на весь семестр. Замены собирает _cell_changes.
+    if is_move(text):
+        return []
+
     result: list[VuzLesson] = []
     carried = ""      # название предмета из первой части ячейки
     for chunk in split_by_weeks(text):
@@ -632,7 +652,7 @@ def parse_sheet(book, sheet_name: str) -> VuzSheet:
                 # Датированные ячейки — это замены, а не постоянное
                 # расписание. Забираем их отдельно, чтобы не попали в базу.
                 cell = sheet.text(row, c)
-                if cell and DATE_RE.search(cell) and is_move(cell):
+                if cell and is_move(cell):
                     changes.extend(_cell_changes(
                         cell, g + VUZ_SUFFIX, para, year))
                 upper = offset < half
