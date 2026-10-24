@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import DateTime, Integer, String, UniqueConstraint
+from sqlalchemy import DateTime, Integer, String, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, TableNameMixin
@@ -15,7 +15,7 @@ class BaseLesson(Base, TableNameMixin):
     """
 
     __table_args__ = (
-        UniqueConstraint('group', 'week_parity', 'weekday', 'para',
+        UniqueConstraint('group', 'week_parity', 'weekday', 'para', 'weeks',
                          name='uc_base_lesson'),
     )
 
@@ -27,6 +27,11 @@ class BaseLesson(Base, TableNameMixin):
     subject: Mapped[str] = mapped_column(String(256))
     teacher: Mapped[str] = mapped_column(String(128), default="")
     room: Mapped[str] = mapped_column(String(64), default="")
+    # Номера недель через запятую: "6,8,10,12,14,16". Пусто — пара идёт
+    # по чётности. Нужно вузу: там в один слот ставится 2-4 предмета с
+    # разными наборами недель.
+    weeks: Mapped[str] = mapped_column(String(128), default="",
+                                       server_default=text("''"))
     source: Mapped[str] = mapped_column(String(8), default="manual")  # site | manual
     updated_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)

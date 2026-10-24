@@ -9,7 +9,7 @@ from common.schedule import course_group_from_course, format_day, format_no_less
 from config import Config
 from infrastructure.database.repo.requests import RequestsRepo
 from parsers import eios
-from tgbot.services import alerts, photos, source_state, sync_eios
+from tgbot.services import alerts, photos, source_state, sync_eios, sync_vuz
 from tgbot.services.broadcaster import broadcast_schedule
 from tgbot.services.notify_edits import snapshot_past_days
 
@@ -61,6 +61,17 @@ async def poll_once(bot, session_pool, config: Config) -> list[tuple[datetime.da
     """
     changes: list[tuple[datetime.date, bool]] = []
     async with ClientSession() as session:
+        # Вуз обновляем отдельным шагом: у него свой источник и свой файл.
+        # Сбой вуза не должен ломать колледж — и наоборот.
+        try:
+            async with session_pool() as db:
+                repo = RequestsRepo(db)
+                vuz_result = await sync_vuz.sync_once(session, repo)
+                if vuz_result.get("failed"):
+                    logging.warning("частичный сбой вуза: %s", vuz_result["failed"])
+        except Exception:
+            logging.exception("синхронизация вуза не удалась")
+
         try:
             async with session_pool() as db:
                 repo = RequestsRepo(db)

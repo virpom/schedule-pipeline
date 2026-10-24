@@ -15,7 +15,7 @@ class FakeBase:
     def __init__(self, lessons):
         self._lessons = lessons
 
-    async def get_day(self, group, weekday, parity):
+    async def get_day(self, group, weekday, parity, week=None):
         return [l for l in self._lessons
                 if l.weekday == weekday and l.week_parity in (parity, "ANY")]
 

@@ -8,12 +8,29 @@ from infrastructure.database.models import BaseLesson
 from infrastructure.database.repo.base import BaseRepo
 
 
+def _fits_week(lesson: BaseLesson, week: int) -> bool:
+    """Идёт ли пара на этой неделе.
+
+    ``weeks`` пусто — пара идёт по чётности, её отфильтровал SQL.
+    ``weeks`` заполнено — смотрим на список номеров.
+    """
+    raw = (lesson.weeks or "").strip()
+    if not raw:
+        return True
+    return week in {int(w) for w in raw.split(",") if w.strip().isdigit()}
+
+
 class BaseLessonRepo(BaseRepo):
-    async def get_day(self, group: str, weekday: int, parity: str) -> list[BaseLesson]:
+    async def get_day(self, group: str, weekday: int, parity: str,
+                      week: int | None = None) -> list[BaseLesson]:
         """Пары группы на день недели с учётом чётности.
 
         Берём строки нужной чётности и ANY (одинаковые каждую неделю);
         при совпадении слота приоритет у конкретной чётности.
+
+        У вуза на один слот бывает несколько пар с разными наборами
+        недель (``weeks``). Если передан номер недели — оставляем только
+        подходящие; без него возвращаем все, чтобы не потерять пары.
         """
         result = await self.session.execute(
             select(BaseLesson)
@@ -24,48 +41,63 @@ class BaseLessonRepo(BaseRepo):
             )
             .order_by(BaseLesson.para)
         )
-        specific, any_rows = {}, {}
-        for l in result.scalars().all():
-            if l.week_parity == PARITY_ANY:
-                any_rows[l.para] = l
-            else:
-                specific[l.para] = l
-        merged = {**any_rows, **specific}
-        return [merged[p] for p in sorted(merged)]
+        rows = list(result.scalars().all())
 
-    async def get_week(self, group: str, parity: str) -> list[BaseLesson]:
+        if week is not None:
+            rows = [r for r in rows if _fits_week(r, week)]
+
+        specific, any_rows = {}, {}
+        for l in rows:
+            # Ключ включает weeks: у вуза в одном слоте живут несколько
+            # пар, и по одному para их не схлопнуть.
+            key = (l.para, l.weeks or "")
+            if l.week_parity == PARITY_ANY:
+                any_rows[key] = l
+            else:
+                specific[key] = l
+        merged = {**any_rows, **specific}
+        return [merged[k] for k in sorted(merged)]
+
+    async def get_week(self, group: str, parity: str,
+                       week: int | None = None) -> list[BaseLesson]:
         result = await self.session.execute(
             select(BaseLesson)
             .where(BaseLesson.group == group,
                    BaseLesson.week_parity.in_([parity, PARITY_ANY]))
             .order_by(BaseLesson.weekday, BaseLesson.para)
         )
-        return list(result.scalars().all())
+        rows = list(result.scalars().all())
+        if week is not None:
+            rows = [r for r in rows if _fits_week(r, week)]
+        return rows
 
     async def upsert(self, group: str, parity: str, weekday: int, para: int,
                      subject: str, teacher: str = "", room: str = "",
-                     source: str = "manual", updated_by: int | None = None) -> None:
+                     source: str = "manual", updated_by: int | None = None,
+                     weeks: str = "") -> None:
         now = datetime.datetime.now()
         await self.session.execute(
             insert(BaseLesson)
             .values(group=group, week_parity=parity, weekday=weekday, para=para,
-                    subject=subject, teacher=teacher, room=room,
+                    weeks=weeks, subject=subject, teacher=teacher, room=room,
                     source=source, updated_by=updated_by, updated_at=now)
             .on_conflict_do_update(
-                index_elements=["group", "week_parity", "weekday", "para"],
+                index_elements=["group", "week_parity", "weekday", "para", "weeks"],
                 set_=dict(subject=subject, teacher=teacher, room=room,
                           source=source, updated_by=updated_by, updated_at=now),
             )
         )
         await self.session.commit()
 
-    async def delete_slot(self, group: str, parity: str, weekday: int, para: int) -> None:
+    async def delete_slot(self, group: str, parity: str, weekday: int, para: int,
+                          weeks: str = "") -> None:
         await self.session.execute(
             delete(BaseLesson).where(
                 BaseLesson.group == group,
                 BaseLesson.week_parity == parity,
                 BaseLesson.weekday == weekday,
                 BaseLesson.para == para,
+                BaseLesson.weeks == weeks,
             )
         )
         await self.session.commit()
