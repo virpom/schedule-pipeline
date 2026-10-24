@@ -6,7 +6,7 @@ import datetime
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.sqlite import insert
 
-from common.schedule import course_group_from_course
+from common.schedule import bells_group
 from infrastructure.database.models import User
 from infrastructure.database.repo.base import BaseRepo
 
@@ -21,7 +21,7 @@ def majority_course_groups(rows) -> dict[str, str]:
     for group, counter in counts.items():
         top = counter.most_common()
         if len(top) == 1 or top[0][1] > top[1][1]:
-            cg = course_group_from_course(top[0][0])
+            cg = bells_group(group, top[0][0])
             if cg:
                 out[group] = cg
     return out
@@ -73,6 +73,13 @@ class UserRepo(BaseRepo):
     async def set_teacher_name(self, user_id: int, name: str) -> None:
         await self.session.execute(
             update(User).where(User.id == user_id).values(teacher_name=name)
+        )
+        await self.session.commit()
+
+    async def set_unit(self, user_id: int, unit: str) -> None:
+        """Подразделение: college | vuz."""
+        await self.session.execute(
+            update(User).where(User.id == user_id).values(unit=unit)
         )
         await self.session.commit()
 

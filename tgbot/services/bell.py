@@ -5,7 +5,7 @@ import logging
 from common.schedule import (
     BELL_FULL,
     BELL_START_END,
-    course_group_from_course,
+    bells_group,
     course_group_from_group,
     day_type_from_date,
 )
@@ -36,7 +36,7 @@ async def _tick(bot, session_pool, now: datetime.datetime) -> None:
             continue
 
         is_teacher = user.role == "teacher"
-        own_cg = None if is_teacher else course_group_from_course(user.course)
+        own_cg = None if is_teacher else bells_group(user.group, user.course)
 
         def _cg(group: str) -> str:
             if own_cg:

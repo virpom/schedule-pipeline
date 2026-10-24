@@ -15,6 +15,7 @@ from infrastructure.database.repo.schedule_file import ScheduleFileRepo
 from infrastructure.database.repo.setting import SettingRepo
 from infrastructure.database.repo.substitution import SubstitutionRepo
 from infrastructure.database.repo.user import UserRepo
+from infrastructure.database.repo.vuz_group import VuzGroupRepo
 
 
 @dataclass
@@ -56,6 +57,10 @@ class RequestsRepo:
     @property
     def base_lessons(self) -> BaseLessonRepo:
         return BaseLessonRepo(self.session)
+
+    @property
+    def vuz_groups(self) -> VuzGroupRepo:
+        return VuzGroupRepo(self.session)
 
     @property
     def substitutions(self) -> SubstitutionRepo:

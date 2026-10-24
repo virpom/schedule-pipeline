@@ -12,7 +12,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from common.schedule import course_group_from_course, format_bell, format_day
+from common.schedule import bells_group, format_bell, format_day
 from config import Config
 from infrastructure.database.repo.requests import RequestsRepo
 from tgbot.services import photos, source_state
@@ -313,7 +313,7 @@ async def _preview_for_user(message: Message, repo: RequestsRepo, config: Config
             await message.answer("У тебя не выбрана группа")
             return
         lessons = await repo.college_lessons.get_for_group_date(user.group, date)
-        cg = course_group_from_course(user.course)
+        cg = bells_group(user.group, user.course)
         gcg = {user.group: cg} if cg else None
     text = format_day(date, lessons, bell, lunches, "brief",
                       meta="group" if is_teacher else "teacher",

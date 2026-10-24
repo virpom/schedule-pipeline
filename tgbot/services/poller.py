@@ -5,7 +5,7 @@ import time
 
 from aiohttp import ClientSession
 
-from common.schedule import course_group_from_course, format_day, format_no_lessons
+from common.schedule import bells_group, format_day, format_no_lessons
 from config import Config
 from infrastructure.database.repo.requests import RequestsRepo
 from parsers import eios
@@ -154,7 +154,7 @@ async def notify_new_schedule(bot, session_pool, changes: list[tuple[datetime.da
             if is_teacher:
                 gcg = group_course_map or None
             else:
-                cg = course_group_from_course(user.course)
+                cg = bells_group(user.group, user.course)
                 gcg = {user.group: cg} if cg else None
             if lessons:
                 text = format_day(

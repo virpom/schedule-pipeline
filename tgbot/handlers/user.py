@@ -15,7 +15,7 @@ from common.schedule import (
     BELL_START_END,
     DETAIL_LABELS,
     DETAIL_ORDER,
-    course_group_from_course,
+    bells_group,
     format_bell,
     format_day,
     format_no_lessons,
@@ -24,10 +24,22 @@ from common.schedule import (
     format_teacher_results,
     format_unverified,
     format_week,
+    is_vuz,
+    strip_unit,
 )
 from infrastructure.database.models import User
 from infrastructure.database.repo.requests import RequestsRepo
 from tgbot.services import source_state
+
+# Названия для людей: в базе коды, студенту они ничего не говорят.
+FACULTY_NAMES = {
+    "FEU": "⚡ ФЭЭиУ",
+    "GTF": "⛏ ГТФ",
+}
+FORM_NAMES = {
+    "full": "Очная",
+    "part": "Очно-заочная",
+}
 
 user_router = Router()
 
@@ -38,6 +50,12 @@ BACK_KB = InlineKeyboardMarkup(
 ROLE_KB = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="🎓 Студент", callback_data="role:student")],
     [InlineKeyboardButton(text="👨‍🏫 Преподаватель", callback_data="role:teacher")],
+])
+
+UNIT_KB = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="🏫 Колледж", callback_data="unit:college")],
+    [InlineKeyboardButton(text="🎓 Вуз", callback_data="unit:vuz")],
+    [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
 ])
 
 COURSE_KB = InlineKeyboardMarkup(inline_keyboard=[
@@ -103,19 +121,23 @@ def menu_kb(user: User, support_link: str = "", is_editor: bool = False) -> Inli
     главное действие.
     """
     sub_icon = "🔕" if user.subscribed else "🔔"
-    second_search = "👥 Группа" if _is_teacher(user) else "👨‍🏫 Преподаватель"
-    second_search_cb = "find_group" if _is_teacher(user) else "find_teacher"
 
     rows = [
         [InlineKeyboardButton(text="📅 Сегодня", callback_data="day:today"),
          InlineKeyboardButton(text="📅 Завтра", callback_data="day:tomorrow")],
         [InlineKeyboardButton(text="🗓 Неделя", callback_data="week"),
          InlineKeyboardButton(text="📜 История", callback_data="hist")],
-        [InlineKeyboardButton(text="🔎 Предмет", callback_data="find"),
-         InlineKeyboardButton(text=second_search, callback_data=second_search_cb)],
+        [InlineKeyboardButton(text="🔎 Предмет", callback_data="find")],
         [InlineKeyboardButton(text="⏰ Звонки", callback_data="bell"),
          InlineKeyboardButton(text=f"{sub_icon} Подписка", callback_data="sub:toggle")],
     ]
+    # У вуза нет справочника преподавателей, поэтому поиск по фамилии
+    # показывал бы пустоту. Кнопку убираем, а не оставляем битой.
+    if _is_teacher(user):
+        rows[2].append(InlineKeyboardButton(text="👥 Группа", callback_data="find_group"))
+    elif not is_vuz(user.group):
+        rows[2].append(InlineKeyboardButton(text="👨‍🏫 Преподаватель",
+                                            callback_data="find_teacher"))
     if is_editor:
         rows.append([InlineKeyboardButton(text="✏️ Редактор расписания",
                                           callback_data="ed:back")])
@@ -134,7 +156,10 @@ def settings_kb(user: User) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(text="🎯 Сменить фамилию", callback_data="pick_teacher")])
     else:
         rows.append([InlineKeyboardButton(text="🎯 Сменить группу", callback_data="pick")])
-        rows.append([InlineKeyboardButton(text="🎯 Сменить курс", callback_data="pick_course")])
+        # У вуза курс берётся из справочника групп — спрашивать его отдельно
+        # значит дать студенту возможность выбрать неверный.
+        if not is_vuz(user.group):
+            rows.append([InlineKeyboardButton(text="🎯 Сменить курс", callback_data="pick_course")])
         rows.append([InlineKeyboardButton(text=f"🐱 Картинки: {_on_off(user.send_image)}",
                                           callback_data="image_toggle")])
     rows.append([InlineKeyboardButton(text=f"🕒 Детализация: {detail_label}",
@@ -151,7 +176,10 @@ def menu_text(user: User) -> str:
         label, ident = "Преподаватель", user.teacher_name or "не выбрана"
     else:
         label = "Группа"
-        ident = user.group or "не выбрана"
+        # Суффикс @vuz — служебный, человеку его видеть незачем.
+        ident = strip_unit(user.group) or "не выбрана"
+        if is_vuz(user.group):
+            label = "Группа · вуз"
         if user.course:
             ident = f"{ident} · {user.course} курс"
     return f"🎓 <b>Расписание ПТК</b>\n\n{label}: <b>{ident}</b>\n\nВыбери действие 👇"
@@ -163,11 +191,62 @@ async def _render_menu(repo: RequestsRepo, user: User) -> tuple[str, InlineKeybo
     return menu_text(user), menu_kb(user, s["support_link"], is_editor)
 
 
-async def _pick_kb(repo: RequestsRepo) -> InlineKeyboardMarkup:
+def _unit_kb() -> InlineKeyboardMarkup:
+    """Первый шаг выбора — подразделение.
+
+    У вуза и колледжа разные наборы групп и разные звонки. Показывать
+    100+ групп одним списком значит заставить человека листать вслепую.
+    """
+    return UNIT_KB
+
+
+async def _college_pick_kb(repo: RequestsRepo) -> InlineKeyboardMarkup:
     groups = await repo.college_lessons.get_groups()
     buttons = [InlineKeyboardButton(text=g, callback_data=f"group:{g}") for g in groups]
     rows = [buttons[i:i + 4] for i in range(0, len(buttons), 4)]
-    rows.append([InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="pick")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _vuz_faculty_kb(repo: RequestsRepo) -> InlineKeyboardMarkup:
+    """Факультеты вуза. Нужны, потому что по имени группы его не узнать."""
+    groups = await repo.vuz_groups.all()
+    facs = sorted({g.faculty for g in groups})
+    rows = [[InlineKeyboardButton(text=FACULTY_NAMES.get(f, f),
+                                  callback_data=f"vu:fac:{f}")] for f in facs]
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="pick")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _vuz_form_kb(repo: RequestsRepo, faculty: str) -> InlineKeyboardMarkup:
+    """Форма обучения внутри факультета."""
+    groups = await repo.vuz_groups.all()
+    forms = sorted({g.form for g in groups if g.faculty == faculty})
+    rows = [[InlineKeyboardButton(text=FORM_NAMES.get(f, f),
+                                  callback_data=f"vu:form:{faculty}:{f}")] for f in forms]
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="unit:vuz")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _vuz_course_kb(repo: RequestsRepo, faculty: str, form: str) -> InlineKeyboardMarkup:
+    courses = await repo.vuz_groups.courses(faculty, form)
+    buttons = [InlineKeyboardButton(text=f"{c} курс",
+                                    callback_data=f"vu:cr:{faculty}:{form}:{c}")
+               for c in courses]
+    rows = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"vu:fac:{faculty}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _vuz_group_kb(repo: RequestsRepo, faculty: str, form: str,
+                        course: int) -> InlineKeyboardMarkup:
+    names = await repo.vuz_groups.by_course(faculty, form, course)
+    buttons = [InlineKeyboardButton(text=strip_unit(n),
+                                    callback_data=f"vu:g:{n}")
+               for n in names]
+    rows = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
+    rows.append([InlineKeyboardButton(
+        text="⬅️ Назад", callback_data=f"vu:form:{faculty}:{form}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -202,7 +281,7 @@ async def _course_group_map(repo: RequestsRepo, user: User) -> dict[str, str] | 
     if _is_teacher(user):
         m = await repo.users.get_group_course_map()
         return m or None
-    cg = course_group_from_course(user.course)
+    cg = bells_group(user.group, user.course)
     return {user.group: cg} if cg else None
 
 
@@ -256,7 +335,7 @@ async def set_group_cmd(message: Message, repo: RequestsRepo, user: User):
 @user_router.callback_query(F.data == "role:student")
 async def cb_role_student(cb: CallbackQuery, repo: RequestsRepo, user: User):
     await repo.users.set_role(user.id, "student")
-    await cb.message.edit_text("🎓 Выбери свою группу 👇", reply_markup=await _pick_kb(repo))
+    await cb.message.edit_text("🎓 Где ты учишься?", reply_markup=_unit_kb())
     await cb.answer()
 
 
@@ -272,14 +351,94 @@ async def cb_role_switch(cb: CallbackQuery, repo: RequestsRepo, user: User):
     await repo.users.set_group(user.id, None)
     await repo.users.set_teacher_name(user.id, None)
     await repo.users.set_course(user.id, None)
+    await repo.users.set_unit(user.id, "college")
     await cb.message.edit_text("🎓 Кто ты?", reply_markup=ROLE_KB)
     await cb.answer()
 
 
 @user_router.callback_query(F.data == "pick")
 async def cb_pick(cb: CallbackQuery, repo: RequestsRepo):
-    await cb.message.edit_text("Выбери свою группу 👇", reply_markup=await _pick_kb(repo))
+    await cb.message.edit_text("🎓 Где ты учишься?", reply_markup=_unit_kb())
     await cb.answer()
+
+
+@user_router.callback_query(F.data == "unit:college")
+async def cb_unit_college(cb: CallbackQuery, repo: RequestsRepo):
+    await cb.message.edit_text("🏫 Выбери свою группу 👇",
+                               reply_markup=await _college_pick_kb(repo))
+    await cb.answer()
+
+
+@user_router.callback_query(F.data == "unit:vuz")
+async def cb_unit_vuz(cb: CallbackQuery, repo: RequestsRepo):
+    kb = await _vuz_faculty_kb(repo)
+    if len(kb.inline_keyboard) == 1:
+        # Групп вуза ещё нет — не показываем пустой экран.
+        await cb.answer("Расписание вуза пока не загружено", show_alert=True)
+        return
+    await cb.message.edit_text("🎓 Выбери факультет 👇", reply_markup=kb)
+    await cb.answer()
+
+
+@user_router.callback_query(F.data.startswith("vu:fac:"))
+async def cb_vuz_faculty(cb: CallbackQuery, repo: RequestsRepo):
+    faculty = cb.data.split(":")[2]
+    forms = sorted({g.form for g in await repo.vuz_groups.all()
+                    if g.faculty == faculty})
+    # Одна форма — незачем спрашивать, сразу курсы.
+    if len(forms) == 1:
+        await cb.message.edit_text(
+            f"{FACULTY_NAMES.get(faculty, faculty)}\n\nВыбери курс 👇",
+            reply_markup=await _vuz_course_kb(repo, faculty, forms[0]))
+        await cb.answer()
+        return
+    await cb.message.edit_text(
+        f"{FACULTY_NAMES.get(faculty, faculty)}\n\nВыбери форму обучения 👇",
+        reply_markup=await _vuz_form_kb(repo, faculty))
+    await cb.answer()
+
+
+@user_router.callback_query(F.data.startswith("vu:form:"))
+async def cb_vuz_form(cb: CallbackQuery, repo: RequestsRepo):
+    _, _, faculty, form = cb.data.split(":")
+    await cb.message.edit_text(
+        f"{FACULTY_NAMES.get(faculty, faculty)} · {FORM_NAMES.get(form, form)}\n\n"
+        f"Выбери курс 👇",
+        reply_markup=await _vuz_course_kb(repo, faculty, form))
+    await cb.answer()
+
+
+@user_router.callback_query(F.data.startswith("vu:cr:"))
+async def cb_vuz_course(cb: CallbackQuery, repo: RequestsRepo):
+    _, _, faculty, form, course = cb.data.split(":")
+    await cb.message.edit_text(
+        f"{FACULTY_NAMES.get(faculty, faculty)} · {FORM_NAMES.get(form, form)}"
+        f" · {course} курс\n\nВыбери группу 👇",
+        reply_markup=await _vuz_group_kb(repo, faculty, form, int(course)))
+    await cb.answer()
+
+
+@user_router.callback_query(F.data.startswith("vu:g:"))
+async def cb_vuz_group(cb: CallbackQuery, repo: RequestsRepo, user: User):
+    """Группа вуза выбрана. Курс берём из справочника, не угадываем."""
+    name = cb.data[5:]
+    info = await repo.vuz_groups.get(name)
+    await repo.users.set_role(user.id, "student")
+    await repo.users.set_group(user.id, name)
+    await repo.users.set_unit(user.id, "vuz")
+    course = info.course if info else None
+    if course:
+        await repo.users.set_course(user.id, course)
+    user.role = "student"
+    user.group = name
+    user.unit = "vuz"
+    user.course = course
+    text, kb = await _render_menu(repo, user)
+    await cb.message.edit_text(
+        f"🎓 Твоя группа: <b>{strip_unit(name)}</b>"
+        f"\nВуз · {FACULTY_NAMES.get(info.faculty, info.faculty) if info else ''}"
+        f"\n\n{text}", reply_markup=kb)
+    await cb.answer(f"{strip_unit(name)}")
 
 
 @user_router.callback_query(F.data == "pick_teacher")
@@ -306,8 +465,10 @@ async def cb_group(cb: CallbackQuery, repo: RequestsRepo, user: User):
     group = cb.data.split(":", 1)[1]
     await repo.users.set_role(user.id, "student")
     await repo.users.set_group(user.id, group)
+    await repo.users.set_unit(user.id, "college")
     user.role = "student"
     user.group = group
+    user.unit = "college"
     if user.course:
         text, kb = await _render_menu(repo, user)
         await cb.message.edit_text(f"Твоя группа: <b>{group}</b>\n\n{text}", reply_markup=kb)

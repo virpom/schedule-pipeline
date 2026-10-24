@@ -109,6 +109,21 @@ def course_group_from_course(course: int | None) -> str | None:
     return "I_IV" if course in (1, 4) else "II_III"
 
 
+def bells_group(group: str | None, course: int | None = None) -> str | None:
+    """Поток звонков для группы с учётом подразделения.
+
+    У вуза своя сетка (8 пар до 22:00), у колледжа — деление по курсам.
+    Раньше везде звали ``course_group_from_course(course)``, и студент
+    вуза получал звонки колледжа: пары заканчивались в 22:00, а бот
+    показывал время до 15:20.
+    """
+    # course_group_from_group уже знает про @vuz — здесь только выбор
+    # источника: группа точнее курса.
+    if group:
+        return course_group_from_group(group)
+    return course_group_from_course(course)
+
+
 def day_type_from_date(date: datetime.date) -> str:
     return "MONDAY" if date.weekday() == 0 else "OTHER"
 
