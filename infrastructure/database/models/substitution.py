@@ -21,7 +21,7 @@ class Substitution(Base, TableNameMixin):
     group: Mapped[str] = mapped_column(String(32), index=True)
     para: Mapped[int] = mapped_column(Integer)
     action: Mapped[str] = mapped_column(String(8))        # replace | cancel | add
-    subject: Mapped[str] = mapped_column(String(128), default="")
+    subject: Mapped[str] = mapped_column(String(256), default="")
     teacher: Mapped[str] = mapped_column(String(128), default="")
     room: Mapped[str] = mapped_column(String(64), default="")
     comment: Mapped[str] = mapped_column(String(256), default="")

@@ -36,6 +36,23 @@ SUB_CANCEL = "cancel"
 
 # Значок пары, пришедшей из листка замен.
 SUB_MARK = "🔄"
+
+# Группы вуза живут в тех же таблицах, что и колледж, и различаются
+# суффиксом. Коллизия реальна: ЭК-23/24/25 есть и там, и там, но это
+# разные люди. Суффикс в ключе даёт разделение без миграции таблиц.
+VUZ_SUFFIX = "@vuz"
+VUZ_GROUP = "VUZ"
+
+
+def is_vuz(group: str | None) -> bool:
+    return bool(group) and group.endswith(VUZ_SUFFIX)
+
+
+def strip_unit(group: str | None) -> str | None:
+    """Имя группы без служебного суффикса — то, что видит человек."""
+    if not group:
+        return group
+    return group[: -len(VUZ_SUFFIX)] if is_vuz(group) else group
 SUB_ADD = "add"
 
 SOURCE_SITE = "site"
@@ -77,6 +94,10 @@ def course_from_group(group: str) -> int:
 
 
 def course_group_from_group(group: str) -> str:
+    # У вуза своя сетка звонков: 8 пар, последняя до 22:00. Деление на
+    # потоки по курсам там не нужно — время одинаковое для всех.
+    if is_vuz(group):
+        return VUZ_GROUP
     course = course_from_group(group)
     # "I_IV" = 1 и 4 курс, "II_III" = 2 и 3 курс
     return "I_IV" if course in (1, 4) else "II_III"

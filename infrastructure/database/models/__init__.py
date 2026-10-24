@@ -13,9 +13,10 @@ from .schedule_file import ScheduleFile
 from .setting import Setting
 from .substitution import Substitution
 from .user import User
+from .vuz_group import VuzGroup
 
 __all__ = [
     "Base", "BaseLesson", "BellLunch", "BellReminder", "BellSchedule", "Chat",
     "CollegeLesson", "DaySnapshot", "NoLessons", "ScheduleEdit", "ScheduleEditor",
-    "ScheduleFile", "Setting", "Substitution", "User",
+    "ScheduleFile", "Setting", "Substitution", "User", "VuzGroup",
 ]

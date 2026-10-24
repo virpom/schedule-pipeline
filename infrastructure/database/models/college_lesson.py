@@ -22,7 +22,7 @@ class CollegeLesson(Base, TableNameMixin):
     group: Mapped[str] = mapped_column(String(32), index=True)
     para: Mapped[int] = mapped_column(Integer)
     para_end: Mapped[int] = mapped_column(Integer)
-    subject: Mapped[str] = mapped_column(String(128))
+    subject: Mapped[str] = mapped_column(String(256))
     teacher: Mapped[str] = mapped_column(String(128), default="")
     room: Mapped[str] = mapped_column(String(64), default="")
     source_url: Mapped[str] = mapped_column(String(512), default="")

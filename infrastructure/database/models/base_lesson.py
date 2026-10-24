@@ -24,7 +24,7 @@ class BaseLesson(Base, TableNameMixin):
     week_parity: Mapped[str] = mapped_column(String(4))   # ODD | EVEN | ANY
     weekday: Mapped[int] = mapped_column(Integer)         # 1..7 (Пн..Вс)
     para: Mapped[int] = mapped_column(Integer)            # 1..5
-    subject: Mapped[str] = mapped_column(String(128))
+    subject: Mapped[str] = mapped_column(String(256))
     teacher: Mapped[str] = mapped_column(String(128), default="")
     room: Mapped[str] = mapped_column(String(64), default="")
     source: Mapped[str] = mapped_column(String(8), default="manual")  # site | manual

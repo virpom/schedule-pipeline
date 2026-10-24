@@ -17,7 +17,7 @@ import logging
 from aiohttp import ClientSession
 from sqlalchemy import delete, select
 
-from common.schedule import PARITY_ANY, PARITY_EVEN, PARITY_ODD
+from common.schedule import PARITY_ANY, PARITY_EVEN, PARITY_ODD, VUZ_GROUP
 from config import Config
 from infrastructure.database.models import BaseLesson, BellSchedule, Substitution
 from infrastructure.database.repo.requests import RequestsRepo
@@ -155,17 +155,19 @@ async def replace_substitutions(repo: RequestsRepo, subs: list[ParsedSub]) -> in
 async def replace_bells(repo: RequestsRepo, slots: list[eios.BellSlot]) -> int:
     """Заменить расписание звонков целиком.
 
-    В БД ``course_group='ALL'`` используется для «Разговоров о важном»
-    (para=0) — эту запись сохраняем, остальное перезаписываем.
+    Сохраняем строки, которые приходят не из файлов колледжа:
+    ``ALL`` — «Разговоры о важном», ``VUZ`` — сетка вуза (8 пар).
+    Их удаление снесло бы чужие данные при первом же проходе.
     """
+    keep = ("ALL", VUZ_GROUP)
     special = [
         row
         for (row,) in await repo.session.execute(
-            select(BellSchedule).where(BellSchedule.course_group == "ALL")
+            select(BellSchedule).where(BellSchedule.course_group.in_(keep))
         )
     ]
     await repo.session.execute(
-        delete(BellSchedule).where(BellSchedule.course_group != "ALL")
+        delete(BellSchedule).where(BellSchedule.course_group.notin_(keep))
     )
 
     for slot in slots:
@@ -361,7 +363,7 @@ async def materialize(repo: RequestsRepo, days: int = MATERIALIZE_DAYS) -> int:
                     "group": group,
                     "para": slot.para,
                     "para_end": slot.para,
-                    "subject": (slot.subject or "")[:128],
+                    "subject": (slot.subject or "")[:256],
                     "teacher": (slot.teacher or "")[:128],
                     "room": (slot.room or "")[:64],
                     "source_url": "",
