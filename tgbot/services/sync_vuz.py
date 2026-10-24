@@ -269,6 +269,40 @@ async def set_anchor(repo: RequestsRepo, value: datetime.date) -> None:
     await repo.settings.set(ANCHOR_KEY, value.isoformat())
 
 
+def anchor_fit(lessons, changes, anchor: datetime.date) -> tuple[int, int]:
+    """Сколько дат из замен попадает в недели, где у группы есть пары.
+
+    Датированные ячейки — единственная привязка файла к календарю, но
+    номер недели в них не написан. Зато если якорь верный, дата замены
+    падает на неделю, в которой у группы вообще бывают пары. Если якорь
+    уехал на семестр, почти все даты окажутся вне диапазона.
+
+    Голосованием это не назвать: сдвиг на одну-две недели картина не
+    различает (диапазоны недель у групп широкие и пересекаются). Но
+    грубый сбой — смену семестра — видно сразу.
+
+    Возвращает (попаданий, всего проверенных).
+    """
+    weeks_by_group: dict[str, set[int]] = {}
+    for l in lessons:
+        weeks_by_group.setdefault(l.group, set()).update(l.weeks)
+
+    good = total = 0
+    for c in changes:
+        weeks = weeks_by_group.get(c.group)
+        if not weeks:
+            continue
+        total += 1
+        if vuz_week(c.date, anchor) in weeks:
+            good += 1
+    return good, total
+
+
+def anchor_looks_off(good: int, total: int) -> bool:
+    """Якорь почти наверняка уехал: меньше половины дат попали в недели."""
+    return total >= 10 and good * 2 < total
+
+
 # --- скачивание --------------------------------------------------------------
 
 async def _download(session: ClientSession, url: str) -> bytes:
@@ -287,8 +321,10 @@ async def sync_once(
 
     Возвращает ``{"full": bool, "part": bool, "groups": int, "failed": [...]}``.
     """
-    result = {"full": False, "part": False, "groups": 0, "failed": []}
+    result = {"full": False, "part": False, "groups": 0, "failed": [],
+              "anchor_off": []}
     all_groups: list[vuz.VuzGroup] = []
+    anchor = await get_anchor(repo)
 
     for form, url in FILES.items():
         try:
@@ -322,6 +358,17 @@ async def sync_once(
                  form, count, len(parsed.changes))
         result[form] = True
         all_groups.extend(parsed.groups)
+
+        # Якорь зашит на начало учебного года. Если вуз поменяет
+        # нумерацию недель (новый семестр, другой файл), расписание
+        # молча поедет. Проверяем: даты замен должны попадать в недели,
+        # где у групп есть пары.
+        good, total = anchor_fit(parsed.lessons, parsed.changes, anchor)
+        if anchor_looks_off(good, total):
+            log.error("якорь недель вуза не сходится: %d из %d дат в диапазоне "
+                      "(якорь %s). Похоже, сменилась нумерация недель — "
+                      "проверь /setvuzanchor", good, total, anchor)
+            result["anchor_off"].append(form)
 
     result["groups"] = len(all_groups)
     return result

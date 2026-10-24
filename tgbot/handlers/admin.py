@@ -262,6 +262,38 @@ async def admin_menu(message: Message, config: Config):
     await message.answer("⚙️ <b>Админ-меню</b>\n\nВыбери раздел 👇", reply_markup=_admin_kb())
 
 
+@admin_router.message(Command("setvuzanchor"))
+async def set_vuz_anchor(message: Message, repo: RequestsRepo, config: Config):
+    """Задать якорь учебной недели вуза вручную.
+
+    Нужен, когда вуз меняет нумерацию недель (новый семестр): без этого
+    расписание вуза поедет, и заметить это можно только глазами.
+    Формат: /setvuzanchor 2027-02-08
+    """
+    if not _is_admin(message, config):
+        return
+    from tgbot.services import sync_vuz
+
+    parts = (message.text or "").split()
+    if len(parts) < 2:
+        anchor = await sync_vuz.get_anchor(repo)
+        await message.answer(
+            f"Якорь недели вуза: <b>{anchor}</b>\n\n"
+            "Задать новый: <code>/setvuzanchor 2027-02-08</code>\n"
+            "Это дата первого дня первой учебной недели.")
+        return
+    try:
+        value = datetime.date.fromisoformat(parts[1])
+    except ValueError:
+        await message.answer("Не понял дату. Нужен формат <code>2027-02-08</code>.")
+        return
+    await sync_vuz.set_anchor(repo, value)
+    await message.answer(
+        f"✅ Якорь вуза: <b>{value}</b>\n\n"
+        "Расписание пересоберётся на ближайшие дни при следующей синхронизации. "
+        "Если недели не сойдутся, в логе появится ошибка.")
+
+
 @admin_router.message(Command("bell"))
 async def show_bell(message: Message, repo: RequestsRepo, config: Config):
     if not _is_admin(message, config):
