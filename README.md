@@ -272,7 +272,8 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirement
 | [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | что делать, когда не работает |
 | [`docs/SOURCE-EIOS.md`](docs/SOURCE-EIOS.md) | разбор источника с доказательствами и объёмами |
 | [`docs/EDITORS.md`](docs/EDITORS.md) | проектная проработка редактора старост (частично историческая) |
-| [`docs/VUZ.md`](docs/VUZ.md) | расписание вуза: разбор источника и план (**не реализовано**) |
+| [`docs/VUZ.md`](docs/VUZ.md) | расписание вуза: разбор источника (**не реализовано**) |
+| [`docs/VUZ-PLAN.md`](docs/VUZ-PLAN.md) | план внедрения вуза: решения, этапы, риски |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | история изменений и список недоделанного |
 
 ## Особенности, о которых стоит знать
