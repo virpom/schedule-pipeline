@@ -234,3 +234,37 @@ def test_vuz_has_own_source_state():
             await engine.dispose()
 
     asyncio.get_event_loop_policy().new_event_loop().run_until_complete(scenario())
+
+
+def test_substitution_mark_next_to_lesson():
+    """🔄 стоит в строке самой пары — видно, что она не по постоянному плану."""
+    import datetime as dt
+    from common.schedule import SUB_MARK, format_day
+
+    l = _lesson()
+    l.changed = True
+    text = format_day(dt.date(2026, 10, 26), [l], _bells(), {})
+    line = next(x for x in text.splitlines() if "Физика" in x)
+    assert SUB_MARK in line, f"нет значка в строке пары: {line!r}"
+    # Именно рядом с предметом, а не отдельной строкой.
+    assert line.index(SUB_MARK) > line.index("Физика")
+
+
+def test_unchanged_lesson_has_no_mark():
+    """Обычная пара без значка — иначе значок перестанет что-то значить."""
+    import datetime as dt
+    from common.schedule import SUB_MARK, format_day
+
+    text = format_day(dt.date(2026, 10, 26), [_lesson()], _bells(), {})
+    assert SUB_MARK not in text
+
+
+def test_vuz_substitution_mark_shown():
+    """Тот же значок для вуза: путь отображения общий."""
+    import datetime as dt
+    from common.schedule import SUB_MARK, format_day
+
+    l = _lesson(group="ЭК-26-2@vuz", para=7)
+    l.changed = True
+    text = format_day(dt.date(2026, 10, 26), [l], _bells(), {}, show_rov=False)
+    assert SUB_MARK in text
