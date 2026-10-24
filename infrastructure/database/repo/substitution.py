@@ -8,6 +8,17 @@ from infrastructure.database.repo.base import BaseRepo
 
 
 class SubstitutionRepo(BaseRepo):
+    async def count(self, vuz: bool | None = None) -> int:
+        """Число замен, при желании — только вуза или только колледжа."""
+        from sqlalchemy import func
+        q = select(func.count()).select_from(Substitution)
+        if vuz is True:
+            q = q.where(Substitution.group.like("%@vuz"))
+        elif vuz is False:
+            q = q.where(Substitution.group.notlike("%@vuz"))
+        result = await self.session.execute(q)
+        return result.scalar_one()
+
     async def get_for_date(self, group: str, date: datetime.date) -> list[Substitution]:
         result = await self.session.execute(
             select(Substitution)

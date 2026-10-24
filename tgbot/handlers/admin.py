@@ -12,7 +12,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from common.schedule import bells_group, format_bell, format_day
+from common.schedule import (bells_group, format_bell, format_day, is_vuz,
+                             strip_unit)
 from config import Config
 from infrastructure.database.repo.requests import RequestsRepo
 from tgbot.services import photos, source_state
@@ -105,62 +106,151 @@ def _settings_kb() -> InlineKeyboardMarkup:
 
 
 async def _build_stats(repo: RequestsRepo) -> tuple[str, InlineKeyboardMarkup]:
+    """Сводка по боту с разделением на колледж и вуз.
+
+    Раньше всё считалось в кучу: 129 групп, общее число пар, общая
+    аудитория. По такой цифре нельзя понять, где проблема — в вузе или
+    в колледже, — а источники у них разные и ломаются независимо.
+    """
     users = await repo.users.get_all()
     now = datetime.datetime.now()
     week_ago = now - datetime.timedelta(days=7)
-    total = len(users)
-    active = sum(1 for u in users if u.last_seen and u.last_seen >= week_ago)
-    subscribed = sum(1 for u in users if u.subscribed)
-    teachers = [u for u in users if u.role == "teacher"]
+
+    # Преподаватели не относятся ни к одному подразделению: у них нет
+    # группы, а is_vuz(None) == False записал бы их в колледж.
     students = [u for u in users if u.role != "teacher"]
+    vuz_users = [u for u in students if is_vuz(u.group)]
+    college_users = [u for u in students if not is_vuz(u.group)]
+    teachers = [u for u in users if u.role == "teacher"]
+    subscribed = sum(1 for u in users if u.subscribed)
+    active = sum(1 for u in users if u.last_seen and u.last_seen >= week_ago)
 
-    lessons = await repo.college_lessons.count_lessons()
-    days = await repo.college_lessons.count_dates()
-    groups = len(await repo.college_lessons.get_groups())
+    groups = await repo.college_lessons.get_groups()
+    vuz_groups = [g for g in groups if is_vuz(g)]
+    college_groups = [g for g in groups if not is_vuz(g)]
 
-    group_stats: dict[str, list[int]] = {}
-    no_group = [0, 0]
-    for u in students:
-        if u.group:
-            entry = group_stats.setdefault(u.group, [0, 0])
-            entry[0] += 1
-            if u.subscribed:
-                entry[1] += 1
-        else:
-            no_group[0] += 1
-            if u.subscribed:
-                no_group[1] += 1
+    # Считаем по подразделению группы, а не по source: у колледжа
+    # source='site', у вуза — 'vuz'. Привязка к source сломалась бы при
+    # смене источника.
+    base_vuz = await repo.base_lessons.count(vuz=True)
+    base_college = await repo.base_lessons.count(vuz=False)
+    subs_vuz = await repo.substitutions.count(vuz=True)
+    subs_college = await repo.substitutions.count(vuz=False)
 
-    lines = ["👥 <b>Статистика</b>\n"]
-    lines.append(f"Всего пользователей: <b>{total}</b>")
-    lines.append(f"Активных (7 дней): <b>{active}</b>")
-    lines.append(f"Подписаны на рассылку: <b>{subscribed}</b>")
-    lines.append(f"Преподавателей: <b>{len(teachers)}</b>")
+    lines = ["📊 <b>Статистика</b>\n"]
+    lines.append(f"👥 Пользователей: <b>{len(users)}</b> · "
+                 f"активных (7д): <b>{active}</b> · подписаны: <b>{subscribed}</b>")
     lines.append("")
-    lines.append("📚 <b>Расписание в базе</b>")
-    lines.append(f"Занятий: {lessons} · Дней: {days} · Групп: {groups}")
+    lines.append("<b>Подразделения</b>")
+    lines.append(f"🎓 Колледж — студентов <b>{len(college_users)}</b>, "
+                 f"групп <b>{len(college_groups)}</b>")
+    lines.append(f"🏛 Вуз — студентов <b>{len(vuz_users)}</b>, "
+                 f"групп <b>{len(vuz_groups)}</b>")
+    if teachers:
+        lines.append(f"👨‍🏫 Преподавателей: <b>{len(teachers)}</b>")
+    lines.append("")
+    lines.append("<b>Расписание</b>")
+    lines.append(f"🎓 Колледж: пар <b>{base_college}</b> · замен <b>{subs_college}</b>")
+    lines.append(f"🏛 Вуз: пар <b>{base_vuz}</b> · замен <b>{subs_vuz}</b>")
+    lines.append("")
 
-    # Состояние источника: без него владелец не узнает, что замены
-    # перестали приезжать, пока студенты не начнут жаловаться.
-    ok_at = await source_state.last_ok(repo)
+    # Источники независимы: ЭИОС может лежать, а файл вуза быть свежим.
+    ok_college = await source_state.last_ok(repo)
     if await source_state.is_stale(repo):
-        when = f"с {ok_at:%d.%m %H:%M}" if ok_at else "никогда"
-        lines.append(f"⚠️ <b>ЭИОС не отвечает</b> (успех: {when})")
-    elif ok_at:
-        lines.append(f"✅ ЭИОС: {ok_at:%d.%m %H:%M}")
-    lines.append("")
-    lines.append("👥 <b>По группам</b> (нажми, чтобы раскрыть)")
+        when = f"с {ok_college:%d.%m %H:%M}" if ok_college else "никогда"
+        lines.append(f"⚠️ <b>ЭИОС колледжа не отвечает</b> (успех: {when})")
+    elif ok_college:
+        lines.append(f"✅ ЭИОС колледжа: {ok_college:%d.%m %H:%M}")
+
+    ok_vuz = await source_state.last_ok_vuz(repo)
+    if await source_state.is_stale_vuz(repo):
+        when = f"с {ok_vuz:%d.%m %H:%M}" if ok_vuz else "ещё не было"
+        lines.append(f"⚠️ <b>Синхронизация вуза не проходила</b> ({when})")
+    elif ok_vuz:
+        lines.append(f"✅ Вуз: {ok_vuz:%d.%m %H:%M}")
+
+    rows = [
+        [InlineKeyboardButton(text="🎓 Колледж подробно", callback_data="adm:stats:college"),
+         InlineKeyboardButton(text="🏛 Вуз подробно", callback_data="adm:stats:vuz")],
+        [InlineKeyboardButton(text="👥 Все группы", callback_data="adm:stats:groups")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back")],
+    ]
+    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _build_stats_unit(repo: RequestsRepo, unit: str) -> tuple[str, InlineKeyboardMarkup]:
+    """Подробности по одному подразделению."""
+    is_v = unit == "vuz"
+    users = await repo.users.get_all()
+    # Только студенты: у преподавателя группы нет, и он попадал бы
+    # в колледж.
+    students = [u for u in users if u.role != "teacher"]
+    mine = [u for u in students if is_vuz(u.group) == is_v]
+    subscribed = sum(1 for u in mine if u.subscribed)
+
+    groups = [g for g in await repo.college_lessons.get_groups() if is_vuz(g) == is_v]
+    base = await repo.base_lessons.count(vuz=is_v)
+    subs = await repo.substitutions.count(vuz=is_v)
+
+    title = "🏛 Вуз" if is_v else "🎓 Колледж"
+    lines = [f"{title} — подробно\n"]
+    lines.append(f"Студентов: <b>{len(mine)}</b> · подписаны: <b>{subscribed}</b>")
+    lines.append(f"Групп в расписании: <b>{len(groups)}</b>")
+    lines.append(f"Пар в базе: <b>{base}</b> · замен: <b>{subs}</b>")
+
+    if is_v:
+        info = await repo.vuz_groups.all()
+        by_form: dict[str, int] = {}
+        for g in info:
+            by_form[g.form] = by_form.get(g.form, 0) + 1
+        if by_form:
+            names = {"full": "очная", "part": "очно-заочная"}
+            parts = ", ".join(f"{names.get(k, k)} {v}" for k, v in sorted(by_form.items()))
+            lines.append(f"Формы обучения: {parts}")
+
+    # Топ групп по числу студентов.
+    per_group: dict[str, int] = {}
+    for u in mine:
+        if u.group:
+            per_group[u.group] = per_group.get(u.group, 0) + 1
+    if per_group:
+        lines.append("")
+        lines.append("<b>Крупнейшие группы</b>")
+        for g, n in sorted(per_group.items(), key=lambda x: -x[1])[:8]:
+            lines.append(f"  {strip_unit(g)} — {n}")
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ К статистике", callback_data="adm:stats")],
+    ])
+    return "\n".join(lines), kb
+
+
+async def _build_stats_groups(repo: RequestsRepo) -> tuple[str, InlineKeyboardMarkup]:
+    """Список всех групп с числом студентов — нажатием открыть состав."""
+    users = await repo.users.get_all()
+    per_group: dict[str, list[int]] = {}
+    for u in users:
+        if u.role == "teacher" or not u.group:
+            continue
+        e = per_group.setdefault(u.group, [0, 0])
+        e[0] += 1
+        if u.subscribed:
+            e[1] += 1
 
     rows = []
-    for g, (t, s) in sorted(group_stats.items(), key=lambda x: (-x[1][0], x[0])):
-        rows.append([InlineKeyboardButton(text=f"{g} — {t} · рассылка {s}", callback_data=f"group_users:{g}")])
-    if no_group[0]:
-        rows.append([InlineKeyboardButton(text=f"Без группы — {no_group[0]} · рассылка {no_group[1]}", callback_data="group_users:__none__")])
-    if teachers:
-        rows.append([InlineKeyboardButton(text=f"👨‍🏫 Преподаватели — {len(teachers)}", callback_data="adm:teachers")])
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back")])
+    for g, (t, s) in sorted(per_group.items(), key=lambda x: (is_vuz(x[0]), x[0])):
+        icon = "🏛" if is_vuz(g) else "🎓"
+        rows.append([InlineKeyboardButton(
+            text=f"{icon} {strip_unit(g)} — {t} · рассылка {s}",
+            callback_data=f"group_users:{g}")])
+    rows.append([InlineKeyboardButton(text="⬅️ К статистике", callback_data="adm:stats")])
 
-    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
+    vuz_n = sum(1 for g in per_group if is_vuz(g))
+    text = (f"👥 <b>Группы с подписчиками</b>\n\n"
+            f"Всего <b>{len(per_group)}</b>: "
+            f"🏛 вуз {vuz_n} · 🎓 колледж {len(per_group) - vuz_n}\n\n"
+            "Нажми на группу, чтобы посмотреть состав.")
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 # ---- commands ----
@@ -615,6 +705,25 @@ async def cb_adm_stats(cb: CallbackQuery, repo: RequestsRepo, config: Config):
     if not _is_admin_cb(cb, config):
         return
     text, kb = await _build_stats(repo)
+    await cb.message.edit_text(text, reply_markup=kb)
+    await cb.answer()
+
+
+@admin_router.callback_query(lambda cb: cb.data in ("adm:stats:college", "adm:stats:vuz"))
+async def cb_adm_stats_unit(cb: CallbackQuery, repo: RequestsRepo, config: Config):
+    if not _is_admin_cb(cb, config):
+        return
+    unit = cb.data.rsplit(":", 1)[1]
+    text, kb = await _build_stats_unit(repo, unit)
+    await cb.message.edit_text(text, reply_markup=kb)
+    await cb.answer()
+
+
+@admin_router.callback_query(lambda cb: cb.data == "adm:stats:groups")
+async def cb_adm_stats_groups(cb: CallbackQuery, repo: RequestsRepo, config: Config):
+    if not _is_admin_cb(cb, config):
+        return
+    text, kb = await _build_stats_groups(repo)
     await cb.message.edit_text(text, reply_markup=kb)
     await cb.answer()
 

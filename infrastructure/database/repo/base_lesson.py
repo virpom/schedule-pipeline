@@ -102,9 +102,15 @@ class BaseLessonRepo(BaseRepo):
         )
         await self.session.commit()
 
-    async def count(self) -> int:
+    async def count(self, vuz: bool | None = None) -> int:
+        """Число пар, при желании — только вуза или только колледжа."""
         from sqlalchemy import func
-        result = await self.session.execute(select(func.count()).select_from(BaseLesson))
+        q = select(func.count()).select_from(BaseLesson)
+        if vuz is True:
+            q = q.where(BaseLesson.group.like("%@vuz"))
+        elif vuz is False:
+            q = q.where(BaseLesson.group.notlike("%@vuz"))
+        result = await self.session.execute(q)
         return result.scalar_one()
 
     async def get_groups(self) -> list[str]:

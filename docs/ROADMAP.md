@@ -192,7 +192,7 @@ return [l for l in await self.get_all_lessons() if l.date == date and ...]
   (`parsers/eios.py`), слить
 - [ ] `_skip_kb` и `cancel_kb` в `editor.py` — две одинаковые обёртки
 
-Всего тестов: **148**.
+Всего тестов: **164**.
 
 ---
 
