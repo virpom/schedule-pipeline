@@ -375,3 +375,50 @@ def test_teacher_search_finds_vuz_lessons():
             await engine.dispose()
 
     asyncio.get_event_loop_policy().new_event_loop().run_until_complete(scenario())
+
+
+# --- чётность недель вуза ----------------------------------------------------
+
+def test_vuz_parity_after_january_diverges_from_iso():
+    """С 04.01.2027 ISO-чётность со сдвигом расходится с вузовской.
+
+    До января они совпадали случайно (якорь 31.08.2026 + PARITY_OFFSET=1),
+    поэтому баг не проявлялся. Дальше расписание инвертировалось бы:
+    пара с пометкой «ч.» показывалась в нечётную неделю вуза, а в свою
+    неделю день был пустым.
+    """
+    import asyncio
+    import datetime as dt
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from infrastructure.database.models import Base, BaseLesson
+    from infrastructure.database.repo.requests import RequestsRepo
+    from tgbot.services import sync_vuz
+    from tgbot.services.schedule_layer import get_day_slots
+
+    async def scenario():
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        pool = async_sessionmaker(engine, expire_on_commit=False)
+        try:
+            async with pool() as db:
+                repo = RequestsRepo(db)
+                await sync_vuz.set_anchor(repo, dt.date(2026, 8, 31))
+                db.add(BaseLesson(group="ГД-26@vuz", week_parity="EVEN",
+                                  weekday=1, para=1, subject="История",
+                                  teacher="", room="", weeks="", source="vuz"))
+                await db.commit()
+
+                # 11.01.2027 — неделя 20 (чётная у вуза), ISO со сдвигом даёт ODD.
+                even_vuz = dt.date(2027, 1, 11)
+                # 04.01.2027 — неделя 19 (нечётная у вуза), ISO даёт EVEN.
+                odd_vuz = dt.date(2027, 1, 4)
+                assert sync_vuz.vuz_week(even_vuz) == 20
+                assert sync_vuz.vuz_week(odd_vuz) == 19
+
+                assert len(await get_day_slots(repo, "ГД-26@vuz", even_vuz)) == 1
+                assert await get_day_slots(repo, "ГД-26@vuz", odd_vuz) == []
+        finally:
+            await engine.dispose()
+
+    asyncio.get_event_loop_policy().new_event_loop().run_until_complete(scenario())

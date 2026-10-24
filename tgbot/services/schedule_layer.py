@@ -5,7 +5,8 @@
 """
 import datetime
 
-from common.schedule import SUB_CANCEL, is_vuz, week_parity
+from common.schedule import (PARITY_EVEN, PARITY_ODD, SUB_CANCEL, is_vuz,
+                             week_parity)
 from infrastructure.database.repo.requests import RequestsRepo
 
 # Колледж считает чётность на 1 иначе, чем ISO (26.10.2026 — ISO чётная,
@@ -37,13 +38,17 @@ async def get_day_slots(repo: RequestsRepo, group: str, date: datetime.date,
     """Итоговое расписание группы на дату."""
     parity = week_parity(date, parity_offset)
 
-    # У вуза пары задаются списками недель, а не чётностью. Номер недели
-    # считается от якоря, который лежит в настройках.
+    # У вуза своя нумерация недель от якоря. Чётность для пар без списка
+    # недель («н.»/«ч.» в файле) тоже вузовская — от этого же счёта.
+    # Раньше бралась ISO-чётность со сдвигом PARITY_OFFSET=1: до января
+    # она совпадала с вузовской случайно, а с 04.01.2027 расходится и
+    # расписание инвертируется — пары показываются в чужую неделю.
     week = None
     if is_vuz(group):
         from tgbot.services import sync_vuz
         anchor = await sync_vuz.get_anchor(repo)
         week = sync_vuz.vuz_week(date, anchor)
+        parity = PARITY_EVEN if week % 2 == 0 else PARITY_ODD
 
     base = await repo.base_lessons.get_day(group, date.isoweekday(), parity,
                                            week=week)
