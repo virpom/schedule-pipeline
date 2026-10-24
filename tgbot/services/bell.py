@@ -54,7 +54,8 @@ async def _tick(bot, session_pool, now: datetime.datetime) -> None:
             # start bell
             bs0 = bell.get((dt, cg, l.para)) or bell.get((dt, "I_IV", l.para))
             if bs0 and user.bell_mode in (BELL_START_END, BELL_FULL):
-                text = f"🔔 {l.para} пара · {l.subject}"
+                mark = " 🔄" if getattr(l, "changed", False) else ""
+                text = f"🔔 {l.para} пара · {l.subject}{mark}"
                 if l.room:
                     text += f" · {l.room}"
                 events.append((bs0.start, f"s:{l.para}", text))

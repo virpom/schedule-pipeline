@@ -348,6 +348,7 @@ async def materialize(repo: RequestsRepo, days: int = MATERIALIZE_DAYS) -> int:
                 "para_end": r.para_end, "subject": r.subject,
                 "teacher": r.teacher, "room": r.room,
                 "source_url": r.source_url, "source": r.source,
+                "changed": r.changed,
             }
             for r in manual
         ]
@@ -365,6 +366,7 @@ async def materialize(repo: RequestsRepo, days: int = MATERIALIZE_DAYS) -> int:
                     "room": (slot.room or "")[:64],
                     "source_url": "",
                     "source": SOURCE_SITE,
+                    "changed": slot.changed,
                 })
 
         await repo.college_lessons.replace_date(date, rows)

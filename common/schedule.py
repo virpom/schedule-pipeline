@@ -33,6 +33,9 @@ PARITY_LABELS = {PARITY_ODD: "нечётная", PARITY_EVEN: "чётная", PA
 
 SUB_REPLACE = "replace"
 SUB_CANCEL = "cancel"
+
+# Значок пары, пришедшей из листка замен.
+SUB_MARK = "🔄"
 SUB_ADD = "add"
 
 SOURCE_SITE = "site"
@@ -142,7 +145,11 @@ def format_day(
             else:
                 time_str = _para_brief(bs)
 
-            line = f"{p}) <b>{time_str}</b>  {lesson.subject}"
+            # Значок замены: студент должен видеть, что пара не по
+            # постоянному плану. Одна точка — подхватывают и день,
+            # и неделя, и рассылка, и уведомления: они все идут сюда.
+            mark = f" {SUB_MARK}" if getattr(lesson, "changed", False) else ""
+            line = f"{p}) <b>{time_str}</b>  {lesson.subject}{mark}"
             lines.append(line)
             if meta == "group":
                 m = " · ".join(x for x in (lesson.group, lesson.room) if x)

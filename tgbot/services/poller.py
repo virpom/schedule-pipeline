@@ -8,12 +8,49 @@ from aiohttp import ClientSession
 from common.schedule import course_group_from_course, format_day, format_no_lessons
 from config import Config
 from infrastructure.database.repo.requests import RequestsRepo
-from tgbot.services import photos, source_state, sync_eios
+from parsers import eios
+from tgbot.services import alerts, photos, source_state, sync_eios
 from tgbot.services.broadcaster import broadcast_schedule
 from tgbot.services.notify_edits import snapshot_past_days
 
 
-async def poll_once(session_pool, config: Config) -> list[tuple[datetime.date, bool]]:
+async def _report_failure(bot, session_pool, config: Config, error: Exception) -> None:
+    """Отличить «сайт лежит» от «сайт поменял структуру» и сказать админу.
+
+    Разница принципиальная: лежащий сайт сам поднимется, и бот дождётся.
+    Изменившаяся структура сама не починится — нужен человек, иначе бот
+    будет молча работать на старых данных, пока не кончится окно из
+    14 дней.
+    """
+    try:
+        async with session_pool() as db:
+            repo = RequestsRepo(db)
+            if isinstance(error, eios.EiosParseError):
+                await alerts.alert(
+                    bot, repo, config, "structure",
+                    f"Сайт отвечает, но файлы не разбираются:\n"
+                    f"<code>{_short(error)}</code>\n\n"
+                    f"Скорее всего изменилась структура страницы или файлов. "
+                    f"Расписание работает на последних данных, но новые "
+                    f"замены не подтягиваются.",
+                )
+            else:
+                # Сеть, таймаут, 5xx — это «сайт лежит». Отдельного
+                # уведомления не шлём: о недоступности пользователю и так
+                # говорит предупреждение в расписании, а админ видит это
+                # в /stats. Тревога нужна для того, что само не пройдёт.
+                await alerts.clear(bot, repo, config, "structure",
+                                   "Файлы снова разбираются.")
+    except Exception:
+        logging.exception("не удалось отправить тревогу")
+
+
+def _short(error: Exception, limit: int = 300) -> str:
+    text = str(error).strip() or type(error).__name__
+    return text[:limit]
+
+
+async def poll_once(bot, session_pool, config: Config) -> list[tuple[datetime.date, bool]]:
     """Синхронизировать расписание СПО из ЭИОС.
 
     Скачивает файлы колледжа, раскладывает их в слои ``base_lesson`` +
@@ -35,6 +72,7 @@ async def poll_once(session_pool, config: Config) -> list[tuple[datetime.date, b
             # успех: is_stale() покажет, что свежесть под вопросом.
             logging.warning("ЭИОС недоступен: %s", e)
             result = None
+            await _report_failure(bot, session_pool, config, e)
 
         # Успехом считаем только проход без единой ошибки. Если не доехали
         # замены — это именно то, о чём надо предупредить: постоянное
@@ -177,7 +215,7 @@ async def poller_loop(bot, session_pool, config: Config) -> None:
 
             if not _in_night(now, settings["night_start"], settings["night_end"]):
                 if time.monotonic() - last_poll >= interval:
-                    changes = await poll_once(session_pool, config)
+                    changes = await poll_once(bot, session_pool, config)
                     if changes:
                         await notify_new_schedule(bot, session_pool, changes, rate, config.photos_path)
                     last_poll = time.monotonic()
