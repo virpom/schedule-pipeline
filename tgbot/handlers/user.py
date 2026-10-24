@@ -201,7 +201,11 @@ def _unit_kb() -> InlineKeyboardMarkup:
 
 
 async def _college_pick_kb(repo: RequestsRepo) -> InlineKeyboardMarkup:
-    groups = await repo.college_lessons.get_groups()
+    # college_lesson общая для обоих подразделений: там лежат и группы
+    # вуза с суффиксом @vuz. Без фильтра в списке «Колледж» появлялись
+    # 92 чужие группы — студент колледжа видел расписание вуза.
+    groups = [g for g in await repo.college_lessons.get_groups()
+              if not is_vuz(g)]
     buttons = [InlineKeyboardButton(text=g, callback_data=f"group:{g}") for g in groups]
     rows = [buttons[i:i + 4] for i in range(0, len(buttons), 4)]
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="pick")])

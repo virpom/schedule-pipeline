@@ -268,3 +268,48 @@ def test_vuz_substitution_mark_shown():
     l.changed = True
     text = format_day(dt.date(2026, 10, 26), [l], _bells(), {}, show_rov=False)
     assert SUB_MARK in text
+
+
+def test_college_picker_excludes_vuz_groups():
+    """В списке «Колледж» не должно быть групп вуза.
+
+    college_lesson общая для обоих подразделений, поэтому
+    get_groups() отдаёт и группы с суффиксом @vuz. Без фильтра
+    студент колледжа видел 92 чужие группы и мог открыть расписание
+    вуза, приняв его за своё.
+    """
+    import asyncio
+    import datetime as dt
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from infrastructure.database.models import Base, CollegeLesson
+    from infrastructure.database.repo.requests import RequestsRepo
+    from tgbot.handlers import user as uh
+
+    async def scenario():
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        pool = async_sessionmaker(engine, expire_on_commit=False)
+        try:
+            async with pool() as db:
+                db.add_all([
+                    CollegeLesson(date=dt.date(2026, 10, 26), group="ТЭ-26ФП",
+                                  para=1, para_end=1, subject="Физика",
+                                  teacher="", room="", source_url="",
+                                  source="site", changed=False),
+                    CollegeLesson(date=dt.date(2026, 10, 26), group="ЭК-26-2@vuz",
+                                  para=1, para_end=1, subject="Матан",
+                                  teacher="", room="", source_url="",
+                                  source="site", changed=False),
+                ])
+                await db.commit()
+                repo = RequestsRepo(db)
+                kb = await uh._college_pick_kb(repo)
+                names = [b.text for row in kb.inline_keyboard for b in row]
+                assert "ТЭ-26ФП" in names
+                assert not any("@vuz" in n for n in names), names
+                assert "ЭК-26-2@vuz" not in names
+        finally:
+            await engine.dispose()
+
+    asyncio.get_event_loop_policy().new_event_loop().run_until_complete(scenario())
