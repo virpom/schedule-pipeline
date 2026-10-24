@@ -69,6 +69,10 @@ async def poll_once(bot, session_pool, config: Config) -> list[tuple[datetime.da
                 vuz_result = await sync_vuz.sync_once(session, repo)
                 if vuz_result.get("failed"):
                     logging.warning("частичный сбой вуза: %s", vuz_result["failed"])
+                else:
+                    # Свой признак свежести: у вуза свой источник, и он
+                    # может быть жив, когда сайт колледжа лежит.
+                    await source_state.mark_ok_vuz(repo)
         except Exception:
             logging.exception("синхронизация вуза не удалась")
 

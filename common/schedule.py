@@ -163,8 +163,11 @@ def format_day(
     lines = [header, ""]
     dt = day_type_from_date(date)
 
+    # «Разговоры о важном» — линейка колледжа, в 9:00 по понедельникам.
+    # У вуза её нет, а звонок лежит в общей таблице с course_group='ALL',
+    # поэтому без проверки он попадал в расписание студента вуза.
     rov = bell.get(("MONDAY", "ALL", 0))
-    if show_rov and dt == "MONDAY" and rov:
+    if show_rov and dt == "MONDAY" and rov and not is_vuz(lessons[0].group):
         lines.append(f"<b>{rov.start:%H:%M}–{rov.end:%H:%M}</b>  Разговоры о важном 🇷🇺")
 
     for lesson in lessons:

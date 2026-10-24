@@ -512,8 +512,14 @@ async def _day_text(repo: RequestsRepo, user: User, date: datetime.date) -> str:
 
     # Замены могли не доехать, если сайт лежит. Постоянное расписание при
     # этом верное, поэтому не скрываем его — только предупреждаем.
-    stale = await source_state.is_stale(repo)
-    last_ok = await source_state.last_ok(repo) if stale else None
+    # У вуза свой источник: сайт колледжа может лежать, а расписание вуза
+    # при этом свежее. Общий флаг показывал студенту вуза чужую проблему.
+    if is_vuz(user.group):
+        stale = await source_state.is_stale_vuz(repo)
+        last_ok = await source_state.last_ok_vuz(repo) if stale else None
+    else:
+        stale = await source_state.is_stale(repo)
+        last_ok = await source_state.last_ok(repo) if stale else None
 
     if lessons:
         text = _fmt(user, date, lessons, bell, lunches, gcg)

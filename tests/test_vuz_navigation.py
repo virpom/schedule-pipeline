@@ -162,3 +162,75 @@ def test_strip_unit_hides_suffix():
     assert strip_unit("ЭК-23@vuz") == "ЭК-23"
     assert strip_unit("ТЭ-26ФП") == "ТЭ-26ФП"
     assert strip_unit(None) is None
+
+
+# --- отображение дня ---------------------------------------------------------
+
+def _lesson(group="ЭК-26-2@vuz", para=6):
+    class L:
+        pass
+    l = L()
+    l.group, l.para, l.para_end = group, para, para
+    l.subject, l.teacher, l.room, l.changed = "Физика", "Иванов И.И.", "", False
+    return l
+
+
+def _bells():
+    import datetime as dt
+    return {("MONDAY", "ALL", 0): type("B", (), {"start": dt.time(9, 0),
+                                                 "end": dt.time(9, 20)})(),
+            ("OTHER", "VUZ", 6): type("B", (), {"start": dt.time(17, 10),
+                                                "end": dt.time(18, 40)})()}
+
+
+def test_rov_not_shown_for_vuz():
+    """«Разговоры о важном» — линейка колледжа, у вуза её нет.
+
+    Звонок лежит в bell_schedule с course_group='ALL', поэтому без
+    проверки подразделения он попадал в расписание студента вуза.
+    """
+    import datetime as dt
+    from common.schedule import format_day
+
+    text = format_day(dt.date(2026, 10, 26), [_lesson()], _bells(), {},
+                      show_rov=True)
+    assert "Разговоры о важном" not in text
+
+
+def test_rov_still_shown_for_college():
+    """У колледжа линейка остаётся — фикс не должен её убрать."""
+    import datetime as dt
+    from common.schedule import format_day
+
+    text = format_day(dt.date(2026, 10, 26), [_lesson(group="ТЭ-26ФП")],
+                      _bells(), {}, show_rov=True)
+    assert "Разговоры о важном" in text
+
+
+def test_vuz_has_own_source_state():
+    """Сайт колледжа и сайт вуза — разные источники, флаги независимы."""
+    import asyncio
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from infrastructure.database.models import Base
+    from infrastructure.database.repo.requests import RequestsRepo
+    from tgbot.services import source_state
+
+    async def scenario():
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        pool = async_sessionmaker(engine, expire_on_commit=False)
+        try:
+            async with pool() as db:
+                repo = RequestsRepo(db)
+                # Вуз синхронизировался, колледж — нет.
+                await source_state.mark_ok_vuz(repo)
+                assert await source_state.is_stale_vuz(repo) is False
+                assert await source_state.is_stale(repo) is True
+                # И наоборот.
+                await source_state.mark_ok(repo)
+                assert await source_state.is_stale(repo) is False
+        finally:
+            await engine.dispose()
+
+    asyncio.get_event_loop_policy().new_event_loop().run_until_complete(scenario())
