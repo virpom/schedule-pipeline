@@ -3,7 +3,7 @@ import asyncio
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from infrastructure.database.models import Base, VuzGroup
+from infrastructure.database.models import Base
 from infrastructure.database.repo.requests import RequestsRepo
 from parsers import vuz
 from tgbot.services import sync_vuz
