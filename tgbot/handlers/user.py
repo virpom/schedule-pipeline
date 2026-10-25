@@ -162,11 +162,10 @@ def settings_kb(user: User) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(text="🎯 Сменить фамилию", callback_data="pick_teacher")])
     else:
         rows.append([InlineKeyboardButton(text="🎯 Сменить группу", callback_data="pick")])
-        # Курс нужен только колледжу: он выбирает поток звонков (1 и 4
-        # против 2 и 3). У вуза сетка одна на всех, а курс зашит в номер
-        # группы — кнопка там меняла лишь подпись. Без группы она тоже
-        # бессмысленна: менять нечего.
-        if user.group and not is_vuz(user.group):
+        # Без группы менять нечего. У вуза курс зашит в номер группы
+        # (ГИ-23 → 4 курс), поэтому кнопка ведёт к выбору другой группы
+        # того же курса, а не переписывает поле.
+        if user.group:
             rows.append([InlineKeyboardButton(text="🎯 Сменить курс", callback_data="pick_course")])
         rows.append([InlineKeyboardButton(text=f"🐱 Картинки: {_on_off(user.send_image)}",
                                           callback_data="image_toggle")])
@@ -548,8 +547,28 @@ async def cb_pick_teacher(cb: CallbackQuery, repo: RequestsRepo):
 
 
 @user_router.callback_query(F.data == "pick_course")
-async def cb_pick_course(cb: CallbackQuery):
-    await cb.message.edit_text("На каком ты курсе? 👇", reply_markup=COURSE_KB)
+async def cb_pick_course(cb: CallbackQuery, repo: RequestsRepo, user: User):
+    """Смена курса.
+
+    У колледжа курс — отдельное поле: он выбирает поток звонков (1 и 4
+    против 2 и 3). У вуза курс зашит в номер группы, поэтому меняется
+    выбором группы того же курса: иначе подпись разошлась бы с фактом.
+    """
+    info = await repo.vuz_groups.get(user.group) if is_vuz(user.group) else None
+    if info is None:
+        await cb.message.edit_text("На каком ты курсе? 👇", reply_markup=COURSE_KB)
+        await cb.answer()
+        return
+
+    courses = await repo.vuz_groups.courses(info.faculty, info.form)
+    buttons = [InlineKeyboardButton(
+        text=f"{c} курс", callback_data=f"vu:cr:{info.faculty}:{info.form}:{c}")
+        for c in courses]
+    rows = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="settings")])
+    await cb.message.edit_text(
+        f"Сейчас {info.course} курс. На какой перевести? 👇",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
     await cb.answer()
 
 
