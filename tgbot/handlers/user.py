@@ -694,9 +694,17 @@ async def cb_week(cb: CallbackQuery, repo: RequestsRepo, user: User):
 
 
 @user_router.callback_query(F.data == "bell")
-async def cb_bell(cb: CallbackQuery, repo: RequestsRepo):
+async def cb_bell(cb: CallbackQuery, repo: RequestsRepo, user: User):
+    """Сетка звонков — своя для каждого подразделения.
+
+    Раньше экран всегда показывал колледж: студент и преподаватель вуза
+    видели «Разговоры о важном», деление на курсы и 5 пар вместо 8.
+    """
     bell, lunches = await repo.bell_schedule.get_context()
-    await cb.message.edit_text(format_bell(bell, lunches), reply_markup=BACK_KB)
+    is_vuz_user = (is_vuz(user.group) if user.group
+                   else user.unit == "vuz")
+    await cb.message.edit_text(format_bell(bell, lunches, vuz=is_vuz_user),
+                               reply_markup=BACK_KB)
     await cb.answer()
 
 
@@ -718,7 +726,13 @@ async def _hist_page(repo: RequestsRepo, user: User, before: datetime.date | Non
         past = [d for d in past if d < before]
 
     if not past:
-        return "📜 Больше расписания нет", InlineKeyboardMarkup(
+        # У вуза история короче: college_lesson материализуется вперёд на
+        # 14 дней, а назад заполняется только по мере прошествия. Поэтому
+        # «Больше расписания нет» на первом заходе — норма, а не ошибка.
+        # Говорим это прямо, иначе выглядит как поломка.
+        text = ("📜 <b>История расписания</b>\n\n"
+                "Прошедших дней пока нет — они копятся по мере учёбы.")
+        return text, InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")]])
 
     window = past[:HIST_PAGE]

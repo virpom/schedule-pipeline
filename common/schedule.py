@@ -188,9 +188,14 @@ def _merge_groups(lessons) -> list:
         if seen is None:
             merged[key] = lesson
             continue
+        # Одна и та же группа попадает дважды: у вуза на один слот
+        # бывает несколько пар с разными списками недель, и после
+        # фильтра по неделе они приходят как отдельные строки. Без
+        # дедупликации в подписи было «СА - 26-2, СА - 26-2».
         groups = [g for g in (getattr(seen, "group", None),
                               getattr(lesson, "group", None)) if g]
-        seen.group = ", ".join(groups)
+        seen.group = ", ".join(dict.fromkeys(
+            part.strip() for g in groups for part in g.split(",") if part.strip()))
     return list(merged.values())
 
 
@@ -327,7 +332,15 @@ def format_teacher_results(entries, bell, lunches, detail: str = DETAIL_BRIEF) -
     return "\n\n".join(parts)
 
 
-def format_bell(bell, lunches) -> str:
+def format_bell(bell, lunches, vuz: bool = False) -> str:
+    """Сетка звонков.
+
+    У вуза своя: 8 пар до 22:00, без деления на курсы и без «Разговоров
+    о важном». Раньше экран всегда показывал колледж, и преподаватель
+    вуза видел чужую сетку с 5 парами.
+    """
+    if vuz:
+        return _format_bell_vuz(bell, lunches)
     lines = ["⏰ <b>Расписание звонков</b>\n"]
     for day_type, title in [("MONDAY", "Понедельник"), ("OTHER", "Остальные дни")]:
         lines.append(f"<b>{title}</b>")
@@ -346,4 +359,25 @@ def format_bell(bell, lunches) -> str:
                 if lunch and lunch.position == "after" and lunch.para == bs.para:
                     lines.append(f"🍽 обед {lunch.lunch_start:%H:%M}–{lunch.lunch_end:%H:%M}")
         lines.append("")
+    return "\n".join(lines)
+
+
+def _format_bell_vuz(bell, lunches) -> str:
+    """Звонки вуза: одна сетка на все дни, 8 пар."""
+    lines = ["⏰ <b>Расписание звонков вуза</b>\n"]
+    rows = [bell[(day_type, VUZ_GROUP, p)]
+            for day_type in ("MONDAY", "OTHER")
+            for p in range(1, 9)
+            if (day_type, VUZ_GROUP, p) in bell]
+    if not rows:
+        lines.append("Сетка звонков вуза не загружена.")
+        return "\n".join(lines)
+    seen = set()
+    for bs in rows:
+        if bs.para in seen:
+            continue
+        seen.add(bs.para)
+        lunch = lunches.get(("MONDAY", VUZ_GROUP))
+        inline = lunch if (lunch and lunch.position == "inside" and lunch.para == bs.para) else None
+        lines.append(f"{bs.para} пара  {_para_full(bs, inline)}")
     return "\n".join(lines)
