@@ -315,9 +315,14 @@ async def _vuz_teacher_day(repo: RequestsRepo, user: User, date: datetime.date):
 
 
 def _vuz_lesson_to_slot(lesson):
-    """Привести пару вуза к виду, который понимает format_day."""
+    """Привести пару вуза к виду, который понимает format_day.
+
+    Группа нужна: по ней выбираются звонки (у вуза своя сетка, 8 пар
+    до 22:00) и она же подписывает пару.
+    """
     from tgbot.services.schedule_layer import Slot
-    return Slot(lesson.para, lesson.subject, lesson.teacher, lesson.room)
+    return Slot(lesson.para, lesson.subject, lesson.teacher, lesson.room,
+                group=lesson.group)
 
 
 async def _user_lessons(repo: RequestsRepo, user: User, date: datetime.date):

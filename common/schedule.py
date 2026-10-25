@@ -188,7 +188,8 @@ def _merge_groups(lessons) -> list:
         if seen is None:
             merged[key] = lesson
             continue
-        groups = [g for g in (seen.group, lesson.group) if g]
+        groups = [g for g in (getattr(seen, "group", None),
+                              getattr(lesson, "group", None)) if g]
         seen.group = ", ".join(groups)
     return list(merged.values())
 
@@ -217,11 +218,13 @@ def format_day(
     # У вуза её нет, а звонок лежит в общей таблице с course_group='ALL',
     # поэтому без проверки он попадал в расписание студента вуза.
     rov = bell.get(("MONDAY", "ALL", 0))
-    if show_rov and dt == "MONDAY" and rov and not is_vuz(lessons[0].group):
+    if show_rov and dt == "MONDAY" and rov and not is_vuz(getattr(lessons[0], "group", None)):
         lines.append(f"<b>{rov.start:%H:%M}–{rov.end:%H:%M}</b>  Разговоры о важном 🇷🇺")
 
     for lesson in lessons:
-        cg = (group_course_group or {}).get(lesson.group) or course_group_from_group(lesson.group)
+        grp = getattr(lesson, "group", None)
+        cg = ((group_course_group or {}).get(grp)
+              or course_group_from_group(grp) if grp else None)
         lunch = lunches.get((dt, cg)) or lunches.get((dt, "I_IV"))
         para_end = getattr(lesson, "para_end", None) or lesson.para
         for p in range(lesson.para, para_end + 1):
@@ -244,7 +247,8 @@ def format_day(
                 # Суффикс @vuz — служебный, человеку он не нужен.
                 # strip_unit снимает @vuz и с каждого имени в склейке:
                 # «АП-25@vuz, ИС-25@vuz» иначе не влезает в строку.
-                names = ", ".join(strip_unit(g) for g in lesson.group.split(", "))
+                raw_group = getattr(lesson, "group", "") or ""
+                names = ", ".join(strip_unit(g) for g in raw_group.split(", ") if g)
                 m = " · ".join(x for x in (names, lesson.room) if x)
             else:
                 m = " · ".join(x for x in (lesson.teacher, lesson.room) if x)

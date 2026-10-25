@@ -17,10 +17,12 @@ PARITY_OFFSET = 1
 class Slot:
     """Итоговая пара дня — то, что видит студент."""
 
-    __slots__ = ("para", "subject", "teacher", "room", "changed", "action", "comment")
+    __slots__ = ("para", "subject", "teacher", "room", "changed", "action",
+                 "comment", "group")
 
     def __init__(self, para: int, subject: str, teacher: str = "", room: str = "",
-                 changed: bool = False, action: str = "", comment: str = ""):
+                 changed: bool = False, action: str = "", comment: str = "",
+                 group: str = ""):
         self.para = para
         self.subject = subject
         self.teacher = teacher
@@ -28,6 +30,10 @@ class Slot:
         self.changed = changed      # пришло из замены
         self.action = action        # replace | add | ""
         self.comment = comment
+        # Группа нужна format_day: по ней выбираются звонки и подпись
+        # под парой. У преподавателя вуза слот собирается из base_lesson,
+        # и без этого поля день вообще не открывался.
+        self.group = group
 
     def __repr__(self):
         return f"<Slot {self.para} {self.subject}{' (замена)' if self.changed else ''}>"
@@ -68,9 +74,11 @@ async def get_day_slots(repo: RequestsRepo, group: str, date: datetime.date,
             continue
         if sub and sub.action in ("replace", "add"):
             slots.append(Slot(lesson.para, sub.subject, sub.teacher, sub.room,
-                              changed=True, action=sub.action, comment=sub.comment))
+                              changed=True, action=sub.action, comment=sub.comment,
+                              group=group))
         else:
-            slots.append(Slot(lesson.para, lesson.subject, lesson.teacher, lesson.room))
+            slots.append(Slot(lesson.para, lesson.subject, lesson.teacher, lesson.room,
+                              group=group))
 
     # Замена на пару, которой нет в базовом расписании, — это новая пара,
     # а не «добавление». У вуза такие часты: перенос на субботу, разовая
@@ -82,7 +90,8 @@ async def get_day_slots(repo: RequestsRepo, group: str, date: datetime.date,
     for para, sub in sorted(sub_by_para.items()):
         if sub.action in ("add", "replace") and para not in used:
             slots.append(Slot(para, sub.subject, sub.teacher, sub.room,
-                              changed=True, action=sub.action, comment=sub.comment))
+                              changed=True, action=sub.action, comment=sub.comment,
+                              group=group))
 
     slots.sort(key=lambda s: s.para)
     return slots
