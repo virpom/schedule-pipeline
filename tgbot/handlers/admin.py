@@ -432,7 +432,15 @@ async def _preview_for_user(message: Message, repo: RequestsRepo, config: Config
         gcg = await repo.users.get_group_course_map() or None
     else:
         if not user.group:
-            await message.answer("У тебя не выбрана группа")
+            # Раньше сообщение было тупиком: ни кнопок, ни подсказки,
+            # что делать дальше.
+            await message.answer(
+                "У тебя не выбрана группа — без неё нечего показать.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🎯 Выбрать группу",
+                                          callback_data="pick")],
+                    [InlineKeyboardButton(text="⚙️ Настройки",
+                                          callback_data="settings")]]))
             return
         lessons = await repo.college_lessons.get_for_group_date(user.group, date)
         cg = bells_group(user.group, user.course)
@@ -493,7 +501,7 @@ async def broadcast_cmd(message: Message, repo: RequestsRepo, config: Config, st
     parts = message.text.split(None, 1)
     if len(parts) < 2:
         await state.set_state(AdminState.set_broadcast)
-        await message.answer("Введи текст сообщения для всех:")
+        await message.answer("Введи текст сообщения для всех:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="adm:bc_cancel")]]))
         return
     await _confirm_broadcast(message, repo, state, parts[1])
 
@@ -570,7 +578,7 @@ async def cb_broadcast(cb: CallbackQuery, config: Config, state: FSMContext):
         return
     await state.update_data(broadcast_target="all")
     await state.set_state(AdminState.set_broadcast)
-    await cb.message.answer("Введи текст сообщения для всех:")
+    await cb.message.answer("Введи текст сообщения для всех:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="adm:bc_cancel")]]))
     await cb.answer()
 
 
@@ -589,7 +597,7 @@ async def cb_broadcast_group(cb: CallbackQuery, config: Config, state: FSMContex
     if not _is_admin_cb(cb, config):
         return
     await state.set_state(AdminState.set_group_broadcast)
-    await cb.message.answer("Напиши номер группы (например, ДП-26):")
+    await cb.message.answer("Напиши номер группы (например, ДП-26):", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="adm:bc_cancel")]]))
     await cb.answer()
 
 
@@ -934,6 +942,17 @@ SETTINGS: dict[str, _Setting] = {
 }
 
 
+@admin_router.callback_query(F.data == "adm:set_cancel")
+async def cb_set_cancel(cb: CallbackQuery, config: Config, state: FSMContext):
+    if not _is_admin_cb(cb, config):
+        return
+    await state.clear()
+    await cb.message.edit_text("Отменено", reply_markup=InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад",
+                                               callback_data="adm:settings")]]))
+    await cb.answer()
+
+
 @admin_router.callback_query(F.data.startswith("adm:set:"))
 async def cb_setting(cb: CallbackQuery, config: Config, state: FSMContext):
     if not _is_admin_cb(cb, config):
@@ -943,7 +962,11 @@ async def cb_setting(cb: CallbackQuery, config: Config, state: FSMContext):
         await cb.answer("Неизвестная настройка", show_alert=True)
         return
     await state.set_state(item.state)
-    await cb.message.answer(item.prompt)
+    # Без кнопки отмены из ввода не было выхода: state висел, пока не
+    # пришлёшь валидное значение, и любое сообщение уходило в парсер.
+    await cb.message.answer(item.prompt, reply_markup=InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена",
+                                               callback_data="adm:set_cancel")]]))
     await cb.answer()
 
 

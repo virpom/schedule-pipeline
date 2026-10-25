@@ -142,6 +142,12 @@ def menu_kb(user: User, support_link: str = "", is_editor: bool = False) -> Inli
     if is_editor:
         rows.append([InlineKeyboardButton(text="✏️ Редактор расписания",
                                           callback_data="ed:back")])
+    # Без идентичности остальные кнопки только ругаются «Сначала выбери
+    # группу». Ставим выбор первым и заметным, чтобы новичок не тыкался.
+    if not _has_identity(user):
+        rows.insert(0, [InlineKeyboardButton(
+            text="🎯 Выбрать группу" if not _is_teacher(user) else "🎯 Найти себя",
+            callback_data="pick" if not _is_teacher(user) else "pick_teacher")])
     rows.append([InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings")])
     if support_link:
         rows.append([InlineKeyboardButton(text="📨 Поддержка", url=support_link)])
@@ -174,11 +180,19 @@ def settings_kb(user: User) -> InlineKeyboardMarkup:
 
 def menu_text(user: User) -> str:
     if _is_teacher(user):
-        label, ident = "Преподаватель", user.teacher_name or "не выбрана"
+        if not (user.teacher_name or "").strip():
+            return ("🎓 <b>Расписание ПТК</b>\n\n"
+                    "Фамилия не выбрана.\n\nНайди себя в списке 👇")
+        label, ident = "Преподаватель", user.teacher_name
     else:
         label = "Группа"
         # Суффикс @vuz — служебный, человеку его видеть незачем.
-        ident = strip_unit(user.group) or "не выбрана"
+        if not user.group:
+            # «не выбрана · 1 курс» читается как издевательство: курса
+            # без группы не бывает, а кнопки дня всё равно откажут.
+            return ("🎓 <b>Расписание ПТК</b>\n\n"
+                    "Группа не выбрана.\n\nВыбери её, чтобы видеть расписание 👇")
+        ident = strip_unit(user.group)
         if is_vuz(user.group):
             label = "Группа · вуз"
         if user.course:
