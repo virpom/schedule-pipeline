@@ -95,3 +95,32 @@ def test_vuz_bell_differs_from_college():
 
     college = format_bell(bell, {}, vuz=False)
     assert "Разговоры о важном" in college
+
+
+def test_preview_matches_student_view():
+    """Предпросмотр редактора обязан совпадать с экраном студента.
+
+    Раньше он собирался своей рукой: без времени пары, с другим
+    порядком строк и без группы. Редактор видел одно, студент другое.
+    """
+    import datetime as _dt
+
+    from common.schedule import format_day
+    from tgbot.handlers.editor import preview_text
+    from tgbot.services.schedule_layer import Slot
+
+    class BS:
+        def __init__(self, para, start, end):
+            self.para, self.start, self.end = para, start, end
+            self.h1_end = self.h2_start = None
+
+    date = _dt.date(2026, 10, 26)
+    bell = {("MONDAY", "I_IV", 2): BS(2, _dt.time(11, 10), _dt.time(12, 45))}
+    slots = [Slot(2, "Обществознание", "Иванов И.И.", "204", group="АТ-26")]
+
+    preview = preview_text("АТ-26", date, slots, bell, {}, "I_IV")
+    student = format_day(date, slots, bell, {}, detail="full", meta="group",
+                         group_course_group={"АТ-26": "I_IV"})
+    assert preview == student
+    assert "11:10–12:45" in preview, "нет времени пары — как у студента"
+    assert "АТ-26" in preview, "нет группы"

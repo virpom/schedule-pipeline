@@ -30,6 +30,7 @@ from common.schedule import (
     SUB_CANCEL,
     SUB_REPLACE,
     WEEKDAY_FULL,
+    bells_group,
     week_parity,
 )
 from infrastructure.database.models import User
@@ -238,26 +239,23 @@ def sub_day_text(group: str, date: datetime.date, slots: list[Slot]) -> str:
     return "\n".join(lines)
 
 
-def preview_text(group: str, date: datetime.date, slots: list[Slot]) -> str:
-    """Предпросмотр ровно так, как увидят студенты."""
-    from common.schedule import MONTHS_GEN
+def preview_text(group: str, date: datetime.date, slots: list[Slot],
+                 bell=None, lunches=None, course_group: str | None = None) -> str:
+    """Предпросмотр ровно так, как увидят студенты.
 
-    header = f"📅 <b>{WEEKDAY_FULL[date.weekday()]}, {date.day} {MONTHS_GEN[date.month]}</b>"
-    if not slots:
-        return f"{header}\n\nЗанятий нет 🙌"
-    lines = [header, ""]
-    for s in slots:
-        line = f"{s.para}) <b>{s.subject}</b>"
-        if s.changed:
-            line += "  🔄"
-        lines.append(line)
-        meta = " · ".join(x for x in (s.teacher, s.room) if x)
-        if meta:
-            lines.append(meta)
-    changed = [s for s in slots if s.changed]
-    if changed:
-        lines += ["", f"🔄 <i>Замен: {len(changed)}</i>"]
-    return "\n".join(lines)
+    Раньше экран собирал текст своей рукой и расходился с реальным:
+    не было времени пары (студент видит «11:10–12:45», редактор —
+    «Обществознание»), другой порядок строк и не было группы. Теперь
+    зовём format_day — тот же код, что и в экране дня.
+    """
+    from common.schedule import format_day
+
+    lessons = [Slot(s.para, s.subject, s.teacher, s.room,
+                    changed=s.changed, action=s.action, comment=s.comment,
+                    group=group) for s in slots]
+    gcg = {group: course_group} if course_group else None
+    return format_day(date, lessons, bell or {}, lunches or {},
+                      detail="full", meta="group", group_course_group=gcg)
 
 
 # --- вход -----------------------------------------------------------------
@@ -778,8 +776,12 @@ async def cb_preview_day(cb: CallbackQuery, repo: RequestsRepo):
         return
     date = datetime.date.fromisoformat(cb.data.split(":")[2])
     slots = await get_day_slots(repo, group, date)
+    # Звонки и поток нужны, чтобы предпросмотр совпадал с экраном дня:
+    # без них не подставить время пары и деление на курсы.
+    bell, lunches = await repo.bell_schedule.get_context()
     await cb.message.edit_text(
-        preview_text(group, date, slots),
+        preview_text(group, date, slots, bell, lunches,
+                     bells_group(group, None)),
         reply_markup=cancel_kb("ed:preview"),
     )
     await cb.answer()
