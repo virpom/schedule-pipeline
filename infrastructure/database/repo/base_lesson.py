@@ -3,7 +3,7 @@ import datetime
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert
 
-from common.schedule import PARITY_ANY
+from common.schedule import PARITY_ANY, teacher_matches
 from infrastructure.database.models import BaseLesson
 from infrastructure.database.repo.base import BaseRepo
 
@@ -119,3 +119,28 @@ class BaseLessonRepo(BaseRepo):
             select(BaseLesson.group).distinct().order_by(BaseLesson.group)
         )
         return [g for (g,) in result.all()]
+
+    async def get_for_teacher(self, teacher_name: str, weekday: int | None = None,
+                              week: int | None = None) -> list[BaseLesson]:
+        """Пары преподавателя вуза из базового расписания.
+
+        У вуза нет материализованного слоя на будущее: пары хранятся в
+        base_lesson со списком недель. Поэтому расписание преподавателя
+        вуза собирается здесь, а не из college_lesson, где вузовских
+        пар на произвольную дату может не оказаться.
+        """
+        if not (teacher_name or "").strip():
+            return []
+        surname = teacher_name.split()[0]
+        query = (select(BaseLesson)
+                 .where(BaseLesson.group.like("%@vuz"),
+                        BaseLesson.teacher.like(f"%{surname}%"))
+                 .order_by(BaseLesson.weekday, BaseLesson.para))
+        if weekday is not None:
+            query = query.where(BaseLesson.weekday == weekday)
+        result = await self.session.execute(query)
+        rows = [r for r in result.scalars().all()
+                if teacher_matches(r.teacher, teacher_name)]
+        if week is not None:
+            rows = [r for r in rows if _fits_week(r, week)]
+        return rows

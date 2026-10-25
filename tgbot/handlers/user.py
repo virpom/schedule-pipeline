@@ -255,11 +255,40 @@ async def _vuz_group_kb(repo: RequestsRepo, faculty: str, form: str,
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def _teacher_pick_kb(repo: RequestsRepo) -> InlineKeyboardMarkup:
-    teachers = await repo.college_lessons.get_teachers()
-    buttons = [InlineKeyboardButton(text=t, callback_data=f"teacher:{t}") for t in teachers]
+# Преподавателей в расписании 235 (колледж) и 168 (вуз). Список кнопками
+# в чате превращался в простыню на сотни строк, в которой вузовских не
+# было вовсе. Вместо списка — подразделение и поиск по фамилии.
+TEACHER_UNIT_KB = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="🏫 Колледж", callback_data="tunit:college")],
+    [InlineKeyboardButton(text="🎓 Вуз", callback_data="tunit:vuz")],
+    [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
+])
+
+
+async def _teacher_search_kb(repo: RequestsRepo, vuz: bool) -> InlineKeyboardMarkup:
+    """Первые буквы фамилий вместо полного списка.
+
+    Полный список не влезает в сообщение Telegram (4096 символов) и
+    нечитаем на телефоне. По буквам человек добирается до своей фамилии
+    за два нажатия.
+    """
+    names = (await repo.college_lessons.get_teachers_vuz() if vuz
+             else await repo.college_lessons.get_teachers(vuz=False))
+    letters = sorted({n[0].upper() for n in names if n})
+    buttons = [InlineKeyboardButton(text=ch, callback_data=f"tlet:{'vuz' if vuz else 'col'}:{ch}")
+               for ch in letters]
+    rows = [buttons[i:i + 6] for i in range(0, len(buttons), 6)]
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="pick_teacher")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _teacher_letter_kb(repo: RequestsRepo, vuz: bool, letter: str) -> InlineKeyboardMarkup:
+    names = (await repo.college_lessons.get_teachers_vuz() if vuz
+             else await repo.college_lessons.get_teachers(vuz=False))
+    picked = [n for n in names if n[:1].upper() == letter.upper()]
+    buttons = [InlineKeyboardButton(text=n, callback_data=f"teacher:{n}") for n in picked]
     rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
-    rows.append([InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="pick_teacher")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -270,9 +299,32 @@ async def _require_identity(cb: CallbackQuery, user: User) -> bool:
     return False
 
 
+async def _vuz_teacher_day(repo: RequestsRepo, user: User, date: datetime.date):
+    """Пары преподавателя вуза на дату — из базового слоя вуза.
+
+    Преподаватель может вести и колледж, и вуз: у вуза пары лежат в
+    base_lesson со списком недель, у колледжа — в college_lesson.
+    Поэтому источников два и они складываются.
+    """
+    from tgbot.services import sync_vuz
+    anchor = await sync_vuz.get_anchor(repo)
+    week = sync_vuz.vuz_week(date, anchor)
+    rows = await repo.base_lessons.get_for_teacher(
+        user.teacher_name, weekday=date.isoweekday(), week=week)
+    return [_vuz_lesson_to_slot(r) for r in rows]
+
+
+def _vuz_lesson_to_slot(lesson):
+    """Привести пару вуза к виду, который понимает format_day."""
+    from tgbot.services.schedule_layer import Slot
+    return Slot(lesson.para, lesson.subject, lesson.teacher, lesson.room)
+
+
 async def _user_lessons(repo: RequestsRepo, user: User, date: datetime.date):
     if _is_teacher(user):
-        return await repo.college_lessons.get_for_teacher_date(user.teacher_name, date)
+        college = await repo.college_lessons.get_for_teacher_date(user.teacher_name, date)
+        vuz = await _vuz_teacher_day(repo, user, date)
+        return sorted([*college, *vuz], key=lambda l: l.para)
     return await repo.college_lessons.get_for_group_date(user.group, date)
 
 
@@ -291,11 +343,19 @@ async def _course_group_map(repo: RequestsRepo, user: User) -> dict[str, str] | 
 
 
 def _fmt(user: User, date: datetime.date, lessons, bell, lunches, gcg=None) -> str:
+    """Текст дня для пользователя.
+
+    ``meta`` был перевёрнут: студент видел преподавателя, а преподаватель
+    — группу. Плюс преподавателю нужно склеивать поток: физкультура у
+    шести групп — это одна пара, а не шесть.
+    """
+    is_teacher = _is_teacher(user)
     return format_day(
         date, lessons, bell, lunches, user.bell_detail,
-        meta="group" if _is_teacher(user) else "teacher",
-        show_rov=not _is_teacher(user),
+        meta="group" if is_teacher else "teacher",
+        show_rov=not is_teacher,
         group_course_group=gcg,
+        merge_groups=is_teacher,
     )
 
 
@@ -347,7 +407,7 @@ async def cb_role_student(cb: CallbackQuery, repo: RequestsRepo, user: User):
 @user_router.callback_query(F.data == "role:teacher")
 async def cb_role_teacher(cb: CallbackQuery, repo: RequestsRepo, user: User):
     await repo.users.set_role(user.id, "teacher")
-    await cb.message.edit_text("👨‍🏫 Выбери себя из списка 👇", reply_markup=await _teacher_pick_kb(repo))
+    await cb.message.edit_text("👨‍🏫 Где ты преподаёшь?", reply_markup=TEACHER_UNIT_KB)
     await cb.answer()
 
 
@@ -448,7 +508,7 @@ async def cb_vuz_group(cb: CallbackQuery, repo: RequestsRepo, user: User):
 
 @user_router.callback_query(F.data == "pick_teacher")
 async def cb_pick_teacher(cb: CallbackQuery, repo: RequestsRepo):
-    await cb.message.edit_text("👨‍🏫 Выбери себя из списка 👇", reply_markup=await _teacher_pick_kb(repo))
+    await cb.message.edit_text("👨‍🏫 Где ты преподаёшь?", reply_markup=TEACHER_UNIT_KB)
     await cb.answer()
 
 
@@ -490,6 +550,26 @@ async def cb_course(cb: CallbackQuery, repo: RequestsRepo, user: User):
     text, kb = await _render_menu(repo, user)
     await cb.message.edit_text(text, reply_markup=kb)
     await cb.answer(f"{course} курс")
+
+
+@user_router.callback_query(F.data.startswith("tunit:"))
+async def cb_teacher_unit(cb: CallbackQuery, repo: RequestsRepo):
+    vuz = cb.data.split(":", 1)[1] == "vuz"
+    where = "вуза" if vuz else "колледжа"
+    await cb.message.edit_text(
+        f"👨‍🏫 Преподаватели {where}\n\nВыбери первую букву фамилии 👇",
+        reply_markup=await _teacher_search_kb(repo, vuz))
+    await cb.answer()
+
+
+@user_router.callback_query(F.data.startswith("tlet:"))
+async def cb_teacher_letter(cb: CallbackQuery, repo: RequestsRepo):
+    _, unit, letter = cb.data.split(":", 2)
+    vuz = unit == "vuz"
+    await cb.message.edit_text(
+        f"👨‍🏫 Фамилии на «{letter}»\n\nВыбери себя 👇",
+        reply_markup=await _teacher_letter_kb(repo, vuz, letter))
+    await cb.answer()
 
 
 @user_router.callback_query(F.data.startswith("teacher:"))

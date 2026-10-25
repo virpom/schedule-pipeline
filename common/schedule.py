@@ -70,7 +70,17 @@ def week_parity(date: datetime.date, parity_offset: int = 0) -> str:
 
 
 def teacher_base(name: str) -> str:
-    return (name or "").split(",")[0].strip()
+    """Фамилия с инициалами без служебного хвоста.
+
+    Пробелы внутри инициалов схлопываются: в файлах вуза встречаются оба
+    варианта — «Кокошка И.П.» и «Кокошка И. П.», — и без нормализации
+    один человек попадал в список преподавателей дважды.
+    """
+    head = (name or "").split(",")[0].strip()
+    head = re.sub(r"\s+", " ", head)
+    # «Кокошка И. П.» и «Кокошка И.П.» — один человек. Убираем пробел
+    # после точки внутри инициалов, иначе в списке два одинаковых имени.
+    return re.sub(r"(?<=\b[А-ЯЁA-Z]\.)\s+(?=[А-ЯЁA-Z]\.)", "", head)
 
 
 def teacher_matches(lesson_teacher: str, selected_name: str) -> bool:
@@ -157,6 +167,32 @@ def _lunch_line(lunch) -> str:
     return f"🍽 Обед {lunch.lunch_start:%H:%M}–{lunch.lunch_end:%H:%M}"
 
 
+def _merge_groups(lessons) -> list:
+    """Склеить пары одного преподавателя на один слот.
+
+    Физкультура идёт потоком: шесть групп, один препод, одна пара. В
+    расписании это шесть строк подряд с одинаковым временем и
+    предметом, и преподаватель видел их как шесть разных пар.
+
+    Пары склеиваются, когда совпадают номер пары, конец пары, предмет
+    и преподаватель, — группы дописываются в ``group`` через запятую.
+    Остальные атрибуты берутся у первой: комната у потока обычно общая,
+    а если и разная, терять её всё равно нельзя — она останется от
+    первой группы.
+    """
+    merged: dict[tuple, object] = {}
+    for lesson in lessons:
+        key = (lesson.para, getattr(lesson, "para_end", None) or lesson.para,
+               lesson.subject, teacher_base(lesson.teacher))
+        seen = merged.get(key)
+        if seen is None:
+            merged[key] = lesson
+            continue
+        groups = [g for g in (seen.group, lesson.group) if g]
+        seen.group = ", ".join(groups)
+    return list(merged.values())
+
+
 def format_day(
         date: datetime.date,
         lessons,
@@ -166,6 +202,7 @@ def format_day(
         meta: str = "teacher",
         show_rov: bool = True,
         group_course_group: dict[str, str] | None = None,
+        merge_groups: bool = False,
 ) -> str:
     header = f"📅 <b>{WEEKDAY_FULL[date.weekday()]}, {date.day} {MONTHS_GEN[date.month]}</b>"
     if not lessons:
@@ -173,6 +210,8 @@ def format_day(
 
     lines = [header, ""]
     dt = day_type_from_date(date)
+    if merge_groups:
+        lessons = _merge_groups(lessons)
 
     # «Разговоры о важном» — линейка колледжа, в 9:00 по понедельникам.
     # У вуза её нет, а звонок лежит в общей таблице с course_group='ALL',
@@ -202,7 +241,11 @@ def format_day(
             line = f"{p}) <b>{time_str}</b>  {lesson.subject}{mark}"
             lines.append(line)
             if meta == "group":
-                m = " · ".join(x for x in (lesson.group, lesson.room) if x)
+                # Суффикс @vuz — служебный, человеку он не нужен.
+                # strip_unit снимает @vuz и с каждого имени в склейке:
+                # «АП-25@vuz, ИС-25@vuz» иначе не влезает в строку.
+                names = ", ".join(strip_unit(g) for g in lesson.group.split(", "))
+                m = " · ".join(x for x in (names, lesson.room) if x)
             else:
                 m = " · ".join(x for x in (lesson.teacher, lesson.room) if x)
             if m:
