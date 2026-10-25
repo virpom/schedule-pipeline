@@ -260,9 +260,11 @@ async def _vuz_course_kb(repo: RequestsRepo, faculty: str, form: str) -> InlineK
                                     callback_data=f"vu:cr:{faculty}:{form}:{c}")
                for c in courses]
     rows = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
-    # Назад — на предыдущий шаг (форма обучения), а не через него.
-    rows.append([InlineKeyboardButton(
-        text="⬅️ Назад", callback_data=f"vu:form:{faculty}:{form}")])
+    # Экран курса рисуется и из «формы», и напрямую из факультета (когда
+    # форма одна). Назад в обоих случаях — к факультету: вернуться на
+    # экран формы, которого человек мог не видеть, хуже.
+    rows.append([InlineKeyboardButton(text="⬅️ Назад",
+                                      callback_data=f"vu:fac:{faculty}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
