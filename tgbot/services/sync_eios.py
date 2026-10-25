@@ -347,6 +347,56 @@ def _merge_para_clash(slots: list) -> list:
     return [seen[p] for p in sorted(seen)]
 
 
+async def materialize_day(repo: RequestsRepo, date: datetime.date) -> int:
+    """Пересобрать один день в ``college_lesson``.
+
+    Нужно после ручной правки: студент читает готовую таблицу, а не
+    слои, поэтому без пересборки замена появлялась у него только после
+    следующего опроса — до пяти минут, а если сайт лежал, то никогда.
+    """
+    from infrastructure.database.models import CollegeLesson
+
+    manual = [
+        row
+        for (row,) in await repo.session.execute(
+            select(CollegeLesson).where(
+                CollegeLesson.date == date,
+                CollegeLesson.source != SOURCE_SITE,
+            )
+        )
+    ]
+    manual_keys = {(r.group, r.para) for r in manual}
+    rows: list[dict] = [
+        {
+            "date": r.date, "group": r.group, "para": r.para,
+            "para_end": r.para_end, "subject": r.subject,
+            "teacher": r.teacher, "room": r.room,
+            "source_url": r.source_url, "source": r.source,
+            "changed": r.changed,
+        }
+        for r in manual
+    ]
+    for group in await repo.base_lessons.get_groups():
+        slots = await get_day_slots(repo, group, date)
+        for slot in _merge_para_clash(slots):
+            if (group, slot.para) in manual_keys:
+                continue
+            rows.append({
+                "date": date,
+                "group": group,
+                "para": slot.para,
+                "para_end": slot.para,
+                "subject": (slot.subject or "")[:256],
+                "teacher": (slot.teacher or "")[:128],
+                "room": (slot.room or "")[:64],
+                "source_url": "",
+                "source": SOURCE_SITE,
+                "changed": slot.changed,
+            })
+    await repo.college_lessons.replace_date(date, rows)
+    return len(rows)
+
+
 async def materialize(repo: RequestsRepo, days: int = MATERIALIZE_DAYS) -> int:
     """Собрать итоговое расписание из слоёв и положить в ``college_lesson``.
 

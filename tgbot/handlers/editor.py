@@ -469,7 +469,9 @@ async def _save_base(event, repo: RequestsRepo, state: FSMContext, via_cb: bool)
         new_value={"weekday": weekday, "parity": parity, "para": para,
                    "subject": subject, "teacher": teacher, "room": room},
     )
-    await state.clear()
+    # База повторяется каждую неделю — пересобираем все дни окна,
+    # иначе студент увидит правку только после следующего опроса.
+    await _rebuild(repo)
 
     notified = 0
     try:
@@ -508,6 +510,7 @@ async def cb_del_base(cb: CallbackQuery, repo: RequestsRepo):
         group, "base", "delete", user_id=cb.from_user.id, para=para,
         old_value={"subject": old_slot.subject} if old_slot else None,
     )
+    await _rebuild(repo)
     lessons = await repo.base_lessons.get_day(group, weekday, parity)
     slots = [Slot(l.para, l.subject, l.teacher, l.room) for l in lessons]
     await cb.message.edit_text(
@@ -612,6 +615,7 @@ async def cb_sub_cancel(cb: CallbackQuery, repo: RequestsRepo):
                                  created_by=cb.from_user.id)
     await repo.edit_log.log(group, "sub", "edit", user_id=cb.from_user.id,
                             date=date, para=para, new_value={"action": SUB_CANCEL})
+    await _rebuild(repo, date)
     await _render_sub_day(cb, repo, group, date)
     await cb.answer("❌ Пара отменена")
 
@@ -628,6 +632,7 @@ async def cb_sub_reset(cb: CallbackQuery, repo: RequestsRepo):
     await repo.substitutions.delete(date, group, para)
     await repo.edit_log.log(group, "sub", "delete", user_id=cb.from_user.id,
                             date=date, para=para)
+    await _rebuild(repo, date)
     await _render_sub_day(cb, repo, group, date)
     await cb.answer("↩️ Замена снята")
 
@@ -718,6 +723,7 @@ async def _save_sub(event, repo: RequestsRepo, state: FSMContext, via_cb: bool):
 
     await repo.substitutions.set(date, group, para, action, subject, teacher, room,
                                  created_by=event.from_user.id)
+    await _rebuild(repo, date)
     await repo.edit_log.log(group, "sub", "edit", user_id=event.from_user.id,
                             date=date, para=para, new_value={
                                 "action": action, "subject": subject,
@@ -864,6 +870,26 @@ async def cb_undo(cb: CallbackQuery, repo: RequestsRepo):
     await repo.edit_log.delete(last.id)
     await cb.answer(msg, show_alert=True)
     await cb_log(cb, repo)
+
+
+async def _rebuild(repo: RequestsRepo, date: datetime.date | None = None) -> None:
+    """Пересобрать college_lesson после правки.
+
+    Студент читает готовую таблицу, а не слои. Без пересборки замена
+    появлялась у него только после следующего опроса поллера — до пяти
+    минут, а если сайт лежал, то вообще никогда.
+
+    ``date`` задан — пересобираем только этот день (правка на дату).
+    Не задан — все дни окна (правка базы повторяется каждую неделю).
+    """
+    from tgbot.services import sync_eios
+    try:
+        if date is None:
+            await sync_eios.materialize(repo)
+        else:
+            await sync_eios.materialize_day(repo, date)
+    except Exception:
+        logging.exception("не удалось пересобрать college_lesson")
 
 
 # --- ввод текста ----------------------------------------------------------
