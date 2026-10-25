@@ -16,6 +16,7 @@ from common.schedule import (
     DETAIL_LABELS,
     DETAIL_ORDER,
     bells_group,
+    course_from_group,
     format_bell,
     format_day,
     format_no_lessons,
@@ -195,8 +196,14 @@ def menu_text(user: User) -> str:
         ident = strip_unit(user.group)
         if is_vuz(user.group):
             label = "Группа · вуз"
-        if user.course:
-            ident = f"{ident} · {user.course} курс"
+            # У вуза курс зашит в номер группы (ГИ-23 → 3 курс), и
+            # отдельное поле course остаётся от прежней группы. Без
+            # этого ГИ-23 подписывалась «1 курс».
+            course = course_from_group(user.group)
+        else:
+            course = user.course
+        if course:
+            ident = f"{ident} · {course} курс"
     return f"🎓 <b>Расписание ПТК</b>\n\n{label}: <b>{ident}</b>\n\nВыбери действие 👇"
 
 
@@ -253,7 +260,9 @@ async def _vuz_course_kb(repo: RequestsRepo, faculty: str, form: str) -> InlineK
                                     callback_data=f"vu:cr:{faculty}:{form}:{c}")
                for c in courses]
     rows = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"vu:fac:{faculty}")])
+    # Назад — на предыдущий шаг (форма обучения), а не через него.
+    rows.append([InlineKeyboardButton(
+        text="⬅️ Назад", callback_data=f"vu:form:{faculty}:{form}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -292,6 +301,8 @@ async def _teacher_search_kb(repo: RequestsRepo, vuz: bool) -> InlineKeyboardMar
     buttons = [InlineKeyboardButton(text=ch, callback_data=f"tlet:{'vuz' if vuz else 'col'}:{ch}")
                for ch in letters]
     rows = [buttons[i:i + 6] for i in range(0, len(buttons), 6)]
+    # Назад — к выбору «колледж или вуз», а не сразу в список: иначе
+    # человек, ошибшийся подразделением, должен начинать с нуля.
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="pick_teacher")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -302,7 +313,10 @@ async def _teacher_letter_kb(repo: RequestsRepo, vuz: bool, letter: str) -> Inli
     picked = [n for n in names if n[:1].upper() == letter.upper()]
     buttons = [InlineKeyboardButton(text=n, callback_data=f"teacher:{n}") for n in picked]
     rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="pick_teacher")])
+    # Назад — к буквам того же подразделения. Раньше вело на выбор
+    # «колледж/вуз» и заставляло заново выбирать букву.
+    rows.append([InlineKeyboardButton(
+        text="⬅️ Назад", callback_data=f"tunit:{'vuz' if vuz else 'college'}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
