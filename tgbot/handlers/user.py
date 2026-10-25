@@ -132,12 +132,10 @@ def menu_kb(user: User, support_link: str = "", is_editor: bool = False) -> Inli
         [InlineKeyboardButton(text="⏰ Звонки", callback_data="bell"),
          InlineKeyboardButton(text=f"{sub_icon} Подписка", callback_data="sub:toggle")],
     ]
-    # Поиск по преподавателю работает и для вуза: в его файлах есть
-    # фамилии (142 человека), а запрос идёт по college_lesson, где лежат
-    # пары обоих подразделений.
-    if _is_teacher(user):
-        rows[2].append(InlineKeyboardButton(text="👥 Группа", callback_data="find_group"))
-    else:
+    # Преподавателю «👥 Группа» не нужна: у него нет своей группы, и
+    # кнопка показывала пары чужой группы, которую он никогда не выбирал.
+    # Поиск по фамилии работает для обоих подразделений.
+    if not _is_teacher(user):
         rows[2].append(InlineKeyboardButton(text="👨‍🏫 Преподаватель",
                                             callback_data="find_teacher"))
     if is_editor:
@@ -164,9 +162,11 @@ def settings_kb(user: User) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(text="🎯 Сменить фамилию", callback_data="pick_teacher")])
     else:
         rows.append([InlineKeyboardButton(text="🎯 Сменить группу", callback_data="pick")])
-        # У вуза курс берётся из справочника групп — спрашивать его отдельно
-        # значит дать студенту возможность выбрать неверный.
-        if not is_vuz(user.group):
+        # Курс нужен только колледжу: он выбирает поток звонков (1 и 4
+        # против 2 и 3). У вуза сетка одна на всех, а курс зашит в номер
+        # группы — кнопка там меняла лишь подпись. Без группы она тоже
+        # бессмысленна: менять нечего.
+        if user.group and not is_vuz(user.group):
             rows.append([InlineKeyboardButton(text="🎯 Сменить курс", callback_data="pick_course")])
         rows.append([InlineKeyboardButton(text=f"🐱 Картинки: {_on_off(user.send_image)}",
                                           callback_data="image_toggle")])
