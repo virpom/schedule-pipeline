@@ -245,6 +245,12 @@ def format_day(
             # Значок замены: студент должен видеть, что пара не по
             # постоянному плану. Одна точка — подхватывают и день,
             # и неделя, и рассылка, и уведомления: они все идут сюда.
+            if getattr(lesson, "action", "") == SUB_CANCEL:
+                # Отменённую пару не выбрасываем из списка: иначе день
+                # выглядит пустым, и непонятно — отменили или не было.
+                lines.append(f"{p}) <s><b>{time_str}</b>  {lesson.subject}</s>"
+                             f"  ❌ <i>отменено</i>")
+                continue
             mark = f" {SUB_MARK}" if getattr(lesson, "changed", False) else ""
             line = f"{p}) <b>{time_str}</b>  {lesson.subject}{mark}"
             lines.append(line)

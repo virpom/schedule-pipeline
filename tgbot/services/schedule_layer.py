@@ -71,6 +71,12 @@ async def get_day_slots(repo: RequestsRepo, group: str, date: datetime.date,
         sub = sub_by_para.get(lesson.para)
         used.add(lesson.para)
         if sub and sub.action == SUB_CANCEL:
+            # Отменённую пару показываем зачёркнутой, а не выбрасываем.
+            # Раньше она молча исчезала: студент видел «Занятий нет 🙌»
+            # и не понимал, отменили пару или её никогда не было.
+            slots.append(Slot(lesson.para, lesson.subject, lesson.teacher,
+                              lesson.room, changed=True, action=SUB_CANCEL,
+                              group=group))
             continue
         if sub and sub.action in ("replace", "add"):
             slots.append(Slot(lesson.para, sub.subject, sub.teacher, sub.room,

@@ -127,3 +127,26 @@ def test_preview_matches_student_view():
     assert "11:10–12:45" in preview, "нет времени пары — как у студента"
     assert "Иванов И.И." in preview, "нет преподавателя"
     assert "АТ-26 · 204" not in preview, "превью показывает группу вместо препода"
+
+
+def test_cancelled_lesson_visible_to_student():
+    """Отменённая пара видна зачёркнутой, а не исчезает."""
+    import datetime as _dt
+
+    from common.schedule import format_day
+    from tgbot.services.schedule_layer import Slot
+
+    class BS:
+        def __init__(self, para, start, end):
+            self.para, self.start, self.end = para, start, end
+            self.h1_end = self.h2_start = None
+
+    date = _dt.date(2026, 10, 27)
+    bell = {("OTHER", "I_IV", 1): BS(1, _dt.time(9, 0), _dt.time(10, 35))}
+    slots = [Slot(1, "Физика", "Петров П.П.", "301", changed=True,
+                  action="cancel", group="ДП-26")]
+
+    text = format_day(date, slots, bell, {}, detail="full", meta="teacher")
+    assert "отменено" in text
+    assert "<s>" in text, "пара не зачёркнута"
+    assert "Занятий нет" not in text, "день выглядит пустым"

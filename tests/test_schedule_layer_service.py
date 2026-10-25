@@ -78,11 +78,17 @@ def test_replace_marks_changed():
     assert slots[0].teacher == "Сидоров С.С."
 
 
-def test_cancel_removes_base_lesson():
+def test_cancel_keeps_slot_marked():
+    """Отменённая пара остаётся в списке с action='cancel'.
+
+    Раньше она выбрасывалась, и студент видел «Занятий нет» на месте
+    отменённой пары — будто её никогда не было.
+    """
     repo = FakeRepo([lesson(1, "Математика"), lesson(2, "Физика")],
                     [sub(1, WED_ODD, SUB_CANCEL)])
     slots = day(repo, date=WED_ODD)
-    assert [(s.para, s.subject) for s in slots] == [(2, "Физика")]
+    assert [(s.para, s.subject, s.action) for s in slots] == [
+        (1, "Математика", SUB_CANCEL), (2, "Физика", "")]
 
 
 def test_add_inserts_without_base():
@@ -91,9 +97,11 @@ def test_add_inserts_without_base():
     assert [(s.para, s.subject, s.changed) for s in slots] == [(3, "История", True)]
 
 
-def test_cancel_all_is_empty_day():
+def test_cancel_all_shows_cancelled_slots():
+    """Все пары отменены — список не пустой, а из отменённых."""
     repo = FakeRepo([lesson(1, "Математика")], [sub(1, WED_ODD, SUB_CANCEL)])
-    assert day(repo, date=WED_ODD) == []
+    slots = day(repo, date=WED_ODD)
+    assert [(s.para, s.action) for s in slots] == [(1, SUB_CANCEL)]
 
 
 def test_slots_sorted_by_para():

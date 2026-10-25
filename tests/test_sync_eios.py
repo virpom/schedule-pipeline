@@ -233,12 +233,16 @@ def test_base_plus_substitution_end_to_end(tmp_path):
         ])
 
         slots = await get_day_slots(repo, "ДП-26", d, PARITY_OFFSET)
+        # Отменённая пара (3) остаётся в списке с action='cancel' —
+        # иначе на её месте студент видел пустоту и не знал об отмене.
         assert [(s.para, s.subject) for s in slots] == [
             (1, "Математика"),
             (2, "История"),
+            (3, "Химия"),
         ]
         assert slots[1].changed is True
         assert slots[1].room == "ауд. 7"
+        assert slots[2].action == "cancel"
 
     _run(_with_repo(tmp_path, body))
 
