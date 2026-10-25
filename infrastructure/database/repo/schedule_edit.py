@@ -1,7 +1,7 @@
 import datetime
 import json
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from infrastructure.database.models import ScheduleEdit
 from infrastructure.database.repo.base import BaseRepo
@@ -35,6 +35,16 @@ class ScheduleEditRepo(BaseRepo):
             .limit(limit)
         )
         return list(result.scalars().all())
+
+    async def delete(self, edit_id: int) -> None:
+        """Убрать запись из журнала после отката.
+
+        Без этого повторное нажатие «Откатить» откатывало ту же самую
+        правку снова: журнал не двигался, и кнопка выглядела сломанной.
+        """
+        await self.session.execute(
+            delete(ScheduleEdit).where(ScheduleEdit.id == edit_id))
+        await self.session.commit()
 
     async def get_last(self, group: str, user_id: int | None = None) -> ScheduleEdit | None:
         query = select(ScheduleEdit).where(ScheduleEdit.group == group)

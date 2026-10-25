@@ -831,15 +831,22 @@ async def cb_undo(cb: CallbackQuery, repo: RequestsRepo):
 
     if last.layer == "base":
         old = json.loads(last.old_value) if last.old_value else {}
-        if old.get("subject"):
-            weekday = None
-            new = json.loads(last.new_value) if last.new_value else {}
-            weekday = new.get("weekday")
-            parity = new.get("parity")
+        new = json.loads(last.new_value) if last.new_value else {}
+        weekday, parity = new.get("weekday"), new.get("parity")
+
+        if last.action == "add":
+            # Пары не было — откат значит убрать её совсем. Раньше
+            # пробовали вернуть old_value, а он пустой, и пара оставалась
+            # на месте: «Откатить» не работало для добавленных пар.
             if weekday and parity:
-                await repo.base_lessons.upsert(group, parity, weekday, last.para,
-                                               old["subject"], source="manual",
-                                               updated_by=cb.from_user.id)
+                await repo.base_lessons.delete_slot(group, parity, weekday, last.para)
+            msg = "↩️ Добавленная пара убрана"
+        elif old.get("subject"):
+            if weekday and parity:
+                await repo.base_lessons.upsert(
+                    group, parity, weekday, last.para, old["subject"],
+                    teacher=old.get("teacher", ""), room=old.get("room", ""),
+                    source="manual", updated_by=cb.from_user.id)
             msg = f"↩️ Возвращено: <b>{old['subject']}</b>"
         else:
             # Пара была удалена — из журнала её содержимое не восстановить.
@@ -848,6 +855,9 @@ async def cb_undo(cb: CallbackQuery, repo: RequestsRepo):
         await repo.substitutions.delete(last.date, group, last.para)
         msg = "↩️ Замена снята"
 
+    # Запись из журнала убираем: иначе следующее нажатие «Откатить»
+    # повторит ту же правку, и кнопка будет выглядеть сломанной.
+    await repo.edit_log.delete(last.id)
     await cb.answer(msg, show_alert=True)
     await cb_log(cb, repo)
 
