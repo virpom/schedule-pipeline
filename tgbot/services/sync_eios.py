@@ -372,7 +372,7 @@ async def materialize_day(repo: RequestsRepo, date: datetime.date) -> int:
             "para_end": r.para_end, "subject": r.subject,
             "teacher": r.teacher, "room": r.room,
             "source_url": r.source_url, "source": r.source,
-            "changed": r.changed,
+            "changed": r.changed, "action": r.action,
         }
         for r in manual
     ]
@@ -392,6 +392,7 @@ async def materialize_day(repo: RequestsRepo, date: datetime.date) -> int:
                 "source_url": "",
                 "source": SOURCE_SITE,
                 "changed": slot.changed,
+                "action": slot.action or "",
             })
     await repo.college_lessons.replace_date(date, rows)
     return len(rows)
@@ -435,7 +436,7 @@ async def materialize(repo: RequestsRepo, days: int = MATERIALIZE_DAYS) -> int:
                 "para_end": r.para_end, "subject": r.subject,
                 "teacher": r.teacher, "room": r.room,
                 "source_url": r.source_url, "source": r.source,
-                "changed": r.changed,
+                "changed": r.changed, "action": r.action,
             }
             for r in manual
         ]
@@ -455,6 +456,7 @@ async def materialize(repo: RequestsRepo, days: int = MATERIALIZE_DAYS) -> int:
                     "source_url": "",
                     "source": SOURCE_SITE,
                     "changed": slot.changed,
+                    "action": slot.action or "",
                 })
 
         await repo.college_lessons.replace_date(date, rows)

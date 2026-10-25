@@ -35,6 +35,10 @@ class CollegeLesson(Base, TableNameMixin):
     # расписании: студент должен видеть, что это не по постоянному плану.
     changed: Mapped[bool] = mapped_column(Boolean, default=False,
                                           server_default=text("0"))
+    # "cancel" — пара отменена. Пусто — обычная пара или замена.
+    # Без этого отмена рисовалась значком замены: отличить их было нечем.
+    action: Mapped[str] = mapped_column(String(8), default="",
+                                        server_default=text("''"))
 
     def __repr__(self):
         return f"<CollegeLesson {self.date} {self.group} п{self.para} {self.subject}>"
