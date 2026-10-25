@@ -119,8 +119,11 @@ def test_preview_matches_student_view():
     slots = [Slot(2, "Обществознание", "Иванов И.И.", "204", group="АТ-26")]
 
     preview = preview_text("АТ-26", date, slots, bell, {}, "I_IV")
-    student = format_day(date, slots, bell, {}, detail="full", meta="group",
+    # meta="teacher" — ровно то, что видит студент: под парой преподаватель
+    # и кабинет, а не своя же группа.
+    student = format_day(date, slots, bell, {}, detail="full", meta="teacher",
                          group_course_group={"АТ-26": "I_IV"})
     assert preview == student
     assert "11:10–12:45" in preview, "нет времени пары — как у студента"
-    assert "АТ-26" in preview, "нет группы"
+    assert "Иванов И.И." in preview, "нет преподавателя"
+    assert "АТ-26 · 204" not in preview, "превью показывает группу вместо препода"

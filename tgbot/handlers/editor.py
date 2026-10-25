@@ -254,8 +254,10 @@ def preview_text(group: str, date: datetime.date, slots: list[Slot],
                     changed=s.changed, action=s.action, comment=s.comment,
                     group=group) for s in slots]
     gcg = {group: course_group} if course_group else None
+    # meta="teacher": под парой студент видит преподавателя и кабинет,
+    # а не свою же группу. Превью — взгляд студента, не преподавателя.
     return format_day(date, lessons, bell or {}, lunches or {},
-                      detail="full", meta="group", group_course_group=gcg)
+                      detail="full", meta="teacher", group_course_group=gcg)
 
 
 # --- вход -----------------------------------------------------------------
