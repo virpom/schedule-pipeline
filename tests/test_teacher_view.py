@@ -52,3 +52,46 @@ def test_merge_off_keeps_teacher_days_apart():
                for g in ("АП-25@vuz", "ИС-25@vuz")]
     text = format_day(dt.date(2026, 10, 26), lessons, {}, {}, meta="group")
     assert text.count("1)") == 2
+
+
+def test_merged_groups_deduplicated():
+    """Одна группа не должна повторяться в подписи.
+
+    У вуза на один слот бывает несколько пар с разными списками недель.
+    После фильтра по неделе они приходят отдельными строками, и подпись
+    превращалась в «СА - 26-2, СА - 26-2, СА - 26-2».
+    """
+    lessons = [FakeLesson(6, "Инженерная геодезия", "СА - 26-2@vuz",
+                          "204", "Кокошка И.П.") for _ in range(3)]
+    text = format_day(dt.date(2026, 10, 27), lessons, {}, {}, meta="group",
+                      merge_groups=True)
+    assert text.count("СА - 26-2") == 1
+    assert text.count("6)") == 1
+
+
+def test_vuz_bell_differs_from_college():
+    """У вуза своя сетка: 8 пар, без «Разговоров о важном»."""
+    from common.schedule import format_bell
+
+    class BS:
+        def __init__(self, para, start, end):
+            self.para = para
+            self.start, self.end = start, end
+            self.h1_end = self.h2_start = None
+
+    bell = {}
+    for p, a, b in [(1, dt.time(8, 40), dt.time(10, 10)),
+                    (8, dt.time(20, 30), dt.time(22, 0))]:
+        for day_type in ("MONDAY", "OTHER"):
+            bell[(day_type, "VUZ", p)] = BS(p, a, b)
+            bell[(day_type, "I_IV", p)] = BS(p, a, b)
+    bell[("MONDAY", "ALL", 0)] = BS(0, dt.time(9, 0), dt.time(9, 20))
+
+    vuz = format_bell(bell, {}, vuz=True)
+    assert "вуза" in vuz
+    assert "Разговоры о важном" not in vuz
+    assert "курс" not in vuz
+    assert "8 пара" in vuz
+
+    college = format_bell(bell, {}, vuz=False)
+    assert "Разговоры о важном" in college
