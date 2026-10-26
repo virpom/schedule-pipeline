@@ -2,6 +2,11 @@ import datetime
 import re
 
 DAYS_OF_WEEK = ("ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС")
+# Последняя пара дня. Шестая бывает: в звонках для неё есть строка
+# (OTHER/I_IV, para=6), в college_lesson — три пары в истории. Жёсткий
+# range(1, 6) обрезал её в трёх местах: сетку звонков и две клавиатуры
+# редактора. Одна константа вместо трёх копий числа.
+MAX_PARA = 6
 WEEKDAY_FULL = ("Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье")
 MONTHS_GEN = {
     1: "января", 2: "февраля", 3: "марта", 4: "апреля", 5: "мая", 6: "июня",
@@ -361,7 +366,7 @@ def format_bell(bell, lunches, vuz: bool = False) -> str:
             lines.append(f"🇷🇺 Разговоры о важном · {rov.start:%H:%M}–{rov.end:%H:%M}")
         for cg, label in [("I_IV", "1 и 4 курс"), ("II_III", "2 и 3 курс")]:
             lunch = lunches.get((day_type, cg))
-            paras = [bell[(day_type, cg, p)] for p in range(1, 6) if (day_type, cg, p) in bell]
+            paras = [bell[(day_type, cg, p)] for p in range(1, MAX_PARA + 1) if (day_type, cg, p) in bell]
             if not paras:
                 continue
             lines.append(f"<b>{label}</b>")

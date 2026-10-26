@@ -22,6 +22,7 @@ from aiogram.types import (
 )
 
 from common.schedule import (
+    MAX_PARA,
     PARITY_ANY,
     PARITY_EVEN,
     PARITY_LABELS,
@@ -107,7 +108,7 @@ def paras_kb(weekday: int, parity: str, slots: list[Slot], prefix: str = "ed:bs"
     """Список пар дня с текущим содержимым."""
     by_para = {s.para: s for s in slots}
     rows = []
-    for p in range(1, 6):
+    for p in range(1, MAX_PARA + 1):
         slot = by_para.get(p)
         label = f"{p}) {slot.subject[:24]}" if slot else f"{p}) — пусто"
         if slot and slot.changed:
@@ -151,7 +152,7 @@ def sub_dates_kb(group: str, today: datetime.date) -> InlineKeyboardMarkup:
 def sub_slots_kb(date_iso: str, slots: list[Slot], subs_by_para: dict) -> InlineKeyboardMarkup:
     by_para = {s.para: s for s in slots}
     rows = []
-    for p in range(1, 6):
+    for p in range(1, MAX_PARA + 1):
         sub = subs_by_para.get(p)
         slot = by_para.get(p)
         if sub and sub.action == SUB_CANCEL:
