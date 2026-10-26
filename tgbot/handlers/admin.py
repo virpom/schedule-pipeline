@@ -310,10 +310,31 @@ async def set_vuz_anchor(message: Message, repo: RequestsRepo, config: Config):
     except ValueError:
         await message.answer("Не понял дату. Нужен формат <code>2027-02-08</code>.")
         return
+    # fromisoformat проверяет формат, но не смысл: /setvuzanchor 1999-01-01
+    # принимался, vuz_week() возвращал неделю вроде 1400, ни одна пара не
+    # совпадала, и расписание вуза молча пустело.
+    today = datetime.date.today()
+    if not (today - datetime.timedelta(days=400) <= value
+            <= today + datetime.timedelta(days=400)):
+        await message.answer(
+            "Якорь должен быть в пределах учебного года от сегодня "
+            f"({today - datetime.timedelta(days=400)} … "
+            f"{today + datetime.timedelta(days=400)}).")
+        return
     await sync_vuz.set_anchor(repo, value)
+    # Пересборка сразу: иначе студент видит старое расписание до
+    # следующего прохода поллера (5 минут), а если сайт лежит — до
+    # бесконечности, и админ считает, что якорь применился.
+    from tgbot.services import sync_eios
+    try:
+        await sync_eios.materialize(repo)
+        tail = "Расписание пересобрано."
+    except Exception as exc:  # noqa: BLE001 — админ должен узнать
+        logging.exception("пересборка после смены якоря вуза упала")
+        tail = (f"Пересобрать не удалось ({exc}). Поллер попробует "
+                "снова в ближайшие 5 минут.")
     await message.answer(
-        f"✅ Якорь вуза: <b>{value}</b>\n\n"
-        "Расписание пересоберётся на ближайшие дни при следующей синхронизации. "
+        f"✅ Якорь вуза: <b>{value}</b>\n\n{tail}\n"
         "Если недели не сойдутся, в логе появится ошибка.")
 
 
@@ -351,10 +372,13 @@ async def set_poll(message: Message, repo: RequestsRepo, config: Config):
         return
     try:
         sec = int(parts[1])
-        if sec < 10:
-            raise ValueError
     except ValueError:
-        await message.answer("Интервал — целое число секунд (мин. 10)")
+        await message.answer("Интервал — целое число секунд (10 … 86400)")
+        return
+    # Верхняя граница: /setpoll 999999999 принимался, и poller_loop больше
+    # никогда не опрашивал сайт — расписание замирало молча.
+    if not 10 <= sec <= 86400:
+        await message.answer("Интервал — от 10 секунд до суток (86400)")
         return
     await repo.settings.set("poll_interval", str(sec))
     await message.answer(f"Интервал опроса: {sec} сек")
@@ -419,6 +443,17 @@ async def set_chat_group(message: Message, repo: RequestsRepo, config: Config):
         await message.answer("Формат: /setgroup ДП-26")
         return
     group = parts[1].strip().upper()
+    # Опечатка (/setgroup ДП-2б -> ДП-2Б) раньше сохранялась молча, и
+    # поллер каждый день слал в чат «пар нет». Проверяем, что группа есть.
+    known = await repo.base_lessons.get_groups()
+    if group not in known and f"{group}@vuz" in known:
+        # Группы вуза хранятся с суффиксом — не заставляем админа его помнить.
+        group = f"{group}@vuz"
+    if known and group not in known:
+        near = [g for g in known if g.startswith(group[:4])][:8]
+        hint = f"\n\nПохожие: {', '.join(near)}" if near else ""
+        await message.answer(f"Группы <b>{group}</b> нет в расписании.{hint}")
+        return
     await repo.chats.set_group(message.chat.id, message.chat.title or "", group)
     await message.answer(f"Группа чата: <b>{group}</b>. Сюда будет приходить расписание.")
 
