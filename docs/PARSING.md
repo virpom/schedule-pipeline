@@ -177,7 +177,7 @@ print(lessons[0])
    отвечает`, проблема в сайте, а не в парсере.
 5. **Пары не той группы** → сравните имена групп в БД и в файле:
    ```bash
-   docker compose exec bot python -c "
+   docker exec bot-wi188f7kradbxpz2efrl7vms python -c "
    import sqlite3
    c = sqlite3.connect('/data/database.db')
    print([r[0] for r in c.execute('select distinct "group" from base_lesson')])

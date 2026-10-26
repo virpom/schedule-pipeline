@@ -12,6 +12,7 @@ from infrastructure.database.repo.requests import RequestsRepo
 from infrastructure.database.setup import create_engine, create_session_pool
 from tgbot.handlers import routers_list
 from tgbot.middlewares.database import DatabaseMiddleware
+from tgbot.middlewares.errors import on_error
 from tgbot.services.bell import bell_loop
 from tgbot.services.poller import poller_loop
 
@@ -26,6 +27,9 @@ def setup_logging() -> None:
 def register_global_middlewares(dp: Dispatcher, session_pool, config) -> None:
     dp.message.outer_middleware(DatabaseMiddleware(session_pool, config))
     dp.callback_query.outer_middleware(DatabaseMiddleware(session_pool, config))
+    # Без этого исключение в обработчике оставляло пользователя без
+    # ответа: спиннер на кнопке висел до таймаута, а сообщение — молча.
+    dp.errors.register(on_error)
 
 
 async def on_startup(session_pool) -> None:
@@ -45,7 +49,9 @@ async def main() -> None:
     await run_migrations(engine, config)
 
     bot = Bot(token=config.tg_bot.token, default=DefaultBotProperties(parse_mode="HTML"))
-    dp = Dispatcher(storage=MemoryStorage())
+    # config в workflow_data: обработчик ошибок висит на dp.update, выше
+    # DatabaseMiddleware, поэтому получает только то, что положили здесь.
+    dp = Dispatcher(storage=MemoryStorage(), config=config)
     dp.include_routers(*routers_list)
     register_global_middlewares(dp, session_pool, config)
 

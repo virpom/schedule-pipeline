@@ -3,21 +3,25 @@
 Симптом → причина → что проверить. Сначала всегда посмотрите логи:
 
 ```bash
-docker compose logs -f --tail=100 bot
+docker logs -f --tail=100 bot-wi188f7kradbxpz2efrl7vms
 ```
+
+Имя контейнера — то, что задано в `--name` при запуске; на проде это
+`bot-wi188f7kradbxpz2efrl7vms`. Своё смотрите так:
+`docker ps -a --filter name=bot`.
 
 ## Бот молчит
 
 **Проверить, что процесс жив:**
 
 ```bash
-docker compose ps
+docker ps -a --filter name=bot-wi188f7kradbxpz2efrl7vms
 ```
 
 Если статус `Restarting` — бот падает при старте. Смотрите логи целиком:
 
 ```bash
-docker compose logs --tail=200 bot
+docker logs --tail=200 bot-wi188f7kradbxpz2efrl7vms
 ```
 
 Частые причины падения при старте:
@@ -32,7 +36,7 @@ docker compose logs --tail=200 bot
 **Проверить, что Telegram видит бота:**
 
 ```bash
-docker compose exec bot python -c "
+docker exec bot-wi188f7kradbxpz2efrl7vms python -c "
 import os, json, urllib.request
 t = os.environ['BOT_TOKEN']
 print(json.load(urllib.request.urlopen(f'https://api.telegram.org/bot{t}/getMe')))
@@ -62,7 +66,7 @@ docker ps --filter name=bot --format '{{.Names}}\t{{.Status}}'
 **Проверить сайт руками:**
 
 ```bash
-docker compose exec bot python -c "
+docker exec bot-wi188f7kradbxpz2efrl7vms python -c "
 import asyncio, sys
 sys.path.insert(0, '/app')
 from aiohttp import ClientSession
@@ -94,7 +98,7 @@ asyncio.run(main())
 **Проверить, что опрос вообще идёт:**
 
 ```bash
-docker compose exec bot python -c "
+docker exec bot-wi188f7kradbxpz2efrl7vms python -c "
 import sqlite3
 c = sqlite3.connect('/data/database.db')
 for k, v in c.execute(\"select key, value from setting where key like '%hash%' or key='last_sync_ok'\"):
@@ -108,7 +112,7 @@ for k, v in c.execute(\"select key, value from setting where key like '%hash%' o
 Проверить настройки:
 
 ```bash
-docker compose exec bot python -c "
+docker exec bot-wi188f7kradbxpz2efrl7vms python -c "
 import sqlite3
 c = sqlite3.connect('/data/database.db')
 for k, v in c.execute(\"select key, value from setting where key in ('night_start','night_end','poll_interval')\"):
@@ -135,7 +139,7 @@ PARITY_OFFSET = 1   # tgbot/services/schedule_layer.py
 1. **Правильная ли группа** у пользователя. Студент мог выбрать не ту.
 2. **Есть ли пары в базе:**
    ```bash
-   docker compose exec bot python -c "
+   docker exec bot-wi188f7kradbxpz2efrl7vms python -c "
    import sqlite3, datetime
    c = sqlite3.connect('/data/database.db')
    today = datetime.date.today()
@@ -165,7 +169,7 @@ PARITY_OFFSET = 1   # tgbot/services/schedule_layer.py
 доступен ли он из контейнера (возможно, блокировка по IP или DNS):
 
 ```bash
-docker compose exec bot python -c "
+docker exec bot-wi188f7kradbxpz2efrl7vms python -c "
 import urllib.request
 print(urllib.request.urlopen('https://eios.norvuz.ru/mod/page/view.php?id=49960', timeout=20).status)
 "
@@ -175,7 +179,7 @@ print(urllib.request.urlopen('https://eios.norvuz.ru/mod/page/view.php?id=49960'
 
 1. **Подписан ли пользователь.** Проверить в БД:
    ```bash
-   docker compose exec bot python -c "
+   docker exec bot-wi188f7kradbxpz2efrl7vms python -c "
    import sqlite3
    c = sqlite3.connect('/data/database.db')
    print('подписано:', c.execute('select count(*) from users where subscribed=1').fetchone()[0])
@@ -199,7 +203,7 @@ print(urllib.request.urlopen('https://eios.norvuz.ru/mod/page/view.php?id=49960'
 Проверить очередь напоминаний:
 
 ```bash
-docker compose exec bot python -c "
+docker exec bot-wi188f7kradbxpz2efrl7vms python -c "
 import sqlite3
 c = sqlite3.connect('/data/database.db')
 print('напоминаний:', c.execute('select count(*) from bell_reminder').fetchone()[0])
@@ -217,7 +221,7 @@ print('напоминаний:', c.execute('select count(*) from bell_reminder')
 Посмотреть правки:
 
 ```bash
-docker compose exec bot python -c "
+docker exec bot-wi188f7kradbxpz2efrl7vms python -c "
 import sqlite3
 c = sqlite3.connect('/data/database.db')
 for r in c.execute('select * from schedule_edit order by id desc limit 10'):
@@ -230,7 +234,7 @@ for r in c.execute('select * from schedule_edit order by id desc limit 10'):
 Проверить объёмы:
 
 ```bash
-docker compose exec bot python -c "
+docker exec bot-wi188f7kradbxpz2efrl7vms python -c "
 import sqlite3
 c = sqlite3.connect('/data/database.db')
 for t in ('users','base_lesson','substitution','college_lesson','bell_schedule'):
@@ -244,7 +248,7 @@ for t in ('users','base_lesson','substitution','college_lesson','bell_schedule')
 Если `college_lesson` пуст — вызвать материализацию вручную:
 
 ```bash
-docker compose exec bot python -c "
+docker exec bot-wi188f7kradbxpz2efrl7vms python -c "
 import asyncio, sys
 sys.path.insert(0, '/app')
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
@@ -268,11 +272,11 @@ asyncio.run(main())
 ## Восстановление из резервной копии
 
 ```bash
-docker compose stop bot
+docker stop bot-wi188f7kradbxpz2efrl7vms
 cp backup-2026-10-24.tar.gz /tmp/ && cd /tmp && tar xzf backup-2026-10-24.tar.gz
 rm -rf /path/to/schedule-pipeline/data
 mv data /path/to/schedule-pipeline/data
-cd /path/to/schedule-pipeline && docker compose start bot
+docker start bot-wi188f7kradbxpz2efrl7vms
 ```
 
 Проверить после: `/stats` в боте.
@@ -280,7 +284,7 @@ cd /path/to/schedule-pipeline && docker compose start bot
 ## Диагностика одной командой
 
 ```bash
-docker compose exec bot python -c "
+docker exec bot-wi188f7kradbxpz2efrl7vms python -c "
 import sqlite3, datetime, os
 c = sqlite3.connect('/data/database.db')
 print('время в контейнере:', datetime.datetime.now())

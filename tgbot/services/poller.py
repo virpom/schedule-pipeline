@@ -39,8 +39,14 @@ async def _report_failure(bot, session_pool, config: Config, error: Exception) -
                 # уведомления не шлём: о недоступности пользователю и так
                 # говорит предупреждение в расписании, а админ видит это
                 # в /stats. Тревога нужна для того, что само не пройдёт.
-                await alerts.clear(bot, repo, config, "structure",
-                                   "Файлы снова разбираются.")
+                #
+                # И не снимаем тревогу о структуре. Раньше здесь стоял
+                # clear с текстом «Файлы снова разбираются», хотя ничего
+                # не разбиралось: сеть упала, структура сломана, а админ
+                # получал «восстановилось». На мигающем сайте это давало
+                # «проблема → восстановилось → проблема» каждый цикл.
+                logging.info("сетевой сбой, тревога о структуре остаётся: %s",
+                             _short(error))
     except Exception:
         logging.exception("не удалось отправить тревогу")
 
@@ -72,6 +78,27 @@ async def _report_partial_failure(bot, repo: RequestsRepo, config: Config,
         )
     except Exception:
         logging.exception("не удалось отправить тревогу о частичном сбое")
+
+
+async def _report_parse_failure(bot, repo: RequestsRepo, config: Config,
+                                parse_failed: list[str]) -> None:
+    """Файлы скачались, но не разобрались — это работа для человека.
+
+    Отличается от частичного сбоя: 404 может пройти сам, если файл
+    вернут на место, а сломанную структуру правит только человек.
+    Поэтому тревога другая, и ключ другой.
+    """
+    names = ", ".join(parse_failed)
+    try:
+        await alerts.alert(
+            bot, repo, config, "structure",
+            f"Файлы скачиваются, но не разбираются: <code>{names}</code>\n\n"
+            f"Скорее всего изменилась структура файла. Расписание работает "
+            f"на последних данных, но новые правки не подтягиваются — "
+            f"это само не пройдёт, нужен разбор парсера.",
+        )
+    except Exception:
+        logging.exception("не удалось отправить тревогу о структуре")
 
 
 async def poll_once(bot, session_pool, config: Config) -> list[tuple[datetime.date, bool]]:
@@ -126,6 +153,7 @@ async def poll_once(bot, session_pool, config: Config) -> list[tuple[datetime.da
         # расписание верно, а изменений на день мы не знаем.
         if result is not None:
             failed = set(result.get("failed") or [])
+            parse_failed = set(result.get("parse_failed") or [])
             async with session_pool() as db:
                 repo = RequestsRepo(db)
                 if failed:
@@ -140,6 +168,17 @@ async def poll_once(bot, session_pool, config: Config) -> list[tuple[datetime.da
                     await source_state.mark_ok(repo)
                     await alerts.clear(bot, repo, config, "partial",
                                        "Все файлы расписания снова обновляются.")
+                # Сломанная структура — единственное, что само не
+                # пройдёт. До этой правки parse-сбой расписания и замен
+                # глотался в _step и до тревоги не доходил: админ видел
+                # только «сайт не отвечает», хотя сайт жив.
+                if parse_failed:
+                    await _report_parse_failure(bot, repo, config, sorted(parse_failed))
+                elif not failed:
+                    # Разбор прошёл на всех файлах — вот теперь тревогу
+                    # можно снимать. Раньше её снимал сетевой сбой.
+                    await alerts.clear(bot, repo, config, "structure",
+                                       "Файлы снова разбираются.")
 
         # Материализуем ВСЕГДА, даже при сбое сайта и даже если файлы не
         # менялись: окно дат должно сдвигаться вперёд каждый день, иначе

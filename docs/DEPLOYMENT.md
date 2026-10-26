@@ -5,7 +5,7 @@
 
 ## Что нужно
 
-- Docker (или Docker Compose)
+- Docker
 - Токен бота от [@BotFather](https://t.me/BotFather)
 - Свой Telegram ID в `ADMINS`, иначе админка будет недоступна
   (узнать: [@userinfobot](https://t.me/userinfobot))
@@ -16,9 +16,15 @@
 git clone <repo> schedule-pipeline && cd schedule-pipeline
 cp .env.example .env
 $EDITOR .env          # BOT_TOKEN и ADMINS обязательны
-docker compose up -d --build
-docker compose logs -f --tail=100 bot
+docker build -t schedule-bot:latest .
+docker run -d --name schedule-bot --restart unless-stopped \
+  --env-file .env -v "$PWD/data:/data" schedule-bot:latest
+docker logs -f --tail=100 schedule-bot
 ```
+
+Имя контейнера задаётся `--name`. Дальше в документе используется имя
+прод-контейнера `bot-wi188f7kradbxpz2efrl7vms` (см. «Прод» ниже) — при
+установке с нуля подставляйте своё.
 
 В логах должны появиться:
 
@@ -70,15 +76,15 @@ data/
     └── sunday/
 ```
 
-В контейнере это `/data`, на хосте — `./data` рядом с `docker-compose.yml`.
+В контейнере это `/data`, на хосте — `./data` рядом с `Dockerfile`.
 
 **Резервная копия** — это просто копия `data/`. Остановите контейнер,
 скопируйте папку, запустите снова:
 
 ```bash
-docker compose stop bot
+docker stop schedule-bot
 tar czf backup-$(date +%F).tar.gz data/
-docker compose start bot
+docker start schedule-bot
 ```
 
 SQLite в режиме WAL переживает и копирование на живой базе, но
@@ -103,27 +109,34 @@ SQLite в режиме WAL переживает и копирование на �
 
 ```bash
 git pull origin master
-docker compose up -d --build
-docker compose logs -f --tail=50 bot
+docker build -q -t schedule-bot:latest .
+docker rm -f schedule-bot
+docker run -d --name schedule-bot \
+  --restart unless-stopped --env-file .env \
+  -v "$PWD/data:/data" schedule-bot:latest
+docker logs -f --tail=50 schedule-bot
 ```
+
+На проде имя другое (`bot-wi188f7kradbxpz2efrl7vms`) и путь тома
+абсолютный — точные команды в разделе «Прод» ниже.
 
 Пересборка занимает около минуты. Данные не теряются: они в `./data`,
 а не в образе.
 
 Если обновились зависимости (`requirements.txt`), пересборка обязательна —
-`--build` её и делает.
+`docker build` её и делает.
 
 ## Проверка, что всё живо
 
 ```bash
 # контейнер запущен и не перезапускается
-docker compose ps
+docker ps -a --filter name=schedule-bot
 
 # ошибки за последнее время (должно быть пусто)
-docker compose logs --since 10m bot | grep -iE 'error|traceback'
+docker logs --since 10m schedule-bot | grep -iE 'error|traceback'
 
 # бот отвечает Telegram
-docker compose exec bot python -c "
+docker exec schedule-bot python -c "
 import os, json, urllib.request
 t = os.environ['BOT_TOKEN']
 r = json.load(urllib.request.urlopen(f'https://api.telegram.org/bot{t}/getMe'))
@@ -156,6 +169,13 @@ docker run -d \
   -v /home/virprom/schedule-pipeline/data:/data \
   schedule-bot:latest
 ```
+
+**`docker-compose.yml` в проде не используется.** Он лежит в репозитории
+исторически и создал бы контейнер с именем `schedule-bot` рядом с рабочим —
+то есть второй процесс на том же токене. Не запускайте `docker compose up`:
+команды `docker compose ...` для прод-контейнера молча ничего не делают
+(пустой проект, код возврата 0), работают только `docker ...` с именем
+из `--name`.
 
 Код — `/opt/projects/schedule-pipeline`, база — `/home/virprom/schedule-pipeline/data/database.db`.
 
@@ -194,5 +214,5 @@ chmod 600 .env
 Проверить время внутри контейнера:
 
 ```bash
-docker compose exec bot date
+docker exec schedule-bot date
 ```

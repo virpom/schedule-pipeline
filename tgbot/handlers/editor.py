@@ -291,7 +291,10 @@ async def cb_back(cb: CallbackQuery, repo: RequestsRepo, state: FSMContext):
 # --- базовое расписание ---------------------------------------------------
 
 @editor_router.callback_query(F.data == "ed:base")
-async def cb_base(cb: CallbackQuery, repo: RequestsRepo):
+async def cb_base(cb: CallbackQuery, repo: RequestsRepo, state: FSMContext):
+    # Состояние-сирота после «Назад» превращало любой текст в
+    # название предмета. Чистим на каждом переходе между экранами.
+    await state.clear()
     group = await editor_group(repo, cb.from_user.id)
     if not group:
         await cb.answer("Нет прав", show_alert=True)
@@ -343,7 +346,10 @@ async def cb_base_parity(cb: CallbackQuery, repo: RequestsRepo):
 
 
 @editor_router.callback_query(F.data.startswith("ed:bpar:"))
-async def cb_base_para_back(cb: CallbackQuery, repo: RequestsRepo):
+async def cb_base_para_back(cb: CallbackQuery, repo: RequestsRepo, state: FSMContext):
+    # Состояние-сирота после «Назад» превращало любой текст в
+    # название предмета. Чистим на каждом переходе между экранами.
+    await state.clear()
     group = await editor_group(repo, cb.from_user.id)
     if not group:
         await cb.answer("Нет прав", show_alert=True)
@@ -476,6 +482,11 @@ async def _save_base(event, repo: RequestsRepo, state: FSMContext, via_cb: bool)
     # База повторяется каждую неделю — пересобираем все дни окна,
     # иначе студент увидит правку только после следующего опроса.
     await _rebuild(repo)
+    # Симметрично _save_sub. Без очистки состояние остаётся
+    # EditorState.room, и любое следующее сообщение старосты («спасибо»)
+    # перезаписывает пару с room="спасибо" — вместе с _rebuild и
+    # рассылкой уведомления группе на каждое сообщение.
+    await state.clear()
 
     notified = 0
     try:
@@ -528,7 +539,10 @@ async def cb_del_base(cb: CallbackQuery, repo: RequestsRepo):
 # --- замены ---------------------------------------------------------------
 
 @editor_router.callback_query(F.data == "ed:subs")
-async def cb_subs(cb: CallbackQuery, repo: RequestsRepo):
+async def cb_subs(cb: CallbackQuery, repo: RequestsRepo, state: FSMContext):
+    # Состояние-сирота после «Назад» превращало любой текст в
+    # название предмета. Чистим на каждом переходе между экранами.
+    await state.clear()
     group = await editor_group(repo, cb.from_user.id)
     if not group:
         await cb.answer("Нет прав", show_alert=True)
@@ -567,7 +581,10 @@ async def cb_sub_date(cb: CallbackQuery, repo: RequestsRepo):
 
 
 @editor_router.callback_query(F.data.startswith("ed:sdl:"))
-async def cb_sub_day_back(cb: CallbackQuery, repo: RequestsRepo):
+async def cb_sub_day_back(cb: CallbackQuery, repo: RequestsRepo, state: FSMContext):
+    # Состояние-сирота после «Назад» превращало любой текст в
+    # название предмета. Чистим на каждом переходе между экранами.
+    await state.clear()
     group = await editor_group(repo, cb.from_user.id)
     if not group:
         await cb.answer("Нет прав", show_alert=True)
@@ -771,7 +788,10 @@ async def _save_sub(event, repo: RequestsRepo, state: FSMContext, via_cb: bool):
 # --- предпросмотр и журнал ------------------------------------------------
 
 @editor_router.callback_query(F.data == "ed:preview")
-async def cb_preview(cb: CallbackQuery, repo: RequestsRepo):
+async def cb_preview(cb: CallbackQuery, repo: RequestsRepo, state: FSMContext):
+    # Состояние-сирота после «Назад» превращало любой текст в
+    # название предмета. Чистим на каждом переходе между экранами.
+    await state.clear()
     group = await editor_group(repo, cb.from_user.id)
     if not group:
         await cb.answer("Нет прав", show_alert=True)
@@ -812,7 +832,10 @@ async def cb_preview_day(cb: CallbackQuery, repo: RequestsRepo):
 
 
 @editor_router.callback_query(F.data == "ed:log")
-async def cb_log(cb: CallbackQuery, repo: RequestsRepo):
+async def cb_log(cb: CallbackQuery, repo: RequestsRepo, state: FSMContext):
+    # Состояние-сирота после «Назад» превращало любой текст в
+    # название предмета. Чистим на каждом переходе между экранами.
+    await state.clear()
     group = await editor_group(repo, cb.from_user.id)
     if not group:
         await cb.answer("Нет прав", show_alert=True)

@@ -129,8 +129,10 @@ https://t.me/<bot_username>
 git clone <repo> schedule-pipeline && cd schedule-pipeline
 cp .env.example .env
 $EDITOR .env          # BOT_TOKEN и ADMINS обязательны
-docker compose up -d --build
-docker compose logs -f --tail=100 bot
+docker build -t schedule-bot:latest .
+docker run -d --name schedule-bot --restart unless-stopped \
+  --env-file .env -v "$PWD/data:/data" schedule-bot:latest
+docker logs -f --tail=100 schedule-bot
 ```
 
 В логах должны появиться `poller started` и `bell loop started` — значит
@@ -290,4 +292,4 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirement
 ## Стек
 
 Python 3.11 в образе · aiogram 3 · SQLAlchemy 2 (async) + aiosqlite ·
-alembic · python-docx · openpyxl · BeautifulSoup · aiohttp · Docker Compose.
+alembic · python-docx · openpyxl · BeautifulSoup · aiohttp · Docker.

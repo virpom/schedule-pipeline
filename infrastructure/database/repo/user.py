@@ -178,8 +178,15 @@ class UserRepo(BaseRepo):
         return list(result.scalars().all())
 
     async def get_teachers_users(self) -> list[User]:
+        """Преподаватели для админской рассылки — только подписавшиеся.
+
+        Без фильтра по subscribed ручная рассылка приходила и тем, кто
+        нажал «Отключить уведомления».
+        """
         result = await self.session.execute(
-            select(User).where(User.role == "teacher", User.teacher_name.is_not(None))
+            select(User).where(User.role == "teacher",
+                               User.teacher_name.is_not(None),
+                               User.subscribed.is_(True))
         )
         return list(result.scalars().all())
 

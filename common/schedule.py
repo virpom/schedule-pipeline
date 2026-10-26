@@ -86,11 +86,10 @@ def teacher_base(name: str) -> str:
 def teacher_matches(lesson_teacher: str, selected_name: str) -> bool:
     """Совпадает ли преподаватель пары с выбранным.
 
-    Сравнение идёт по фамилии: в расписании она записана по-разному
-    («Коленова В.А.» и «Коленова В. А.»), а человек ищет просто
-    «Коленова». Раньше обрабатывался только обратный случай — в паре
-    одна фамилия, а выбрано полное имя, — поэтому поиск по фамилии
-    не находил ничего ни у вуза, ни у колледжа.
+    Сравнение идёт по фамилии и, если они есть у обеих сторон, по
+    инициалам: в расписании имя записано по-разному («Коленова В.А.» и
+    «Коленова В. А.»), а человек ищет просто «Коленова». Без сверки
+    инициалов однофамильцы видели чужие пары.
     """
     lb = teacher_base(lesson_teacher)
     if lb == selected_name:
@@ -99,9 +98,16 @@ def teacher_matches(lesson_teacher: str, selected_name: str) -> bool:
     ss = selected_name.split()
     if not ls or not ss:
         return False
-    # Сравниваем первые слова (фамилии) без учёта регистра. Инициалы
-    # могут быть записаны по-разному или отсутствовать.
-    return ls[0].casefold() == ss[0].casefold()
+    if ls[0].casefold() != ss[0].casefold():
+        return False
+    # Сверяем только общие инициалы: у одного человека в источниках
+    # бывает «Городиский В.» и «Городиский В.В.».
+    li = [c.casefold() for c in re.findall(r"[А-ЯЁA-Z]", " ".join(ls[1:]))]
+    si = [c.casefold() for c in re.findall(r"[А-ЯЁA-Z]", " ".join(ss[1:]))]
+    if not li or not si:
+        return True          # ищем по фамилии — так и задумано
+    n = min(len(li), len(si))
+    return li[:n] == si[:n]
 
 
 def course_from_group(group: str) -> int:

@@ -505,11 +505,19 @@ async def _confirm_broadcast(message: Message, repo: RequestsRepo, state: FSMCon
 
 
 async def _target_users(repo: RequestsRepo, target: str):
+    """Кому слать ручную рассылку — только подписавшимся.
+
+    Раньше брались get_all/get_by_group/get_teachers_users, и ни один не
+    смотрел на subscribed: одиннадцать человек получали каждую рассылку,
+    хотя нажали «Отключить уведомления». Автоматические уведомления о
+    расписании фильтруют правильно, а ручные — нет. Человек разницы не
+    видит: отписался, а сообщения идут.
+    """
     if target == "teachers":
         return await repo.users.get_teachers_users(), "преподавателям"
     if target == "all" or not target:
-        return await repo.users.get_all(), "пользователям"
-    return await repo.users.get_by_group(target), f"в группе {target}"
+        return await repo.users.get_subscribed(), "пользователям"
+    return await repo.users.get_subscribed_by_group(target), f"в группе {target}"
 
 
 def _broadcast_menu_kb() -> InlineKeyboardMarkup:

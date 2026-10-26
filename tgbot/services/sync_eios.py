@@ -247,15 +247,24 @@ async def sync_once(
     changed = {"ochoe": False, "zameny": False, "bells": False}
     links = await _fetch_links(session, config)
     failed: list[str] = []
+    parse_failed: list[str] = []
     attempted: list[str] = []
 
     # Каждый файл обновляем независимо: если листок замен вернул 404,
     # звонки всё равно должны обновиться. Иначе один битый файл из трёх
     # останавливает весь проход и сайт выглядит «лежащим», хотя он жив.
+    #
+    # Отдельно копим parse_failed: сеть восстановится сама, а сломанная
+    # структура файла — нет. Только она заслуживает тревоги «нужен
+    # человек», и только её нельзя путать с сетевым сбоем.
     async def _step(name: str, coro) -> None:
         attempted.append(name)
         try:
             await coro
+        except eios.EiosParseError as exc:
+            log.warning("не разобрался %s: %s", name, exc)
+            failed.append(name)
+            parse_failed.append(name)
         except Exception as exc:  # noqa: BLE001
             log.warning("не удалось обновить %s: %s", name, exc)
             failed.append(name)
@@ -274,6 +283,10 @@ async def sync_once(
 
     if failed:
         changed["failed"] = failed
+    # Сломанная структура файла: сама не починится, нужен человек.
+    # Отдельным ключом, чтобы не менять формат failed — его читает поллер.
+    if parse_failed:
+        changed["parse_failed"] = parse_failed
     # Какие шаги вообще пробовали. Без этого «упали все» не отличить от
     # «половину файлов убрали со страницы»: непробованный шаг не попадает
     # ни в failed, ни в успех, и сравнение с ALL_STEPS врёт.
