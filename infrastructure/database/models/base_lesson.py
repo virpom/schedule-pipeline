@@ -26,7 +26,9 @@ class BaseLesson(Base, TableNameMixin):
     para: Mapped[int] = mapped_column(Integer)            # 1..5
     subject: Mapped[str] = mapped_column(String(256))
     teacher: Mapped[str] = mapped_column(String(128), default="")
-    room: Mapped[str] = mapped_column(String(64), default="")
+    # 512, а не 64: в этой колонке у вуза бывает ссылка на онлайн-пару
+    # (до 70 символов), и обрезка по 64 давала неработающий огрызок URL.
+    room: Mapped[str] = mapped_column(String(512), default="")
     # Номера недель через запятую: "6,8,10,12,14,16". Пусто — пара идёт
     # по чётности. Нужно вузу: там в один слот ставится 2-4 предмета с
     # разными наборами недель.

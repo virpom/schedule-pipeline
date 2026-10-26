@@ -38,7 +38,7 @@ def test_migrations_go_to_given_path():
                 "select name from sqlite_master where type='table'")]
             assert len(tables) >= 16, f"таблиц всего {len(tables)}"
             version = conn.execute("select version_num from alembic_version").fetchone()
-            assert version[0] == "0007_bell_reminder"
+            assert version[0] == "0008_room_len"
         finally:
             conn.close()
 
@@ -91,5 +91,50 @@ def test_bell_reminder_has_event_key():
             cols = [r[1] for r in conn.execute("PRAGMA table_info(bell_reminder)")]
             assert "event_key" in cols, cols
             assert "key" not in cols, cols
+        finally:
+            conn.close()
+
+
+def test_room_column_holds_online_link():
+    """`room` вмещает ссылку на онлайн-пару целиком.
+
+    План 021: колонка была VARCHAR(64), а ссылки до 70 символов. Даже
+    с починенным парсером студент получил бы неработающий огрызок URL.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        target = str(Path(tmp) / "room.db")
+        run_migrations_sync(_cfg(target))
+
+        url = ("https://teams.microsoft.com/meet/3987014521775208"
+               "?p=AZSDXjVQmYQhD6bllO")
+        assert len(url) > 64
+
+        conn = sqlite3.connect(target)
+        try:
+            for table in ("base_lesson", "college_lesson"):
+                cols = {r[1]: r[2] for r in conn.execute(f"PRAGMA table_info({table})")}
+                assert "512" in str(cols["room"]), cols["room"]
+        finally:
+            conn.close()
+
+
+def test_room_migration_keeps_rows():
+    """Миграция не должна терять строки: batch_alter_table пересоздаёт
+    таблицу, и при ошибке данные пропадут молча."""
+    with tempfile.TemporaryDirectory() as tmp:
+        target = str(Path(tmp) / "rows.db")
+        run_migrations_sync(_cfg(target))
+
+        conn = sqlite3.connect(target)
+        try:
+            sql = ("insert into base_lesson (\"group\", week_parity, weekday, para,"
+                   " subject, teacher, room, weeks, source) "
+                   "values ('ДП-26@vuz', 'ANY', 1, 1, 'Физика', 'Иванов И.И.',"
+                   " 'М-101', '', 'vuz')")
+            conn.execute(sql)
+            conn.commit()
+            assert conn.execute("select count(*) from base_lesson").fetchone()[0] == 1
+            room = conn.execute("select room from base_lesson").fetchone()[0]
+            assert room == "М-101"
         finally:
             conn.close()

@@ -457,26 +457,41 @@ def _time_column(sheet: Sheet, header: int, first_group: int) -> int:
     return best
 
 
-def _groups(sheet: Sheet, header: int, time_col: int) -> list[tuple[int, str]]:
-    """Колонки групп: (индекс колонки, имя) из шапки."""
-    result = []
+def _groups(
+    sheet: Sheet, header: int, time_col: int
+) -> list[tuple[int, str, int | None]]:
+    """Колонки групп: (индекс колонки, имя, индекс колонки кабинета).
+
+    Кабинет лежит в отдельной колонке сразу после группы («ЭК-26-1»,
+    «ауд», «МН-26», «ауд», …). Раньше эти колонки просто отбрасывались,
+    и все 717 кабинетов и 43 ссылки на Teams терялись.
+
+    Ищем по позиции, а не по ``c + 1``: «ГП-26» занимает две колонки в
+    шапке, и после мержа «ауд» может оказаться не соседней.
+    """
+    result: list[tuple[int, str, int | None]] = []
     seen: set[str] = set()
     for c in range(time_col + 1, sheet.ncols):
         name = sheet.text(header, c).strip()
         if not name:
+            continue
+        low = name.lower()
+        # Колонка кабинета относится к предыдущей найденной группе.
+        if "ауд" in low:
+            if result and result[-1][2] is None:
+                result[-1] = (result[-1][0], result[-1][1], c)
             continue
         # «ГП-26» занимает две колонки в шапке: вторая — продолжение
         # мержа, а не вторая группа. Оставляем только первую.
         if name in seen:
             continue
         seen.add(name)
-        low = name.lower()
-        if low in SERVICE or "ауд" in low:
+        if low in SERVICE:
             continue
         # «ЭЭ-25 (6,9,12,15)» — суффикс в скобках это недели, не часть имени
         clean = re.sub(r"\s*\([\d,\s]+\)\s*$", "", name).strip()
         if clean:
-            result.append((c, clean))
+            result.append((c, clean, None))
     return result
 
 
@@ -493,9 +508,46 @@ def _row_para(sheet: Sheet, r: int, time_col: int) -> int | None:
     return para_from_time(t)
 
 
+# Что бывает в колонке «ауд» кроме кабинета: «н.»/«ч.» — чётность
+# недели, «Айка»/«ЭИОС» — электронная среда, а при горизонтальном мерже
+# туда перетекает текст самой пары («Геология (прак.) Иванов И.И.»).
+# Всё это кабинетом не является и раньше попадало в поле room.
+_ROOM_JUNK = {"н.", "ч.", "н", "ч", "айка", "эиос", "н.э.", "ч.э."}
+
+
+def _cell_room(sheet: Sheet, row: int, col: int) -> str:
+    """Кабинет из колонки «ауд» для этой строки.
+
+    Мерж: одна ячейка кабинета часто накрывает весь блок пары, поэтому
+    если в своей строке пусто — поднимаемся к началу мержа.
+    """
+    text = sheet.text(row, col)
+    if not text or not text.strip():
+        origin = sheet._origin.get((row, col))
+        if origin and origin[0] != row:
+            text = sheet.text(origin[0], col)
+    text = (text or "").strip()
+    if not text:
+        return ""
+    # Ссылка на онлайн-пару: не обрезаем по 64 символам — иначе она
+    # превратится в неработающий огрызок.
+    if text.lower().startswith(("http://", "https://")):
+        return text
+    text = " ".join(text.split())
+    low = text.lower().strip(" .")
+    if low in _ROOM_JUNK:
+        return ""
+    # Кабинет короткий и без пробелов: «М-406», «А-101», «307». Всё, что
+    # длиннее или содержит больше одного слова, — перетёкший текст пары.
+    if len(text) > 20 or len(text.split()) > 1:
+        return ""
+    return text[:64]
+
+
 def _cell_lessons(
     sheet: Sheet, r: int, c: int, group: str, weekday: int, para: int,
     upper: bool, covers_both_weeks: bool = False,
+    room_col: int | None = None,
 ) -> list[VuzLesson]:
     """Разобрать одну ячейку пары в уроки.
 
@@ -539,6 +591,15 @@ def _cell_lessons(
         for lesson in result:
             if not lesson.teacher:
                 lesson.teacher = only
+
+    # Кабинет или ссылка на онлайн-пару: в источнике это отдельная
+    # колонка «ауд» рядом с группой. 43 ячейки в файле — ссылки на
+    # Teams; без них дистанционную пару невозможно посетить.
+    if room_col is not None:
+        room = _cell_room(sheet, r, room_col)
+        if room:
+            for lesson in result:
+                lesson.room = room
     return result
 
 
@@ -623,7 +684,7 @@ def parse_sheet(book, sheet_name: str) -> VuzSheet:
     changes: list[VuzChange] = []
     meta: list[VuzGroup] = [
         VuzGroup(name=g + VUZ_SUFFIX, faculty=faculty, course=course, form="full")
-        for _, g in groups
+        for _, g, _room in groups
     ]
 
     weekday = 0
@@ -647,7 +708,7 @@ def parse_sheet(book, sheet_name: str) -> VuzSheet:
         r2 = min(r2, sheet.nrows)
         half = max(1, (r2 - r) // 2)
 
-        for c, g in groups:
+        for c, g, room_col in groups:
             for offset, row in enumerate(range(r, r2)):
                 # Датированные ячейки — это замены, а не постоянное
                 # расписание. Забираем их отдельно, чтобы не попали в базу.
@@ -665,7 +726,8 @@ def parse_sheet(book, sheet_name: str) -> VuzSheet:
                 covers = merged_down and span_r2 >= r2
                 lessons.extend(_cell_lessons(
                     sheet, row, c, g + VUZ_SUFFIX, weekday, para,
-                    upper=upper, covers_both_weeks=covers))
+                    upper=upper, covers_both_weeks=covers,
+                    room_col=room_col))
 
     lessons = _merge_slot_clash(_merge_same_subject(_dedupe(lessons)))
     return VuzSheet(lessons=lessons, groups=meta, changes=changes)
@@ -738,8 +800,10 @@ def _dedupe(lessons: list[VuzLesson]) -> list[VuzLesson]:
     """
     seen: dict[tuple, VuzLesson] = {}
     for lesson in lessons:
+        # room в ключе: две пары одного предмета в разных кабинетах —
+        # не дубль, а разные занятия (например, подгруппы).
         key = (lesson.group, lesson.weekday, lesson.para, lesson.parity,
-               lesson.subject, lesson.teacher, lesson.weeks)
+               lesson.subject, lesson.teacher, lesson.room, lesson.weeks)
         seen.setdefault(key, lesson)
     return list(seen.values())
 

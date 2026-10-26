@@ -145,7 +145,7 @@ async def replace_vuz_lessons(
                 weeks=weeks,
                 subject=(lesson.subject or "")[:256],
                 teacher=(lesson.teacher or "")[:128],
-                room=(lesson.room or "")[:64],
+                room=(lesson.room or "")[:512],
                 source=SOURCE_VUZ,
                 updated_at=now,
             )
@@ -240,7 +240,7 @@ async def replace_vuz_changes(
                 action=change.action,
                 subject=(change.subject or "")[:256],
                 teacher=(change.teacher or "")[:128],
-                room=(change.room or "")[:64],
+                room=(change.room or "")[:512],
                 comment="",
                 source=SOURCE_VUZ,
                 created_at=now,

@@ -28,7 +28,8 @@ class CollegeLesson(Base, TableNameMixin):
     para_end: Mapped[int] = mapped_column(Integer)
     subject: Mapped[str] = mapped_column(String(256))
     teacher: Mapped[str] = mapped_column(String(128), default="")
-    room: Mapped[str] = mapped_column(String(64), default="")
+    # 512, а не 64: у вуза здесь бывает ссылка на онлайн-пару.
+    room: Mapped[str] = mapped_column(String(512), default="")
     source_url: Mapped[str] = mapped_column(String(512), default="")
     source: Mapped[str] = mapped_column(String(8), server_default=text("'site'"))
     # Пара пришла из листка замен. Нужен, чтобы пометить её значком в
