@@ -1,11 +1,10 @@
 """Откат правки редактора: журнал должен двигаться, «add» — убирать пару."""
 import asyncio
-import datetime as dt
 import json
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from infrastructure.database.models import Base, BaseLesson, ScheduleEdit
+from infrastructure.database.models import Base, ScheduleEdit
 from infrastructure.database.repo.requests import RequestsRepo
 
 

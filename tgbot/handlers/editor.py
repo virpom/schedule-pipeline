@@ -857,8 +857,7 @@ async def cb_log(cb: CallbackQuery, repo: RequestsRepo, state: FSMContext):
     else:
         for e in entries:
             when = e.created_at.strftime("%d.%m %H:%M") if e.created_at else "—"
-            where = e.date.strftime("%d.%m") if e.date else \
-                f"{WEEKDAY_SHORT[(e.para or 1) - 1] if False else ''}".strip()
+            where = ""
             if e.layer == "base":
                 where = f"база/{e.para} пара"
             elif e.layer == "sub":

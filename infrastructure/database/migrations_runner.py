@@ -71,11 +71,18 @@ def run_migrations_sync(config: Config) -> None:
                 _stamp_baseline(conn)
             elif current is None:
                 logging.info("alembic: пустая БД — применяю все миграции")
+
+        # Соединение передаём явно: env.py не поднимает свой event loop
+        # и не строит второй движок по URL. Раньше URL из runner-а
+        # затирался внутри env.py, и миграции уходили в database.db
+        # рядом с текущим каталогом (план 052).
+        cfg = _alembic_config(config)
+        with engine.begin() as conn:
+            cfg.attributes["connection"] = conn
+            command.upgrade(cfg, "head")
     finally:
         engine.dispose()
 
-    cfg = _alembic_config(config)
-    command.upgrade(cfg, "head")
     logging.info("alembic: миграции применены")
 
 

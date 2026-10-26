@@ -103,3 +103,18 @@ def test_failed_rebuild_does_not_rollback_edit():
     tail = src[i:]
     assert "base_lessons.delete" not in tail
     assert "rollback" not in tail
+
+
+def test_day_snapshot_is_still_written():
+    """Снимки прошедших дней — не мёртвый код (план 012 ошибся).
+
+    `college_lesson` хранит только окно материализации (14 дней вперёд),
+    прошедшие дни из него вычищаются. На проде в `day_snapshot` 236 строк
+    за 20–22 октября, и этих дат в `college_lesson` нет вообще — снимки
+    единственная копия расписания за те дни.
+    """
+    from tgbot.services import notify_edits, poller
+
+    assert hasattr(notify_edits, "snapshot_past_days")
+    src = inspect.getsource(poller)
+    assert "snapshot_past_days" in src, "снимки перестали писаться"

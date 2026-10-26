@@ -20,14 +20,6 @@ def _read_env(path: str) -> None:
         pass
 
 
-def _int(name: str, default: int) -> int:
-    return int(os.environ.get(name) or default)
-
-
-def _float(name: str, default: float) -> float:
-    return float(os.environ.get(name) or default)
-
-
 def _ids(name: str) -> list[int]:
     return [int(x) for x in (os.environ.get(name) or "").replace(",", " ").split()]
 

@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 
 from config import load_config
-from infrastructure.database import models  # noqa: F401  (register tables)
 from infrastructure.database.models.base import Base
 
 config = context.config
@@ -27,15 +26,31 @@ target_metadata = Base.metadata
 
 
 def _database_url() -> str:
-    """Resolve DB URL: ALEMBIC_DB_URL wins, else SQLITE_PATH from .env."""
+    """Куда применять миграции.
+
+    URL, уже переданный вызывающим кодом (``migrations_runner`` через
+    ``set_main_option``), главнее всего: иначе два независимых пути
+    угадывают одну и ту же базу, и совпадение держится на том, что
+    ``SQLITE_PATH`` в окружении случайно тот же. Наблюдалось живьём:
+    ``run_migrations`` с ``Db(path="/tmp/x.db")`` создавал таблицы в
+    ``database.db`` в текущей директории, а не в ``/tmp/x.db``.
+    """
+    injected = config.get_main_option("sqlalchemy.url")
+    if injected:
+        return injected
     explicit = os.getenv("ALEMBIC_DB_URL")
     if explicit:
         return explicit
     env_path = os.getenv("ENV_FILE", ".env")
     try:
         return load_config(env_path).db.sqlalchemy_url()
-    except Exception:
-        return "sqlite+aiosqlite:///database.db"
+    except Exception as exc:
+        # Молчаливый уход в database.db рядом с текущим каталогом хуже
+        # громкой ошибки: бот потом не находит таблиц.
+        raise RuntimeError(
+            "Не удалось определить URL базы для миграций: задай "
+            "ALEMBIC_DB_URL или SQLITE_PATH"
+        ) from exc
 
 
 config.set_main_option("sqlalchemy.url", _database_url())

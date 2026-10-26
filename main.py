@@ -6,7 +6,6 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import load_config
-from infrastructure.database import models  # noqa: F401  (register tables)
 from infrastructure.database.migrations_runner import run_migrations
 from infrastructure.database.repo.requests import RequestsRepo
 from infrastructure.database.setup import create_engine, create_session_pool

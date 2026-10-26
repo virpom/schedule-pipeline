@@ -9,7 +9,7 @@ import datetime as dt
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from infrastructure.database.models import Base, Substitution
+from infrastructure.database.models import Base
 from infrastructure.database.repo.requests import RequestsRepo
 
 

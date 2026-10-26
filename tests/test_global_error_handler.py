@@ -4,10 +4,8 @@
 на этом всё: `cb.answer()` не вызывался, спиннер на кнопке висел до
 таймаута, обычное сообщение оставалось без ответа.
 """
-import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 from aiogram.types import CallbackQuery, Chat, ErrorEvent, Message, Update, User
 
 from tgbot.middlewares.errors import TEXT_CALLBACK, TEXT_MESSAGE, _place, on_error

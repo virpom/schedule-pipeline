@@ -2,9 +2,14 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from config import Db
+# Импорт ради побочного эффекта: регистрирует все таблицы в
+# Base.metadata, без него create_all и alembic не видят моделей.
+# Живёт здесь, а не в main.py, потому что это часть настройки БД.
+from infrastructure.database import models  # noqa: F401
 
 
 def create_engine(db: Db, echo: bool = False):
+    _ = models.Base  # ссылка, чтобы линтер видел использование
     engine = create_async_engine(db.sqlalchemy_url(), future=True, echo=echo)
 
     # journal_mode=delete (по умолчанию) блокирует базу целиком на любую
