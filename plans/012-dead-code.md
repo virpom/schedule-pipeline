@@ -1,0 +1,106 @@
+# План 012: убрать мёртвый код
+
+**Приоритет:** низкий, но дёшево и снимает путаницу при чтении.
+
+**Трудоёмкость:** S (~10 строк удалить).
+
+## Что удалить
+
+### 1. `config.py:23` и `:27` — `_int` и `_float`
+
+```python
+def _int(name: str, default: int) -> int:
+    return int(os.environ.get(name) or default)
+
+
+def _float(name: str, default: float) -> float:
+    return float(os.environ.get(name) or default)
+```
+
+Ни одного вызова. Все числовые настройки (интервал опроса, скорость
+рассылки, ночная пауза) живут в таблице `setting`, а не в окружении —
+это описано в `docs/DEPLOYMENT.md`. Функции остались от ранней версии.
+
+**Удалить обе.**
+
+### 2. `editor.py:807` — мёртвая ветка `if False`
+
+```python
+where = e.date.strftime("%d.%m") if e.date else \
+    f"{WEEKDAY_SHORT[(e.para or 1) - 1] if False else ''}".strip()
+if e.layer == "base":
+    where = f"база/{e.para} пара"
+elif e.layer == "sub":
+    where = f"замена {e.date.strftime('%d.%m') if e.date else ''}/{e.para} пара"
+```
+
+Выражение `f"{... if False else ''}"` всегда даёт пустую строку, и
+результат тут же перезаписывается в `if/elif`. Остаток недописанной
+логики.
+
+**Заменить на:**
+
+```python
+if e.layer == "base":
+    where = f"база/{e.para} пара"
+else:
+    where = f"замена {e.date.strftime('%d.%m') if e.date else ''}/{e.para} пара"
+```
+
+`WEEKDAY_SHORT` после этого может стать неиспользуемым в этом
+обработчике — проверить `grep -n "WEEKDAY_SHORT" tgbot/handlers/editor.py`
+и убрать импорт, если больше нигде.
+
+### 3. `infrastructure/database/repo/day_snapshot.py` — таблица-призрак
+
+`snapshot_past_days` пишет 403 строки, но **ни один** код их не читает.
+История строится из `college_lesson` (там данные не удаляются).
+
+Два варианта:
+
+**А. Дочитывать** — если история нужна как «слепок на конец дня»
+(сайт может обновить файл задним числом). Тогда нужен экран «архив».
+
+**Б. Перестать писать** — убрать `snapshot_past_days` из поллера и
+удалить таблицу миграцией.
+
+Выбрать осознанно. Сейчас это худший вариант: работа делается, пользы
+нет. **Рекомендация: Б**, потому что `college_lesson` уже хранит
+историю и не чистится (см. проверку роста: ~20 МБ/год).
+
+Если Б — проверить, что `docs/ARCHITECTURE.md` не описывает архив как
+существующую функцию.
+
+### 4. `main.py:9` — `# noqa: F401` не работает
+
+```python
+from infrastructure.database import models  # noqa: F401  (register tables)
+```
+
+`# noqa` — синтаксис flake8. `pyflakes` его игнорирует, поэтому
+`pyflakes` честно ругается: `'infrastructure.database.models' imported
+but unused`. То же в `migrations/env.py:12`.
+
+Это не ошибка, но замечание остаётся в линтере и маскирует настоящие
+находки. Решение — в плане 013 (настроить линтер), здесь только
+отметить.
+
+## Как проверить
+
+```bash
+cd /Users/virprom/schedule-pipeline
+.venv/bin/python -m pyflakes $(find . -name "*.py" -not -path "./.venv/*" -not -path "./.git/*")
+.venv/bin/python -m pytest -q
+```
+
+До: 5 замечаний. После: 3 (два `models` останутся, пока нет
+конфига линтера).
+
+## Риски
+
+- **`_int`/`_float` могут понадобиться.** Если в ROADMAP есть планы
+  вынести настройки в env — тогда не удалять, а оставить с пометкой.
+  Проверить `docs/ROADMAP.md` перед удалением.
+- **`day_snapshot`** — 403 строки в проде. Удаление таблицы
+  необратимо; сделать миграцию с `downgrade`, который пересоздаёт
+  структуру (данные не вернуть, но это архив, который никто не читал).
