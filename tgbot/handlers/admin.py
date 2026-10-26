@@ -494,6 +494,13 @@ async def _report_broadcast(bot, chat_id, items, rate):
 async def _confirm_broadcast(message: Message, repo: RequestsRepo, state: FSMContext, text: str, users=None, label: str = "пользователям"):
     if users is None:
         users = await repo.users.get_all()
+    # Нечего отправлять — говорим прямо и не показываем кнопку. Иначе
+    # админ видит «Отправить 0 пользователям» и всё равно жмёт.
+    if not users:
+        await message.answer(f"В выбранной аудитории ({label}) никого нет — "
+                             f"рассылать некому.")
+        await state.clear()
+        return
     await state.update_data(broadcast_text=text, broadcast_ids=[u.id for u in users])
     await state.set_state(AdminState.confirm_broadcast)
     preview = text if len(text) <= 400 else text[:400] + "…"
@@ -718,7 +725,13 @@ async def cb_bc_send(cb: CallbackQuery, repo: RequestsRepo, config: Config, stat
     if not text:
         await cb.answer("Нет текста")
         return
-    items = [(uid, text) for uid in ids] if ids else [(u.id, text) for u in await repo.users.get_all()]
+    # Пустой список — это «в выбранной аудитории никого», а не «всем».
+    # Раньше [] был falsy и уводил рассылку на всех 227 человек, хотя
+    # подтверждение показывало «Отправить 0 пользователям». Отозвать
+    # такое сообщение нельзя. None остаётся «списка нет — всем».
+    if ids is None:
+        ids = [u.id for u in await repo.users.get_all()]
+    items = [(uid, text) for uid in ids]
     rate = float((await repo.settings.get_all())["notify_rate"])
     await cb.message.edit_text(f"Рассылка запущена ({len(items)} получателей)")
     await cb.answer()

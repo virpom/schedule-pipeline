@@ -466,3 +466,45 @@ def test_match_group_does_not_guess_when_ambiguous():
     """Если похожих несколько и они равны — лучше вернуть None, чем угадать."""
     known = ["ЭОф-24", "ЭОф-23"]
     assert match_group("ЭОф-99", known) is None
+
+
+def test_parse_ochoe_raises_on_empty_sheet():
+    """Пустой лист — ошибка, а не «ноль пар».
+
+    План 001. Раньше возвращался пустой список, и sync заменял расписание
+    на пустое: replace_base_lessons([]) удаляет все строки source='site'
+    и вставляет ноль. 704 пары колледжа исчезали, 222 студента видели
+    «Занятий нет 🙌» на все 14 дней, а в лог уходило
+    «базовое расписание обновлено: 0 пар» — выглядело как обычная работа.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "1 курс"
+    buf = BytesIO()
+    wb.save(buf)
+
+    try:
+        lessons = parse_ochoe(buf.getvalue())
+    except EiosParseError:
+        return
+    raise AssertionError(f"ожидали EiosParseError, вернулось {len(lessons)} пар")
+
+
+def test_parse_ochoe_raises_when_groups_found_but_no_lessons():
+    """Шапка читается, а пар нет — тот же исход, то же исключение.
+
+    Сдвиг таблицы на строку вверх даёт именно это: группы нашлись,
+    а цикл по парам не выполнился ни разу.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "1 курс"
+    ws.cell(3, 3).value = "ДП-26"
+    buf = BytesIO()
+    wb.save(buf)
+
+    try:
+        lessons = parse_ochoe(buf.getvalue())
+    except EiosParseError:
+        return
+    raise AssertionError(f"ожидали EiosParseError, вернулось {len(lessons)} пар")

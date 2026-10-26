@@ -368,6 +368,16 @@ def parse_ochoe(data: bytes) -> list[BaseLesson]:
                 lesson.teacher = m.group(1)
                 lesson.subject = lesson.subject[: m.start()].strip()
 
+    # Пустой разбор — ошибка, а не «ноль пар». Без этого сдвиг шапки
+    # таблицы на одну строку вверх давал бы [] и replace_base_lessons
+    # стёр бы все 704 пары колледжа молча, с записью в лог
+    # «базовое расписание обновлено: 0 пар». Так же защищены
+    # parse_substitutions и vuz.parse.
+    if not lessons:
+        raise EiosParseError(
+            "В файле очного расписания не найдено ни одной пары — "
+            "вероятно, изменилась структура листа"
+        )
     return lessons
 
 
