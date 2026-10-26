@@ -50,6 +50,30 @@ def _short(error: Exception, limit: int = 300) -> str:
     return text[:limit]
 
 
+async def _report_partial_failure(bot, repo: RequestsRepo, config: Config,
+                                  failed: list[str]) -> None:
+    """Часть файлов не обновилась — сказать админу, а не только в лог.
+
+    Раньше частичный сбой писал одну строку в лог и всё. 26.10.2026 файл
+    замен отдавал 404 девять часов: админ не знал, студенты читали
+    устаревшие замены. Лог читают, когда уже сломано.
+
+    Отдельный ключ ``partial``, а не ``structure``: иначе две разные
+    тревоги глушат друг друга по хешу текста.
+    """
+    names = ", ".join(failed)
+    try:
+        await alerts.alert(
+            bot, repo, config, "partial",
+            f"Не обновились файлы: <code>{names}</code>\n\n"
+            f"Остальное расписание работает на последних данных. "
+            f"Если так больше суток — проверь страницу расписания: "
+            f"возможно, файл переименовали или убрали.",
+        )
+    except Exception:
+        logging.exception("не удалось отправить тревогу о частичном сбое")
+
+
 async def poll_once(bot, session_pool, config: Config) -> list[tuple[datetime.date, bool]]:
     """Синхронизировать расписание СПО из ЭИОС.
 
@@ -100,11 +124,22 @@ async def poll_once(bot, session_pool, config: Config) -> list[tuple[datetime.da
         # Успехом считаем только проход без единой ошибки. Если не доехали
         # замены — это именно то, о чём надо предупредить: постоянное
         # расписание верно, а изменений на день мы не знаем.
-        if result is not None and not result.get("failed"):
+        if result is not None:
+            failed = set(result.get("failed") or [])
             async with session_pool() as db:
-                await source_state.mark_ok(RequestsRepo(db))
-        elif result and result.get("failed"):
-            logging.warning("частичный сбой синхронизации: %s", result["failed"])
+                repo = RequestsRepo(db)
+                if failed:
+                    # Сайт отвечает, если доехал хоть один файл. Упали все
+                    # запрошенные — это уже недоступность, свежесть не
+                    # отмечаем: is_stale() честно скажет, что данные
+                    # под вопросом.
+                    if set(result.get("attempted") or []) - failed:
+                        await source_state.mark_ok(repo)
+                    await _report_partial_failure(bot, repo, config, sorted(failed))
+                else:
+                    await source_state.mark_ok(repo)
+                    await alerts.clear(bot, repo, config, "partial",
+                                       "Все файлы расписания снова обновляются.")
 
         # Материализуем ВСЕГДА, даже при сбое сайта и даже если файлы не
         # менялись: окно дат должно сдвигаться вперёд каждый день, иначе

@@ -36,6 +36,13 @@ log = logging.getLogger(__name__)
 SOURCE_SITE = "site"
 _HASH_KEY = "eios_hash_{kind}"
 
+# Имена шагов в ``sync_once``. Вынесены в константы, потому что по ним
+# поллер отличает «сайт лёг» от «один файл убрали»: сравнивает failed
+# с attempted.
+STEP_OCHOE = "очное расписание"
+STEP_ZAMENY = "замены"
+STEP_BELLS = "звонки"
+
 
 def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -233,16 +240,20 @@ async def sync_once(
 ) -> dict[str, bool]:
     """Один проход синхронизации.
 
-    Возвращает, что изменилось: ``{"ochoe": bool, "zameny": bool, "bells": bool}``.
+    Возвращает, что изменилось: ``{"ochoe": bool, "zameny": bool, "bells": bool}``,
+    плюс ``failed`` (имена упавших шагов) и ``attempted`` (имена
+    запрошенных). По ним поллер отличает «сайт лёг» от «один файл убрали».
     """
     changed = {"ochoe": False, "zameny": False, "bells": False}
     links = await _fetch_links(session, config)
     failed: list[str] = []
+    attempted: list[str] = []
 
     # Каждый файл обновляем независимо: если листок замен вернул 404,
     # звонки всё равно должны обновиться. Иначе один битый файл из трёх
     # останавливает весь проход и сайт выглядит «лежащим», хотя он жив.
     async def _step(name: str, coro) -> None:
+        attempted.append(name)
         try:
             await coro
         except Exception as exc:  # noqa: BLE001
@@ -251,13 +262,33 @@ async def sync_once(
 
     # --- базовое расписание ---
     if links.ochoe:
-        await _step("очное расписание", _sync_ochoe(session, repo, links.ochoe, force, changed))
+        await _step(STEP_OCHOE, _sync_ochoe(session, repo, links.ochoe, force, changed))
 
     # --- замены ---
     if links.zameny:
-        await _step("замены", _sync_zameny(session, repo, links.zameny, force, changed))
+        await _step(STEP_ZAMENY, _sync_zameny(session, repo, links.zameny, force, changed))
 
     # --- звонки ---
+    if links.bells_monday or links.bells_standard:
+        await _step(STEP_BELLS, _sync_bells(session, repo, links, force, changed))
+
+    if failed:
+        changed["failed"] = failed
+    # Какие шаги вообще пробовали. Без этого «упали все» не отличить от
+    # «половину файлов убрали со страницы»: непробованный шаг не попадает
+    # ни в failed, ни в успех, и сравнение с ALL_STEPS врёт.
+    changed["attempted"] = attempted
+    return changed
+
+
+async def _sync_bells(session, repo, links, force: bool, changed: dict) -> None:
+    """Звонки: два файла (понедельник и обычный) в одну таблицу.
+
+    Отдельной функцией, а не блоком в ``sync_once``: иначе падение
+    звонков вылетает из прохода целиком, ``sync_once`` бросает
+    исключение, и уже записанное очное расписание теряет отметку
+    свежести — студент видит «сайт не отвечает», хотя сайт жив.
+    """
     slots = []
     if links.bells_monday:
         data = await _download(session, links.bells_monday)
@@ -265,22 +296,19 @@ async def sync_once(
     if links.bells_standard:
         data = await _download(session, links.bells_standard)
         slots += await asyncio.to_thread(eios.parse_bells, data, "OTHER")
-    if slots:
-        digest = hashlib.sha256(
-            repr(sorted(
-                (s.day_type, s.course_group, s.para, str(s.start), str(s.end2))
-                for s in slots
-            )).encode()
-        ).hexdigest()
-        if force or await repo.settings.get(_HASH_KEY.format(kind="bells")) != digest:
-            count = await replace_bells(repo, slots)
-            await repo.settings.set(_HASH_KEY.format(kind="bells"), digest)
-            log.info("звонки обновлены: %d слотов", count)
-            changed["bells"] = True
-
-    if failed:
-        changed["failed"] = failed
-    return changed
+    if not slots:
+        return
+    digest = hashlib.sha256(
+        repr(sorted(
+            (s.day_type, s.course_group, s.para, str(s.start), str(s.end2))
+            for s in slots
+        )).encode()
+    ).hexdigest()
+    if force or await repo.settings.get(_HASH_KEY.format(kind="bells")) != digest:
+        count = await replace_bells(repo, slots)
+        await repo.settings.set(_HASH_KEY.format(kind="bells"), digest)
+        log.info("звонки обновлены: %d слотов", count)
+        changed["bells"] = True
 
 
 async def _sync_ochoe(session, repo, url: str, force: bool, changed: dict) -> None:
