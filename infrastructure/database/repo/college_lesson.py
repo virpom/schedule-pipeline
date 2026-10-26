@@ -96,29 +96,33 @@ class CollegeLessonRepo(BaseRepo):
         result = await self.session.execute(select(func.count()).select_from(CollegeLesson))
         return result.scalar_one()
 
-    async def digest_by_date(self) -> dict[datetime.date, str]:
-        """Отпечаток содержимого каждой даты в материализованном слое.
+    async def digest_by_date(self) -> dict[datetime.date, dict[str, str]]:
+        """Отпечаток содержимого каждой группы на каждую дату.
 
         Нужен рассылке. Файл на сайте перезаписывается целиком, поэтому
         флаг «очное расписание изменилось» срабатывает от одной строки —
         а уведомление уходило на все даты замен сразу. Человек получал
         полтора десятка сообщений «расписание изменилось», хотя менялось
-        одно. Сравнение отпечатков до и после материализации показывает,
-        какие даты действительно поменялись.
+        одно.
+
+        Отпечаток считается по группе, а не по дате целиком: иначе одна
+        исправленная строка у ``ДП-26`` тянула бы рассылку всем 230
+        подписчикам, включая тех, у кого в этот день ничего не менялось.
         """
         result = await self.session.execute(
             select(CollegeLesson).order_by(
                 CollegeLesson.date, CollegeLesson.group, CollegeLesson.para)
         )
-        buckets: dict[datetime.date, list] = {}
+        buckets: dict[tuple[datetime.date, str], list] = {}
         for row in result.scalars().all():
-            buckets.setdefault(row.date, []).append(
-                (row.group, row.para, row.subject, row.teacher, row.room,
+            buckets.setdefault((row.date, row.group), []).append(
+                (row.para, row.subject, row.teacher, row.room,
                  row.changed, row.action))
-        return {
-            date: hashlib.sha256(repr(rows).encode()).hexdigest()
-            for date, rows in buckets.items()
-        }
+        digests: dict[datetime.date, dict[str, str]] = {}
+        for (date, group), rows in buckets.items():
+            digests.setdefault(date, {})[group] = hashlib.sha256(
+                repr(rows).encode()).hexdigest()
+        return digests
 
     async def count_dates(self) -> int:
         result = await self.session.execute(select(func.count(func.distinct(CollegeLesson.date))))

@@ -137,20 +137,31 @@ async def poll_once(bot, session_pool, config: Config) -> list[tuple[datetime.da
         # отпечаток даты ловит изменения из обоих источников. Отдельный
         # список дат замен больше не нужен: дата без замены тоже бывает
         # изменённой, и пересечение с get_dates() её бы выбросило.
-        dates = {d for d, h in after.items() if before.get(d) != h}
+        #
+        # Группы тоже сравниваем: правка одной группы не должна будить
+        # остальные 30. Иначе двадцать изменившихся дат дают 20×230
+        # сообщений вместо 20 — по одному каждому, у кого ничего не
+        # менялось.
+        changed: dict[datetime.date, set[str]] = {}
+        for date, groups in after.items():
+            was = before.get(date, {})
+            diff = {g for g, h in groups.items() if was.get(g) != h}
+            if diff:
+                changed[date] = diff
 
         # Изменилось, а отпечатка нет: правили день вне окна материализации
         # (оно 14 дней). Молчать нельзя — данные другие, — поэтому честно
-        # показываем ближайшие дни.
-        if ((result and result["ochoe"]) or vuz_changed) and not dates:
-            dates = {today + datetime.timedelta(days=i) for i in range(3)}
+        # показываем ближайшие дни всем: что именно поменялось, неизвестно.
+        if ((result and result["ochoe"]) or vuz_changed) and not changed:
+            for i in range(3):
+                changed[today + datetime.timedelta(days=i)] = set()
 
-        for date in sorted(dates):
-            changes.append((date, had_lessons == 0 and date == today))
+        for date in sorted(changed):
+            changes.append((date, had_lessons == 0 and date == today, changed[date]))
     return changes
 
 
-async def notify_new_schedule(bot, session_pool, changes: list[tuple[datetime.date, bool]], rate: float, photos_path: str) -> None:
+async def notify_new_schedule(bot, session_pool, changes: list[tuple[datetime.date, bool, set[str]]], rate: float, photos_path: str) -> None:
     async with session_pool() as db:
         repo = RequestsRepo(db)
         bell, lunches = await repo.bell_schedule.get_context()
@@ -159,10 +170,18 @@ async def notify_new_schedule(bot, session_pool, changes: list[tuple[datetime.da
         group_course_map = await repo.users.get_group_course_map()
 
     items: list[tuple[int, str, str | None]] = []
-    for date, is_new in sorted(changes, key=lambda x: x[0]):
+    for date, is_new, groups in sorted(changes, key=lambda x: x[0]):
         weekday = photos.weekday_folder(date)
         prefix = "🆕 <b>Новое расписание</b>\n\n" if is_new else "🔄 <b>Расписание изменилось</b>\n\n"
         for user in subscribers:
+            # Будить только тех, чья группа (или чьи пары) поменялась.
+            # Пустой набор — «не знаем, что именно», тогда шлём всем.
+            if groups:
+                is_teacher = user.role == "teacher"
+                if not is_teacher and user.group not in groups:
+                    continue
+                if is_teacher and not user.teacher_name:
+                    continue
             async with session_pool() as db:
                 repo = RequestsRepo(db)
                 if user.role == "teacher" and user.teacher_name:

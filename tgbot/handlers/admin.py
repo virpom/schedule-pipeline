@@ -640,7 +640,7 @@ async def cb_notify_confirm(cb: CallbackQuery, repo: RequestsRepo, config: Confi
     await cb.message.edit_text("Рассылка запущена")
     await cb.answer()
     rate = float((await repo.settings.get_all())["notify_rate"])
-    _spawn(notify_new_schedule(cb.message.bot, session_pool, [(latest, True)],
+    _spawn(notify_new_schedule(cb.message.bot, session_pool, [(latest, True, set())],
                                rate, config.photos_path))
 
 

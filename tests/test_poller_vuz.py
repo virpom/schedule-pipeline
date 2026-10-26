@@ -105,9 +105,61 @@ def test_digest_by_date_detects_only_changed_date():
                 ])
                 after = await repo.college_lessons.digest_by_date()
 
-                changed = {d for d, h in after.items() if before.get(d) != h}
+                changed = {
+                    d for d, groups in after.items()
+                    if any(h != before.get(d, {}).get(g) for g, h in groups.items())
+                }
                 assert changed == {d1}, f"ожидали только {d1}, получили {changed}"
                 assert before[d2] == after[d2], "нетронутая дата изменила отпечаток"
+        finally:
+            await engine.dispose()
+    run(scenario())
+
+
+def test_digest_by_date_isolates_groups():
+    """Правка одной группы не меняет отпечаток соседней на ту же дату.
+
+    Инцидент 26.10.2026 (второй): отпечаток считался по дате целиком,
+    поэтому исправление у ``ДП-26`` будило всех 230 подписчиков —
+    двадцать дат по 230 человек вместо двадцати сообщений.
+    """
+    async def scenario():
+        engine, pool = await make_env()
+        try:
+            async with pool() as db:
+                repo = RequestsRepo(db)
+                day = dt.date.today()
+                await repo.college_lessons.replace_date(day, [
+                    {"date": day, "group": "ДП-26", "para": 1, "para_end": 1,
+                     "subject": "Архивное дело", "teacher": "Молчанова Н.А.",
+                     "room": "", "source_url": "", "source": "site",
+                     "changed": False, "action": ""},
+                    {"date": day, "group": "СМк-25", "para": 1, "para_end": 1,
+                     "subject": "Анатомия", "teacher": "Боровик И.А.",
+                     "room": "", "source_url": "", "source": "site",
+                     "changed": False, "action": ""},
+                ])
+                before = await repo.college_lessons.digest_by_date()
+
+                # Правим только ДП-26.
+                await repo.college_lessons.replace_date(day, [
+                    {"date": day, "group": "ДП-26", "para": 1, "para_end": 1,
+                     "subject": "Архивное дело (перенос)", "teacher": "Молчанова Н.А.",
+                     "room": "201", "source_url": "", "source": "site",
+                     "changed": False, "action": ""},
+                    {"date": day, "group": "СМк-25", "para": 1, "para_end": 1,
+                     "subject": "Анатомия", "teacher": "Боровик И.А.",
+                     "room": "", "source_url": "", "source": "site",
+                     "changed": False, "action": ""},
+                ])
+                after = await repo.college_lessons.digest_by_date()
+
+                diff = {
+                    g for g, h in after[day].items()
+                    if before[day].get(g) != h
+                }
+                assert diff == {"ДП-26"}, f"ожидали только ДП-26, получили {diff}"
+                assert before[day]["СМк-25"] == after[day]["СМк-25"]
         finally:
             await engine.dispose()
     run(scenario())
