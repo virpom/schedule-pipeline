@@ -145,9 +145,12 @@ def extract_links(html: str, base_url: str = PAGE_URL) -> SourceLinks:
         name = unquote(url.split("?")[0].split("#")[0].rsplit("/", 1)[-1]).lower()
         result.all_links[name] = url
 
-        if name.endswith(".xlsx"):
-            result.ochoe = url
-        elif "замен" in name:
+        # Смысловые признаки раньше расширения. Раньше `endswith(".xlsx")`
+        # стоял первым, и стоило колледжу переименовать листок замен в
+        # .xlsx, как он попадал в «очную форму»: parse_ochoe вернул бы 0
+        # пар, replace_base_lessons стёр бы 704 строки колледжа, а замены
+        # не обновились бы вовсе — 220 студентов увидели «Занятий нет».
+        if "замен" in name:
             result.zameny = url
         elif "заоч" in name:
             result.zaochnoe = url
@@ -156,6 +159,8 @@ def extract_links(html: str, base_url: str = PAGE_URL) -> SourceLinks:
                 result.bells_monday = url
             elif "стандарт" in name:
                 result.bells_standard = url
+        elif "очная" in name and name.endswith(".xlsx"):
+            result.ochoe = url
 
     if not result.ochoe:
         raise EiosParseError(
