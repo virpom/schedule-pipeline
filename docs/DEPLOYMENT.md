@@ -22,9 +22,9 @@ docker run -d --name schedule-bot --restart unless-stopped \
 docker logs -f --tail=100 schedule-bot
 ```
 
-Имя контейнера задаётся `--name`. Дальше в документе используется имя
-прод-контейнера `bot-wi188f7kradbxpz2efrl7vms` (см. «Прод» ниже) — при
-установке с нуля подставляйте своё.
+Имя контейнера задаётся `--name`. Дальше в документе команды написаны для
+прод-контейнера `bot-wi188f7kradbxpz2efrl7vms` (см. «Прод» ниже) —
+подставляйте своё имя, при установке по этому разделу это `schedule-bot`.
 
 В логах должны появиться:
 
@@ -82,9 +82,9 @@ data/
 скопируйте папку, запустите снова:
 
 ```bash
-docker stop schedule-bot
+docker stop bot-wi188f7kradbxpz2efrl7vms
 tar czf backup-$(date +%F).tar.gz data/
-docker start schedule-bot
+docker start bot-wi188f7kradbxpz2efrl7vms
 ```
 
 SQLite в режиме WAL переживает и копирование на живой базе, но
@@ -110,15 +110,16 @@ SQLite в режиме WAL переживает и копирование на �
 ```bash
 git pull origin master
 docker build -q -t schedule-bot:latest .
-docker rm -f schedule-bot
-docker run -d --name schedule-bot \
+docker rm -f bot-wi188f7kradbxpz2efrl7vms
+docker run -d --name bot-wi188f7kradbxpz2efrl7vms \
   --restart unless-stopped --env-file .env \
   -v "$PWD/data:/data" schedule-bot:latest
-docker logs -f --tail=50 schedule-bot
+docker logs -f --tail=50 bot-wi188f7kradbxpz2efrl7vms
 ```
 
-На проде имя другое (`bot-wi188f7kradbxpz2efrl7vms`) и путь тома
-абсолютный — точные команды в разделе «Прод» ниже.
+На проде том монтируется абсолютным путём
+(`/home/virprom/schedule-pipeline/data`) — точные команды в разделе
+«Прод» ниже.
 
 Пересборка занимает около минуты. Данные не теряются: они в `./data`,
 а не в образе.
@@ -130,13 +131,13 @@ docker logs -f --tail=50 schedule-bot
 
 ```bash
 # контейнер запущен и не перезапускается
-docker ps -a --filter name=schedule-bot
+docker ps -a --filter name=bot-wi188f7kradbxpz2efrl7vms
 
 # ошибки за последнее время (должно быть пусто)
-docker logs --since 10m schedule-bot | grep -iE 'error|traceback'
+docker logs --since 10m bot-wi188f7kradbxpz2efrl7vms | grep -iE 'error|traceback'
 
 # бот отвечает Telegram
-docker exec schedule-bot python -c "
+docker exec bot-wi188f7kradbxpz2efrl7vms python -c "
 import os, json, urllib.request
 t = os.environ['BOT_TOKEN']
 r = json.load(urllib.request.urlopen(f'https://api.telegram.org/bot{t}/getMe'))
@@ -214,5 +215,5 @@ chmod 600 .env
 Проверить время внутри контейнера:
 
 ```bash
-docker exec schedule-bot date
+docker exec bot-wi188f7kradbxpz2efrl7vms date
 ```

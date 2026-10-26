@@ -47,10 +47,11 @@ print(json.load(urllib.request.urlopen(f'https://api.telegram.org/bot{t}/getMe')
 дерутся за обновления, и бот отвечает через раз:
 
 ```bash
-docker ps --filter name=bot --format '{{.Names}}\t{{.Status}}'
+docker ps -a --filter name=bot --format '{{.Names}}\t{{.Status}}'
 ```
 
-Должен быть ровно один контейнер.
+Должен быть ровно один контейнер. Второй появляется, если кто-то запустил
+`docker compose up -d`: compose создаёт `schedule-bot` рядом с прод-именем.
 
 ## Расписание не обновляется
 
