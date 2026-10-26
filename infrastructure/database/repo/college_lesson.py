@@ -27,11 +27,12 @@ def _clean_teacher_names(raw) -> list[str]:
 
 class CollegeLessonRepo(BaseRepo):
     async def bulk_insert(self, lessons: list[dict]) -> None:
-        """Вставить пары как есть.
+        """Вставить пары как есть, одним коммитом.
 
-        Без ``ON CONFLICT``: у ``college_lesson`` нет уникального индекса
-        (см. модель), а согласованность держит ``replace_date()`` — он
-        сначала удаляет все пары за дату.
+        Без ``ON CONFLICT``: согласованность держит ``replace_date()`` —
+        он сначала удаляет все пары за дату. Уникальный индекс
+        ``uc_college_lesson`` при этом работает как страховка: наложение
+        двух пар вуза упадёт, а не создаст дубль.
         """
         if not lessons:
             return
@@ -39,9 +40,27 @@ class CollegeLessonRepo(BaseRepo):
         await self.session.commit()
 
     async def replace_date(self, date: datetime.date, lessons: list[dict]) -> None:
-        await self.session.execute(delete(CollegeLesson).where(CollegeLesson.date == date))
-        await self.session.commit()
-        await self.bulk_insert(lessons)
+        """Заменить все пары за дату одной транзакцией.
+
+        Раньше здесь было два коммита: delete фиксировался отдельно, и
+        упавшая вставка оставляла день пустым. ``materialize`` зовёт
+        этот метод 14 раз подряд, так что падение на восьмом дне давало
+        ровно один пустой день посреди окна — студент видел «Занятий
+        нет» за конкретное число, остальные дни были в порядке.
+
+        Откат обязателен: после ошибки сессия остаётся в состоянии
+        «транзакция сломана», и без rollback delete применится, а insert
+        нет — день всё равно опустеет.
+        """
+        try:
+            await self.session.execute(
+                delete(CollegeLesson).where(CollegeLesson.date == date))
+            if lessons:
+                await self.session.execute(insert(CollegeLesson).values(lessons))
+            await self.session.commit()
+        except Exception:
+            await self.session.rollback()
+            raise
 
     async def get_for_group_date(
             self, group: str, date: datetime.date

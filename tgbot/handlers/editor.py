@@ -481,7 +481,7 @@ async def _save_base(event, repo: RequestsRepo, state: FSMContext, via_cb: bool)
     )
     # База повторяется каждую неделю — пересобираем все дни окна,
     # иначе студент увидит правку только после следующего опроса.
-    await _rebuild(repo)
+    rebuilt = await _rebuild(repo)
     # Симметрично _save_sub. Без очистки состояние остаётся
     # EditorState.room, и любое следующее сообщение старосты («спасибо»)
     # перезаписывает пару с room="спасибо" — вместе с _rebuild и
@@ -497,7 +497,13 @@ async def _save_base(event, repo: RequestsRepo, state: FSMContext, via_cb: bool)
 
     lessons = await repo.base_lessons.get_day(group, weekday, parity)
     slots = [Slot(l.para, l.subject, l.teacher, l.room) for l in lessons]
-    text = ("✅ <b>Сохранено</b>"
+    # Не врать про успех: правка уже в слоях, но студент её не увидит,
+    # пока поллер не пересоберёт college_lesson сам.
+    head = "✅ <b>Сохранено</b>" if rebuilt else (
+        "⚠️ <b>Правка сохранена, но расписание не пересобралось</b>\n"
+        "Студенты увидят её в течение 5 минут — поллер пересоберёт сам. "
+        "Если не появилась, сообщи админу.")
+    text = (head
             + (f" · уведомлено: {notified}" if notified else "")
             + "\n\n"
             f"{WEEKDAY_FULL[weekday - 1]}, {PARITY_LABELS.get(parity, parity)} неделя, "
@@ -751,7 +757,7 @@ async def _save_sub(event, repo: RequestsRepo, state: FSMContext, via_cb: bool):
 
     await repo.substitutions.set(date, group, para, action, subject, teacher, room,
                                  created_by=event.from_user.id)
-    await _rebuild(repo, date)
+    rebuilt = await _rebuild(repo, date)
     await repo.edit_log.log(group, "sub", "edit", user_id=event.from_user.id,
                             date=date, para=para,
                             old_value={"action": old_sub.action,
@@ -773,7 +779,11 @@ async def _save_sub(event, repo: RequestsRepo, state: FSMContext, via_cb: bool):
     slots = await get_day_slots(repo, group, date)
     subs = await repo.substitutions.get_for_date(group, date)
     subs_by_para = {s.para: s for s in subs}
-    text = ("✅ <b>Сохранено</b>"
+    head = "✅ <b>Сохранено</b>" if rebuilt else (
+        "⚠️ <b>Правка сохранена, но расписание не пересобралось</b>\n"
+        "Студенты увидят её в течение 5 минут — поллер пересоберёт сам. "
+        "Если не появилась, сообщи админу.")
+    text = (head
             + (f" · уведомлено: {notified}" if notified else "")
             + f"\n\n{date.strftime('%d.%m.%Y')}, {para} пара → "
             f"<b>{subject}</b>\n\n" + sub_day_text(group, date, slots))
@@ -900,6 +910,10 @@ async def cb_undo(cb: CallbackQuery, repo: RequestsRepo):
         else:
             # Пара была удалена — из журнала её содержимое не восстановить.
             msg = "↩️ Откат: пара была удалена (восстанови вручную)"
+        # Студент читает college_lesson, а не слои: без пересборки откат
+        # доедет до него только через следующий проход поллера. Для базы
+        # пересобираем все дни — правка повторяется каждую неделю.
+        await _rebuild(repo)
     else:
         # Замену возвращаем, а не просто снимаем: если поверх уже стояла
         # замена, set() её перезаписал, и удаление стёрло бы обе.
@@ -922,8 +936,8 @@ async def cb_undo(cb: CallbackQuery, repo: RequestsRepo):
     await cb_log(cb, repo)
 
 
-async def _rebuild(repo: RequestsRepo, date: datetime.date | None = None) -> None:
-    """Пересобрать college_lesson после правки.
+async def _rebuild(repo: RequestsRepo, date: datetime.date | None = None) -> bool:
+    """Пересобрать college_lesson после правки. ``False`` — не вышло.
 
     Студент читает готовую таблицу, а не слои. Без пересборки замена
     появлялась у него только после следующего опроса поллера — до пяти
@@ -931,6 +945,10 @@ async def _rebuild(repo: RequestsRepo, date: datetime.date | None = None) -> Non
 
     ``date`` задан — пересобираем только этот день (правка на дату).
     Не задан — все дни окна (правка базы повторяется каждую неделю).
+
+    Возвращает результат, чтобы обработчик не врал «✅ Сохранено», когда
+    расписание не пересобралось. Правку при этом не откатываем: она уже
+    в слоях и корректна, поллер пересоберёт сам через ≤5 минут.
     """
     from tgbot.services import sync_eios
     try:
@@ -938,8 +956,10 @@ async def _rebuild(repo: RequestsRepo, date: datetime.date | None = None) -> Non
             await sync_eios.materialize(repo)
         else:
             await sync_eios.materialize_day(repo, date)
+        return True
     except Exception:
         logging.exception("не удалось пересобрать college_lesson")
+        return False
 
 
 # --- ввод текста ----------------------------------------------------------
