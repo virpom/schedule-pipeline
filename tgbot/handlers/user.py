@@ -15,6 +15,8 @@ from common.schedule import (
     BELL_START_END,
     DETAIL_LABELS,
     DETAIL_ORDER,
+    PARITY_EVEN,
+    PARITY_ODD,
     bells_group,
     course_from_group,
     format_bell,
@@ -338,8 +340,12 @@ async def _vuz_teacher_day(repo: RequestsRepo, user: User, date: datetime.date):
     from tgbot.services import sync_vuz
     anchor = await sync_vuz.get_anchor(repo)
     week = sync_vuz.vuz_week(date, anchor)
+    # Чётность считаем здесь: репозиторий не должен знать правило
+    # нумерации недель вуза. Без неё преподаватель видел пары чужой
+    # недели — те, которых в этот день нет ни у одной группы.
+    parity = PARITY_EVEN if week % 2 == 0 else PARITY_ODD
     rows = await repo.base_lessons.get_for_teacher(
-        user.teacher_name, weekday=date.isoweekday(), week=week)
+        user.teacher_name, weekday=date.isoweekday(), week=week, parity=parity)
     return [_vuz_lesson_to_slot(r) for r in rows]
 
 

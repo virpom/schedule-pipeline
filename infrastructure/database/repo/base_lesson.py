@@ -121,13 +121,19 @@ class BaseLessonRepo(BaseRepo):
         return [g for (g,) in result.all()]
 
     async def get_for_teacher(self, teacher_name: str, weekday: int | None = None,
-                              week: int | None = None) -> list[BaseLesson]:
+                              week: int | None = None,
+                              parity: str | None = None) -> list[BaseLesson]:
         """Пары преподавателя вуза из базового расписания.
 
         У вуза нет материализованного слоя на будущее: пары хранятся в
         base_lesson со списком недель. Поэтому расписание преподавателя
         вуза собирается здесь, а не из college_lesson, где вузовских
         пар на произвольную дату может не оказаться.
+
+        ``parity`` — чётность недели (``ODD``/``EVEN``). Вызывающий знает
+        её точно: он уже посчитал номер недели вуза. Без фильтра
+        преподаватель видел пары чужой недели — те, которых в этот день
+        нет ни у одной группы.
         """
         if not (teacher_name or "").strip():
             return []
@@ -138,6 +144,9 @@ class BaseLessonRepo(BaseRepo):
                  .order_by(BaseLesson.weekday, BaseLesson.para))
         if weekday is not None:
             query = query.where(BaseLesson.weekday == weekday)
+        if parity is not None:
+            query = query.where(
+                BaseLesson.week_parity.in_([parity, PARITY_ANY]))
         result = await self.session.execute(query)
         rows = [r for r in result.scalars().all()
                 if teacher_matches(r.teacher, teacher_name)]

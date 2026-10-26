@@ -1,5 +1,9 @@
 FROM python:3.11-slim
 
+# Без этого stdout/stderr буферизуются и docker logs показывает пустоту:
+# при падении контейнера последние строки теряются.
+ENV PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
 COPY requirements.txt .

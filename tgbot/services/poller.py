@@ -267,6 +267,11 @@ def _in_night(now: datetime.datetime, start_str: str, end_str: str) -> bool:
         end = datetime.time.fromisoformat(end_str)
     except ValueError:
         return False
+    # Кривое значение могло попасть в БД до того, как /setnight начал
+    # отбивать часы с поясом. Сравнение aware с naive — TypeError,
+    # который поллер ловит общим except и молча перестаёт опрашивать.
+    if start.tzinfo is not None or end.tzinfo is not None:
+        return False
     if start == end:
         return False
     t = now.time()

@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -63,6 +64,28 @@ def _is_admin(message: Message, config: Config) -> bool:
 
 def _is_admin_cb(cb: CallbackQuery, config: Config) -> bool:
     return cb.from_user.id in config.tg_bot.admin_ids
+
+
+def _parse_hhmm(value: str) -> datetime.time | None:
+    """Разобрать время строго как HH:MM.
+
+    ``time.fromisoformat`` принимает больше, чем «HH:MM»: «23»,
+    «07:00:00», «23:00+03:00». Последнее особенно опасно — с часовым
+    поясом получается aware-время, и ``_in_night`` падает с TypeError
+    на сравнении с naive ``now``. Поллер это ловит общим except, пишет
+    «poll failed» и крутится, но ``poll_once`` не вызывается никогда:
+    расписание замирает, пока админ не вспомнит про /setnight.
+
+    Проверяем формат строкой, а не только результат разбора: «07:00:00»
+    даёт ``time(7, 0)`` с нулевыми секундами, и по полям его от
+    «07:00» не отличить.
+    """
+    if not re.fullmatch(r"\d{2}:\d{2}", value):
+        return None
+    try:
+        return datetime.time.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def _settings_text(s: dict) -> str:
@@ -369,11 +392,15 @@ async def set_night(message: Message, repo: RequestsRepo, config: Config):
     if len(parts) != 3:
         await message.answer("Формат: /setnight 23:00 07:00  (или /setnight off)")
         return
-    try:
-        datetime.time.fromisoformat(parts[1])
-        datetime.time.fromisoformat(parts[2])
-    except ValueError:
+    start = _parse_hhmm(parts[1])
+    end = _parse_hhmm(parts[2])
+    if start is None or end is None:
         await message.answer("Формат времени: HH:MM")
+        return
+    if start == end:
+        # Иначе админ видит «Ночная пауза: 23:00–23:00» и думает, что
+        # она включена, а _in_night честно возвращает False.
+        await message.answer("Начало и конец не могут совпадать")
         return
     await repo.settings.set("night_start", parts[1])
     await repo.settings.set("night_end", parts[2])
@@ -920,9 +947,31 @@ def _night(text: str) -> tuple[str, ...]:
     parts = text.split()
     if len(parts) != 2:
         raise ValueError
-    datetime.time.fromisoformat(parts[0])
-    datetime.time.fromisoformat(parts[1])
+    # Через _parse_hhmm, а не fromisoformat: «23:00+03:00» даёт
+    # aware-время, и поллер молча перестаёт опрашивать сайт.
+    if _parse_hhmm(parts[0]) is None or _parse_hhmm(parts[1]) is None:
+        raise ValueError
     return (parts[0], parts[1])
+
+
+def _url(text: str) -> tuple[str, ...]:
+    """Ссылка поддержки: http(s) или tg, либо пусто (убрать кнопку).
+
+    Telegram принимает в url кнопки только эти схемы и на остальное
+    отвечает BUTTON_URL_INVALID, отклоняя сообщение целиком. А меню —
+    это 9 обработчиков, и глобального обработчика ошибок нет: студент
+    не получил бы ничего, а админ не смог бы исправить — «Настройки»
+    живут в том же меню, отдельной команды нет.
+
+    Одного префикса мало: «https://» без хоста Telegram тоже отбивает.
+    """
+    value = text.strip()
+    if not value:
+        return ("",)
+    for scheme in ("https://", "http://", "tg://"):
+        if value.startswith(scheme) and value[len(scheme):].strip():
+            return (value,)
+    raise ValueError
 
 
 SETTINGS: dict[str, _Setting] = {
@@ -938,7 +987,7 @@ SETTINGS: dict[str, _Setting] = {
     "night": _Setting(AdminState.set_night, "Введи ночное окно «HH:MM HH:MM»:",
                       ("night_start", "night_end"), _night, "Ночная пауза: {}–{}"),
     "support": _Setting(AdminState.set_support, "Отправь ссылку на группу поддержки:",
-                        ("support_link",), lambda t: (t,), "Ссылка поддержки: {}"),
+                        ("support_link",), _url, "Ссылка поддержки: {}"),
 }
 
 

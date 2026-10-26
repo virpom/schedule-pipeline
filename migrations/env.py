@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 from logging.config import fileConfig
 
@@ -14,7 +15,12 @@ from infrastructure.database.models.base import Base
 
 config = context.config
 
-if config.config_file_name is not None:
+# Не перетирать логирование приложения. fileConfig из alembic.ini ставит
+# root.level = WARNING, и после run_migrations все logging.info в проекте
+# уходят в пустоту — включая «poller started» и итоги рассылок. В консоли
+# alembic.ini нужен для ручных вызовов; когда логирование уже настроено
+# (main.py:setup_logging), трогать его нельзя.
+if config.config_file_name is not None and not logging.getLogger().handlers:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata

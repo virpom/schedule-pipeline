@@ -465,7 +465,11 @@ async def _save_base(event, repo: RequestsRepo, state: FSMContext, via_cb: bool)
     await repo.edit_log.log(
         group, "base", "edit" if old_slot else "add", user_id=event.from_user.id,
         para=para,
-        old_value={"subject": old_slot.subject} if old_slot else None,
+        # Преподавателя и кабинет тоже: cb_undo восстанавливает все три
+        # поля, а раньше в журнале лежал только предмет — откат молча
+        # стирал преподавателя у 100% пар.
+        old_value={"subject": old_slot.subject, "teacher": old_slot.teacher,
+                   "room": old_slot.room} if old_slot else None,
         new_value={"weekday": weekday, "parity": parity, "para": para,
                    "subject": subject, "teacher": teacher, "room": room},
     )
@@ -508,7 +512,8 @@ async def cb_del_base(cb: CallbackQuery, repo: RequestsRepo):
     await repo.base_lessons.delete_slot(group, parity, weekday, para)
     await repo.edit_log.log(
         group, "base", "delete", user_id=cb.from_user.id, para=para,
-        old_value={"subject": old_slot.subject} if old_slot else None,
+        old_value={"subject": old_slot.subject, "teacher": old_slot.teacher,
+                   "room": old_slot.room} if old_slot else None,
     )
     await _rebuild(repo)
     lessons = await repo.base_lessons.get_day(group, weekday, parity)
@@ -721,11 +726,22 @@ async def _save_sub(event, repo: RequestsRepo, state: FSMContext, via_cb: bool):
         await state.clear()
         return
 
+    # Что было на этом слоте до правки. Без этого «Откатить» для замены
+    # просто удалял строку: если поверх уже стояла замена, она была
+    # перезаписана set()-ом и больше нигде не хранилась.
+    before = await repo.substitutions.get_for_date(group, date)
+    old_sub = next((s for s in before if s.para == para), None)
+
     await repo.substitutions.set(date, group, para, action, subject, teacher, room,
                                  created_by=event.from_user.id)
     await _rebuild(repo, date)
     await repo.edit_log.log(group, "sub", "edit", user_id=event.from_user.id,
-                            date=date, para=para, new_value={
+                            date=date, para=para,
+                            old_value={"action": old_sub.action,
+                                       "subject": old_sub.subject,
+                                       "teacher": old_sub.teacher,
+                                       "room": old_sub.room} if old_sub else None,
+                            new_value={
                                 "action": action, "subject": subject,
                                 "teacher": teacher, "room": room})
     await state.clear()
@@ -862,8 +878,19 @@ async def cb_undo(cb: CallbackQuery, repo: RequestsRepo):
             # Пара была удалена — из журнала её содержимое не восстановить.
             msg = "↩️ Откат: пара была удалена (восстанови вручную)"
     else:
-        await repo.substitutions.delete(last.date, group, last.para)
-        msg = "↩️ Замена снята"
+        # Замену возвращаем, а не просто снимаем: если поверх уже стояла
+        # замена, set() её перезаписал, и удаление стёрло бы обе.
+        old = json.loads(last.old_value) if last.old_value else None
+        if old and old.get("subject"):
+            await repo.substitutions.set(
+                last.date, group, last.para, old.get("action") or "replace",
+                old["subject"], old.get("teacher", ""), old.get("room", ""),
+                created_by=cb.from_user.id)
+            msg = f"↩️ Возвращена замена: <b>{old['subject']}</b>"
+        else:
+            await repo.substitutions.delete(last.date, group, last.para)
+            msg = "↩️ Замена снята"
+        await _rebuild(repo, last.date)
 
     # Запись из журнала убираем: иначе следующее нажатие «Откатить»
     # повторит ту же правку, и кнопка будет выглядеть сломанной.
@@ -947,9 +974,14 @@ async def on_subject(message: Message, repo: RequestsRepo, state: FSMContext):
 @editor_router.message(EditorState.teacher)
 async def on_teacher(message: Message, repo: RequestsRepo, state: FSMContext):
     await state.update_data(teacher=(message.text or "").strip())
+    # Колбэк по слою, как в on_subject: у базовой правки даты нет, и
+    # ed:sub_skip_room падал в _save_sub с KeyError: 'date' — правка
+    # терялась молча, без ошибки и без подтверждения.
+    data = await state.get_data()
     await message.answer(
         f"{EDITOR_TITLE}\n\n🚪 <b>Кабинет</b> или «Пропустить».",
-        reply_markup=_skip_kb("ed:sub_skip_room"),
+        reply_markup=_skip_kb("ed:sub_skip_room" if data.get("layer") == "sub"
+                              else "ed:skip_room"),
     )
     await state.set_state(EditorState.room)
 
