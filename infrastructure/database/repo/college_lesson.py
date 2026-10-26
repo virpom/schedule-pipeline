@@ -1,4 +1,5 @@
 import datetime
+import hashlib
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.sqlite import insert
@@ -94,6 +95,30 @@ class CollegeLessonRepo(BaseRepo):
     async def count_lessons(self) -> int:
         result = await self.session.execute(select(func.count()).select_from(CollegeLesson))
         return result.scalar_one()
+
+    async def digest_by_date(self) -> dict[datetime.date, str]:
+        """Отпечаток содержимого каждой даты в материализованном слое.
+
+        Нужен рассылке. Файл на сайте перезаписывается целиком, поэтому
+        флаг «очное расписание изменилось» срабатывает от одной строки —
+        а уведомление уходило на все даты замен сразу. Человек получал
+        полтора десятка сообщений «расписание изменилось», хотя менялось
+        одно. Сравнение отпечатков до и после материализации показывает,
+        какие даты действительно поменялись.
+        """
+        result = await self.session.execute(
+            select(CollegeLesson).order_by(
+                CollegeLesson.date, CollegeLesson.group, CollegeLesson.para)
+        )
+        buckets: dict[datetime.date, list] = {}
+        for row in result.scalars().all():
+            buckets.setdefault(row.date, []).append(
+                (row.group, row.para, row.subject, row.teacher, row.room,
+                 row.changed, row.action))
+        return {
+            date: hashlib.sha256(repr(rows).encode()).hexdigest()
+            for date, rows in buckets.items()
+        }
 
     async def count_dates(self) -> int:
         result = await self.session.execute(select(func.count(func.distinct(CollegeLesson.date))))

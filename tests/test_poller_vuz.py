@@ -66,3 +66,48 @@ def test_vuz_change_flag_drives_broadcast():
     assert "vuz_result.get(\"full\")" in src or "vuz_result.get('full')" in src
     # Условие раннего выхода должно учитывать оба подразделения.
     assert "college_changed" in src and "not vuz_changed" in src
+
+
+def test_digest_by_date_detects_only_changed_date():
+    """Отпечаток даты меняется только у той даты, которую правили.
+
+    Раньше флаг «файл изменился» слал уведомления на все даты замен
+    сразу. Инцидент 26.10.2026: одна исправленная строка в файле очного
+    расписания дала 15 сообщений «расписание изменилось».
+    """
+    async def scenario():
+        engine, pool = await make_env()
+        try:
+            async with pool() as db:
+                repo = RequestsRepo(db)
+                today = dt.date.today()
+                d1, d2 = today, today + dt.timedelta(days=1)
+                await repo.college_lessons.replace_date(d1, [
+                    {"date": d1, "group": "ДП-26", "para": 1, "para_end": 1,
+                     "subject": "Архивное дело", "teacher": "Молчанова Н.А.",
+                     "room": "", "source_url": "", "source": "site",
+                     "changed": False, "action": ""},
+                ])
+                await repo.college_lessons.replace_date(d2, [
+                    {"date": d2, "group": "ДП-26", "para": 1, "para_end": 1,
+                     "subject": "Деловая культура", "teacher": "Золотухина Н.Е.",
+                     "room": "", "source_url": "", "source": "site",
+                     "changed": False, "action": ""},
+                ])
+                before = await repo.college_lessons.digest_by_date()
+
+                # Правим только первый день.
+                await repo.college_lessons.replace_date(d1, [
+                    {"date": d1, "group": "ДП-26", "para": 1, "para_end": 1,
+                     "subject": "Архивное дело (перенос)", "teacher": "Молчанова Н.А.",
+                     "room": "201", "source_url": "", "source": "site",
+                     "changed": False, "action": ""},
+                ])
+                after = await repo.college_lessons.digest_by_date()
+
+                changed = {d for d, h in after.items() if before.get(d) != h}
+                assert changed == {d1}, f"ожидали только {d1}, получили {changed}"
+                assert before[d2] == after[d2], "нетронутая дата изменила отпечаток"
+        finally:
+            await engine.dispose()
+    run(scenario())

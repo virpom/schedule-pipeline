@@ -114,10 +114,12 @@ async def poll_once(bot, session_pool, config: Config) -> list[tuple[datetime.da
         async with session_pool() as db:
             repo = RequestsRepo(db)
             had_lessons = await repo.college_lessons.count_lessons()
+            before = await repo.college_lessons.digest_by_date()
             try:
                 await sync_eios.materialize(repo)
             except Exception:
                 logging.exception("материализация не удалась")
+            after = await repo.college_lessons.digest_by_date()
 
         # Рассылаем, только если источник реально изменился.
         college_changed = result is not None and (result["ochoe"] or result["zameny"])
@@ -126,18 +128,22 @@ async def poll_once(bot, session_pool, config: Config) -> list[tuple[datetime.da
 
         today = datetime.date.today()
 
-        # Замены приходят на конкретные даты (листок выдаётся сразу на
-        # несколько дней, например СБ + ПН). Фиксированное окно «сегодня + 2»
-        # их теряло: замена на понедельник, пришедшая в пятницу, не попадала.
-        async with session_pool() as db:
-            repo = RequestsRepo(db)
-            dates = set(await repo.substitutions.get_dates(today))
+        # Что именно поменялось. Флаг «файл изменился» слишком грубый: в
+        # файле весь семестр, и одна исправленная строка тянула рассылку
+        # на все даты замен сразу — человек получал полтора десятка
+        # сообщений «расписание изменилось», хотя менялось одно.
+        #
+        # Материализация применяет и замены, и базовое расписание, поэтому
+        # отпечаток даты ловит изменения из обоих источников. Отдельный
+        # список дат замен больше не нужен: дата без замены тоже бывает
+        # изменённой, и пересечение с get_dates() её бы выбросило.
+        dates = {d for d, h in after.items() if before.get(d) != h}
 
-        if (result and result["ochoe"]) or vuz_changed:
-            # Сменилось базовое расписание — показываем ближайшие дни.
-            # Для вуза это обязательно: его замены лежат в substitution
-            # с датами, но базовое расписание тоже могло поменяться.
-            dates |= {today + datetime.timedelta(days=i) for i in range(3)}
+        # Изменилось, а отпечатка нет: правили день вне окна материализации
+        # (оно 14 дней). Молчать нельзя — данные другие, — поэтому честно
+        # показываем ближайшие дни.
+        if ((result and result["ochoe"]) or vuz_changed) and not dates:
+            dates = {today + datetime.timedelta(days=i) for i in range(3)}
 
         for date in sorted(dates):
             changes.append((date, had_lessons == 0 and date == today))
