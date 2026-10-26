@@ -69,6 +69,7 @@ def test_stale_threshold():
     class FakeSettings:
         def __init__(self, raw): self.raw = raw
         async def get(self, key): return self.raw
+        async def get_all(self): return {"poll_interval": "300"}
 
     class FakeRepo:
         def __init__(self, raw): self.settings = FakeSettings(raw)
@@ -87,3 +88,48 @@ def test_stale_threshold():
 
     broken = FakeRepo("не дата")
     assert asyncio.run(source_state.is_stale(broken)) is True
+
+
+def test_stale_threshold_follows_poll_interval():
+    """Порог устаревания не должен отставать от интервала опроса.
+
+    При /setpoll 3600 интервал 60 минут, а порог был зашит в 30 —
+    значит между опросами экран почти всегда показывал «данные
+    устарели». Предупреждение, которое горит постоянно, перестают
+    читать.
+    """
+    import asyncio
+    from tgbot.services import source_state
+
+    class FakeSettings:
+        def __init__(self, interval): self.interval = interval
+        async def get(self, key): return None
+        async def get_all(self): return {"poll_interval": str(self.interval)}
+
+    class FakeRepo:
+        def __init__(self, interval): self.settings = FakeSettings(interval)
+
+    async def threshold(interval):
+        return await source_state.stale_after(FakeRepo(interval))
+
+    # Дефолт: три интервала по 300 с = 15 мин, но не меньше 30.
+    assert asyncio.run(threshold(300)) == datetime.timedelta(minutes=30)
+    # Интервал вырос — порог вырос вместе с ним.
+    assert asyncio.run(threshold(3600)) == datetime.timedelta(minutes=180)
+    assert asyncio.run(threshold(1800)) == datetime.timedelta(minutes=90)
+
+
+def test_stale_after_survives_broken_setting():
+    """Мусор в настройке не должен ронять экран."""
+    import asyncio
+    from tgbot.services import source_state
+
+    class FakeSettings:
+        async def get(self, key): return None
+        async def get_all(self): return {"poll_interval": "не число"}
+
+    class FakeRepo:
+        settings = FakeSettings()
+
+    assert asyncio.run(source_state.stale_after(FakeRepo())) == \
+        datetime.timedelta(minutes=30)

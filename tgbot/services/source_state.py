@@ -21,9 +21,22 @@ LAST_OK = "last_sync_ok"
 # флаг врал: студент вуза видел «сайт колледжа не отвечает».
 LAST_OK_VUZ = "last_sync_ok_vuz"
 
-# Сколько ждём, прежде чем считать данные устаревшими. Три интервала опроса
-# по умолчанию (300 с) — запас на разовый сбой сети, но не на сутки.
+# Сколько ждём, прежде чем считать данные устаревшими. Зашитый порог
+# расходился с настройкой: `/setpoll 3600` давал интервал 60 минут при
+# пороге 30, и между опросами экран почти всегда показывал «данные
+# устарели» — предупреждение, которое быстро привыкают игнорировать.
+# Теперь порог считается от интервала (три опроса, не меньше 30 минут).
 STALE_AFTER = datetime.timedelta(minutes=30)
+
+
+async def stale_after(repo: RequestsRepo) -> datetime.timedelta:
+    """Порог устаревания: три интервала опроса, но не меньше 30 минут."""
+    raw = (await repo.settings.get_all()).get("poll_interval")
+    try:
+        interval = int(raw) if raw else 300
+    except (TypeError, ValueError):
+        interval = 300
+    return datetime.timedelta(seconds=max(interval * 3, int(STALE_AFTER.total_seconds())))
 
 
 async def mark_ok(repo: RequestsRepo) -> None:
@@ -49,7 +62,7 @@ async def is_stale_vuz(repo: RequestsRepo) -> bool:
     when = await last_ok_vuz(repo)
     if when is None:
         return True
-    return datetime.datetime.now() - when > STALE_AFTER
+    return datetime.datetime.now() - when > await stale_after(repo)
 
 
 async def last_ok(repo: RequestsRepo) -> datetime.datetime | None:
@@ -71,4 +84,4 @@ async def is_stale(repo: RequestsRepo) -> bool:
     when = await last_ok(repo)
     if when is None:
         return True
-    return datetime.datetime.now() - when > STALE_AFTER
+    return datetime.datetime.now() - when > await stale_after(repo)
