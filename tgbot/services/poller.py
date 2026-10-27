@@ -264,10 +264,8 @@ async def notify_new_schedule(bot, session_pool, changes: list[tuple[datetime.da
                 repo = RequestsRepo(db)
                 if user.role == "teacher" and user.teacher_name:
                     lessons = await repo.college_lessons.get_for_teacher_date(user.teacher_name, date)
-                    note = None
                 else:
                     lessons = await repo.college_lessons.get_for_group_date(user.group, date)
-                    note = await repo.no_lessons.get_note(date, user.group) if not lessons else None
             is_teacher = user.role == "teacher"
             if is_teacher:
                 gcg = group_course_map or None
@@ -282,7 +280,7 @@ async def notify_new_schedule(bot, session_pool, changes: list[tuple[datetime.da
                     group_course_group=gcg,
                 )
             else:
-                text = format_no_lessons(date, note)
+                text = format_no_lessons(date)
             photo = photos.random_photo(photos_path, weekday) if (user.send_image and not is_teacher) else None
             items.append((user.id, prefix + text, photo))
         for chat in chats:
@@ -291,11 +289,10 @@ async def notify_new_schedule(bot, session_pool, changes: list[tuple[datetime.da
             async with session_pool() as db:
                 repo = RequestsRepo(db)
                 lessons = await repo.college_lessons.get_for_group_date(chat.group, date)
-                note = await repo.no_lessons.get_note(date, chat.group) if not lessons else None
             if lessons:
                 text = format_day(date, lessons, bell, lunches, "brief")
             else:
-                text = format_no_lessons(date, note)
+                text = format_no_lessons(date)
             photo = photos.random_photo(photos_path, weekday)
             items.append((chat.id, prefix + text, photo))
 

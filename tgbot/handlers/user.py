@@ -674,13 +674,13 @@ async def _day_text(repo: RequestsRepo, user: User, date: datetime.date) -> str:
         if stale and last_ok is not None:
             text += format_stale_warning(last_ok)
     else:
-        note = None
-        if not _is_teacher(user):
-            note = await repo.no_lessons.get_note(date, user.group)
+        # Заметку из `no_lessons` больше не спрашиваем: писать в таблицу
+        # некому. Её заполнял старый парсер, разбирая «Занятий нет» из
+        # ячеек файла; после перехода на ЭИОС таких ячеек нет, и
+        # replace_date не вызывается ниоткуда. Четыре строки остались от
+        # 07–08.10 — таблицу не удаляю, чтобы не терять историю.
         published = await repo.schedule_files.get_hash(date) is not None
-        if note:
-            text = format_no_lessons(date, note)
-        elif published:
+        if published:
             # День был опубликован — значит на момент публикации пар не было.
             text = format_no_lessons(date)
             if stale:
