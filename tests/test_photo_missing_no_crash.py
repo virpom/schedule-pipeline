@@ -93,7 +93,9 @@ async def test_broadcast_survives_unexpected_exception():
     bot = _Bot(exc=RuntimeError("что-то новое"))
     items = [(1, "а", None), (2, "б", None)]
     sent = await broadcaster.broadcast_schedule(bot, items, rate=1000.0)
-    assert len(bot.calls) == 2, "цикл оборвался"
+    # Первый проход должен дойти до обоих: с плана 017 неудачники
+    # повторяются отдельным проходом, поэтому вызовов может быть больше.
+    assert bot.calls[:2] == [1, 2], f"цикл оборвался: {bot.calls}"
     assert sent == 0
 
 
@@ -101,7 +103,7 @@ async def test_broadcast_survives_unexpected_exception():
 async def test_broadcast_many_survives_exception():
     bot = _Bot(exc=RuntimeError("сбой"))
     sent = await broadcaster.broadcast_many(bot, [(1, "а"), (2, "б")], rate=1000.0)
-    assert len(bot.calls) == 2
+    assert bot.calls[:2] == [1, 2], f"цикл оборвался: {bot.calls}"
     assert sent == 0
 
 
