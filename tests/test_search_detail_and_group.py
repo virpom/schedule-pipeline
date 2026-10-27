@@ -24,19 +24,9 @@ def test_teacher_search_passes_detail():
     assert "user.bell_detail" in src, "поиск преподавателя игнорирует режим"
 
 
-def test_group_search_passes_detail():
-    src = inspect.getsource(uh.group_answer)
-    assert "user.bell_detail" in src, "поиск группы игнорирует режим"
-
-
 def test_teacher_answer_has_user_param():
     """Без `user` в сигнатуре настройку взять неоткуда."""
     sig = inspect.signature(uh.teacher_answer)
-    assert "user" in sig.parameters
-
-
-def test_group_answer_has_user_param():
-    sig = inspect.signature(uh.group_answer)
     assert "user" in sig.parameters
 
 

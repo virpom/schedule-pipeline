@@ -87,10 +87,6 @@ class TeacherSearch(StatesGroup):
     waiting = State()
 
 
-class GroupSearch(StatesGroup):
-    waiting = State()
-
-
 def _is_teacher(user: User) -> bool:
     return user.role == "teacher"
 
@@ -1048,38 +1044,6 @@ async def teacher_answer(message: Message, repo: RequestsRepo, user: User, state
     entries = [(d, by_date[d]) for d in sorted(by_date)]
     await message.answer(
         f"👨‍🏫 «{q}»:\n\n"
-        + format_teacher_results(entries, bell, lunches, user.bell_detail),
-        reply_markup=BACK_KB,
-    )
-
-
-@user_router.callback_query(F.data == "find_group")
-async def cb_find_group(cb: CallbackQuery, state: FSMContext):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Отмена", callback_data="find:cancel")],
-    ])
-    await cb.message.edit_text("👥 Напиши номер группы (например, ДП-26):", reply_markup=kb)
-    await state.set_state(GroupSearch.waiting)
-    await cb.answer()
-
-
-@user_router.message(GroupSearch.waiting)
-async def group_answer(message: Message, repo: RequestsRepo, user: User, state: FSMContext):
-    await state.clear()
-    group = message.text.strip().upper()
-    bell, lunches = await repo.bell_schedule.get_context()
-    start = datetime.date.today()
-    end = start + datetime.timedelta(days=6)
-    lessons = await repo.college_lessons.get_for_group_range(group, start, end)
-    if not lessons:
-        await message.answer(f"У группы «{group}» пар на неделю нет", reply_markup=BACK_KB)
-        return
-    by_date: dict[datetime.date, list] = {}
-    for l in lessons:
-        by_date.setdefault(l.date, []).append(l)
-    entries = [(d, by_date[d]) for d in sorted(by_date)]
-    await message.answer(
-        f"👥 «{group}» — неделя:\n\n"
         + format_teacher_results(entries, bell, lunches, user.bell_detail),
         reply_markup=BACK_KB,
     )
