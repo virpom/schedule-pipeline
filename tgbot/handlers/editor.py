@@ -516,6 +516,15 @@ async def _save_base(event, repo: RequestsRepo, state: FSMContext, via_cb: bool)
     data = await state.get_data()
     group = await editor_group(repo, event.from_user.id)
     if not group:
+        # Права могли отозвать, пока староста вводил три поля. Раньше
+        # здесь был голый return: человек проходил весь диалог и на
+        # последнем шаге не получал ни ошибки, ни подтверждения.
+        text = "Права редактора отозваны. Правка не сохранена."
+        if via_cb:
+            await event.message.edit_text(text, reply_markup=_no_rights_kb())
+        else:
+            await event.answer(text, reply_markup=_no_rights_kb())
+        await state.clear()
         return
     weekday = data["weekday"]
     parity = data["parity"]
@@ -819,6 +828,15 @@ async def _save_sub(event, repo: RequestsRepo, state: FSMContext, via_cb: bool):
     data = await state.get_data()
     group = await editor_group(repo, event.from_user.id)
     if not group:
+        # Права могли отозвать, пока староста вводил три поля. Раньше
+        # здесь был голый return: человек проходил весь диалог и на
+        # последнем шаге не получал ни ошибки, ни подтверждения.
+        text = "Права редактора отозваны. Правка не сохранена."
+        if via_cb:
+            await event.message.edit_text(text, reply_markup=_no_rights_kb())
+        else:
+            await event.answer(text, reply_markup=_no_rights_kb())
+        await state.clear()
         return
     date = datetime.date.fromisoformat(data["date"])
     para = data["para"]
