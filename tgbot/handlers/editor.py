@@ -9,6 +9,7 @@
   * все правки пишутся в журнал, последнюю можно откатить.
 """
 import datetime
+import json
 import logging
 from html import escape
 
@@ -962,6 +963,45 @@ async def cb_preview_day(cb: CallbackQuery, repo: RequestsRepo):
     await cb.answer()
 
 
+def _log_place(e) -> str:
+    """Где сделана правка — так, чтобы строки отличались.
+
+    У правок базы даты нет (она повторяется каждую неделю), и в журнале
+    все они выглядели одинаково: «база/3 пара». Три правки — пн, ср,
+    пт, все третьи пары — давали три неразличимые строки, и староста
+    не мог понять, какую откатывать. День недели и чётность уже лежат
+    в new_value, их пишет _save_base.
+    """
+    if e.layer == "base":
+        data = _json(e.new_value)
+        wd = data.get("weekday")
+        # В базе parity лежит как "EVEN"/"ODD", но старые записи и чужие
+        # руки могут дать нижний регистр — приводим.
+        par = PARITY_LABELS.get(str(data.get("parity") or "").upper(), "")
+        day = WEEKDAY_SHORT[wd - 1] if isinstance(wd, int) and 1 <= wd <= 7 else "?"
+        return f"база/{day} {par}/{e.para} пара".replace("  ", " ")
+    if e.layer == "sub":
+        day = e.date.strftime("%d.%m") if e.date else "?"
+        return f"замена {day}/{e.para} пара"
+    return f"{e.layer}/{e.para} пара"
+
+
+def _json(raw) -> dict:
+    """Разобрать JSON из журнала, не роняя экран.
+
+    Поле VARCHAR(1024) и пишется кодом, но экран правок не должен
+    зависать из-за одной битой строки: студент-староста увидит ошибку
+    вместо журнала и ничего не откатит.
+    """
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except (ValueError, TypeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
 @editor_router.callback_query(F.data == "ed:log")
 async def cb_log(cb: CallbackQuery, repo: RequestsRepo, state: FSMContext):
     # Состояние-сирота после «Назад» превращало любой текст в
@@ -978,11 +1018,7 @@ async def cb_log(cb: CallbackQuery, repo: RequestsRepo, state: FSMContext):
     else:
         for e in entries:
             when = e.created_at.strftime("%d.%m %H:%M") if e.created_at else "—"
-            where = ""
-            if e.layer == "base":
-                where = f"база/{e.para} пара"
-            elif e.layer == "sub":
-                where = f"замена {e.date.strftime('%d.%m') if e.date else ''}/{e.para} пара"
+            where = _log_place(e)
             lines.append(f"<b>{when}</b> · {where} · {e.action}")
     await cb.message.edit_text(
         "\n".join(lines),
@@ -1006,11 +1042,9 @@ async def cb_undo(cb: CallbackQuery, repo: RequestsRepo):
         await cb.answer("Нечего откатывать", show_alert=True)
         return
 
-    import json
-
     if last.layer == "base":
-        old = json.loads(last.old_value) if last.old_value else {}
-        new = json.loads(last.new_value) if last.new_value else {}
+        old = _json(last.old_value)
+        new = _json(last.new_value)
         weekday, parity = new.get("weekday"), new.get("parity")
 
         if last.action == "add":
@@ -1041,7 +1075,7 @@ async def cb_undo(cb: CallbackQuery, repo: RequestsRepo):
     else:
         # Замену возвращаем, а не просто снимаем: если поверх уже стояла
         # замена, set() её перезаписал, и удаление стёрло бы обе.
-        old = json.loads(last.old_value) if last.old_value else None
+        old = _json(last.old_value) or None
         if old and old.get("subject"):
             await repo.substitutions.set(
                 last.date, group, last.para, old.get("action") or "replace",
