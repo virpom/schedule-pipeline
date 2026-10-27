@@ -93,8 +93,15 @@ async def _tick(bot, session_pool, now: datetime.datetime) -> None:
                 repo = RequestsRepo(db)
                 if await repo.reminders.is_sent(user.id, today, key):
                     continue
+            # Сначала отправляем, потом помечаем. Раньше было наоборот, и
+            # при Forbidden/BadRequest звонок терялся навсегда: отметка
+            # уже стояла, повтор не приходил. Та же ловушка, что в
+            # alerts (план 050).
+            if not await send_message(bot, user.id, text):
+                continue
+            async with session_pool() as db:
+                repo = RequestsRepo(db)
                 await repo.reminders.mark_sent(user.id, today, key)
-            await send_message(bot, user.id, text)
 
 
 async def bell_loop(bot, session_pool, config: Config) -> None:
