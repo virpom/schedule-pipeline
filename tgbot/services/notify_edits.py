@@ -51,12 +51,16 @@ async def notify_group_about_edit(
     return sent
 
 
-async def snapshot_past_days(repo: RequestsRepo, days_back: int = 3) -> int:
+async def snapshot_past_days(repo: RequestsRepo, days_back: int = 14) -> int:
     """Сохранить в архив расписание прошедших дней.
 
     Учебный день кончился — фиксируем, что было (база + замены на тот
     момент). Раньше этого не делалось: если сайт обновит файл задним
     числом, история потерялась бы.
+
+    Глубина 14 дней, а не 3: при простое в четыре дня дыра закрывалась
+    навсегда. 14 — столько же, сколько материализуется вперёд, так что
+    архив покрывает всё, что ещё не успело выпасть из college_lesson.
     """
     today = datetime.date.today()
     saved = 0
@@ -69,8 +73,8 @@ async def snapshot_past_days(repo: RequestsRepo, days_back: int = 3) -> int:
             if await repo.snapshots.exists(date, group):
                 continue
             slots = await get_day_slots(repo, group, date)
-            if not slots:
-                continue
+            # Пустой день тоже сохраняем: иначе нельзя отличить «пар не
+            # было» от «бот не работал», и история врёт молчанием.
             await repo.snapshots.save(date, group, slots)
             saved += 1
     if saved:

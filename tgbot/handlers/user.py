@@ -1,4 +1,5 @@
 import datetime
+from types import SimpleNamespace
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
@@ -774,6 +775,26 @@ async def cb_bell(cb: CallbackQuery, repo: RequestsRepo, user: User):
 HIST_PAGE = 5
 
 
+async def _snapshot_lessons(repo: RequestsRepo, group: str, date: datetime.date):
+    """День из архива в виде объектов, которые понимает format_day.
+
+    `group` подставляем обязательно: в payload его нет, а без него
+    format_day берёт звонки по fallback I_IV — у 2–3 курса вторая пара
+    кончается в 12:20, а не в 12:40, и студент увидел бы не то время.
+    """
+    rows = await repo.snapshots.get(date, group)
+    if not rows:
+        return []
+    out = []
+    for d in rows:
+        item = SimpleNamespace(**d)
+        item.group = group
+        item.time_note = getattr(item, "time_note", "") or ""
+        item.para_end = getattr(item, "para_end", None) or item.para
+        out.append(item)
+    return out
+
+
 async def _hist_page(repo: RequestsRepo, user: User, before: datetime.date | None) -> tuple[str, InlineKeyboardMarkup]:
     """Окно из пяти дат, начиная с самой свежей раньше ``before``.
 
@@ -784,6 +805,12 @@ async def _hist_page(repo: RequestsRepo, user: User, before: datetime.date | Non
         dates = await repo.college_lessons.get_dates_for_teacher(user.teacher_name)
     else:
         dates = await repo.college_lessons.get_dates_for_group(user.group)
+        # day_snapshot — архив, который пишется каждый час. Он покрывает
+        # дни, которых в college_lesson уже нет: материализация идёт на
+        # 14 дней вперёд, а назад заполняется только по мере прошествия,
+        # и простой бота оставляет дыру навсегда. На проде 20–22.10 были
+        # в архиве и не видны в истории.
+        dates = set(dates) | set(await repo.snapshots.get_dates_for_group(user.group))
     past = sorted((d for d in dates if d < datetime.date.today()), reverse=True)
     if before:
         past = [d for d in past if d < before]
@@ -837,6 +864,8 @@ async def cb_hist_date(cb: CallbackQuery, repo: RequestsRepo, user: User):
     bell, lunches = await repo.bell_schedule.get_context()
     gcg = await _course_group_map(repo, user)
     lessons = await _user_lessons(repo, user, date)
+    if not lessons and not _is_teacher(user) and user.group:
+        lessons = await _snapshot_lessons(repo, user.group, date)
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ К истории", callback_data="hist")],
         [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
