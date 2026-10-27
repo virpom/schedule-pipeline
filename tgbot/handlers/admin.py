@@ -32,7 +32,6 @@ VALID_COURSE = {"ALL", "I_IV", "II_III", "VUZ"}
 class AdminState(StatesGroup):
     set_poll = State()
     set_rate = State()
-    set_deadline = State()
     set_night = State()
     set_support = State()
     set_broadcast = State()
@@ -99,7 +98,6 @@ def _settings_text(s: dict) -> str:
         f"Интервал опроса: <b>{s['poll_interval']} сек</b>\n"
         f"Скорость рассылки: <b>{s['notify_rate']} сообщ/сек</b>\n"
         f"Ночная пауза: <b>{night}</b>\n"
-        f"Дедлайн «занятий нет»: <b>{s['deadline_hour']}:00</b>\n"
         f"Ссылка поддержки: <b>{s['support_link'] or '—'}</b>"
     )
 
@@ -124,7 +122,6 @@ def _settings_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Интервал опроса", callback_data="adm:set:poll")],
         [InlineKeyboardButton(text="Скорость рассылки", callback_data="adm:set:rate")],
         [InlineKeyboardButton(text="Ночная пауза", callback_data="adm:set:night")],
-        [InlineKeyboardButton(text="Дедлайн «занятий нет»", callback_data="adm:set:deadline")],
         [InlineKeyboardButton(text="Ссылка поддержки", callback_data="adm:set:support")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back")],
     ])
@@ -1060,9 +1057,6 @@ SETTINGS: dict[str, _Setting] = {
     "rate": _Setting(AdminState.set_rate, "Введи скорость рассылки (сообщений/сек, 0–30):",
                      ("notify_rate",), _rate,
                      "Скорость рассылки: {} сообщ/сек"),
-    "deadline": _Setting(AdminState.set_deadline, "Введи час дедлайна (0–23):",
-                         ("deadline_hour",), lambda t: _num(t, 0, 23),
-                         "Дедлайн «занятий нет»: {}:00"),
     "night": _Setting(AdminState.set_night, "Введи ночное окно «HH:MM HH:MM»:",
                       ("night_start", "night_end"), _night, "Ночная пауза: {}–{}"),
     "support": _Setting(AdminState.set_support, "Отправь ссылку на группу поддержки:",

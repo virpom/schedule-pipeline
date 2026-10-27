@@ -10,7 +10,6 @@ DEFAULTS = {
     "notify_rate": "20",
     "night_start": "23:00",
     "night_end": "07:00",
-    "deadline_hour": "20",
     "support_link": "",
 }
 

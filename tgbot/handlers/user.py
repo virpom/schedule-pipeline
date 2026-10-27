@@ -690,13 +690,15 @@ async def _day_text(repo: RequestsRepo, user: User, date: datetime.date) -> str:
             # «занятий нет» нельзя.
             text = format_unverified(date, last_ok)
         else:
-            s = await repo.settings.get_all()
-            deadline = int(s.get("deadline_hour", 20) or 20)
-            now = datetime.datetime.now()
-            if 0 <= deadline <= 23 and now.hour >= deadline:
-                text = format_no_lessons(date)
-            else:
-                text = format_not_published(date)
+            # `schedule_file` означает «день материализован», а не «сайт
+            # выложил файл»: materialize пишет его на все 14 дней окна,
+            # включая пустые. Для окна это одно и то же, за окном — нет.
+            #
+            # Ветка с `deadline_hour` была недостижима: все даты в UI
+            # лежат внутри окна, значит `published` всегда True и до неё
+            # дело не доходило. Убрал настройку, которая ничего не
+            # делала, вместо того чтобы оставлять иллюзию работающей.
+            text = format_not_published(date)
         for i in range(1, 8):
             d = date + datetime.timedelta(days=i)
             nxt = await _user_lessons(repo, user, d)
