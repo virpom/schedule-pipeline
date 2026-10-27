@@ -245,8 +245,8 @@ infrastructure/database/
 ├── models/                15 таблиц SQLAlchemy
 ├── repo/                  репозитории (по одному на таблицу)
 └── migrations_runner.py   alembic при старте
-migrations/versions/       0001_baseline, 0002_editors
-tests/                     69 тестов, без сети и без Telegram
+migrations/versions/       0001..0011 (head — 0011_drop_bell_notify)
+tests/                     510 тестов, без сети и без Telegram
 ```
 
 ## Тесты
@@ -257,7 +257,7 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirement
 ```
 
 ```
-69 passed
+510 passed
 ```
 
 Покрыто: разбор xlsx/docx/звонков, чётность и её сдвиг, сборка дня из слоёв,
@@ -274,7 +274,7 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirement
 | [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | что делать, когда не работает |
 | [`docs/SOURCE-EIOS.md`](docs/SOURCE-EIOS.md) | разбор источника с доказательствами и объёмами |
 | [`docs/EDITORS.md`](docs/EDITORS.md) | проектная проработка редактора старост (частично историческая) |
-| [`docs/VUZ.md`](docs/VUZ.md) | расписание вуза: разбор источника (**не реализовано**) |
+| [`docs/VUZ.md`](docs/VUZ.md) | расписание вуза: разбор источника и показ |
 | [`docs/VUZ-PLAN.md`](docs/VUZ-PLAN.md) | план внедрения вуза: решения, этапы, риски |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | история изменений и список недоделанного |
 

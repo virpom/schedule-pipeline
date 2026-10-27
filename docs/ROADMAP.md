@@ -1,6 +1,6 @@
 # Что не так с проектом и что делать
 
-> Аудит от 16.10.2026. Ревизия кода: `5f0d2ef`.
+> Аудит от 16.10.2026, сверено с кодом 27.10.2026.
 > Разделы: **что менялось** → **что криво** → **что доделать**.
 
 ---
@@ -186,13 +186,13 @@ return [l for l in await self.get_all_lessons() if l.date == date and ...]
   0 коллизий, очная и очно-заочная формы
 - [x] Вуз, этап 3: выбор вуз/колледж и группы по факультетам — **сделано**
   (`unit:*` → `vu:fac` → `vu:form` → `vu:cr` → `vu:g`, справочник `vuz_group`)
-- [ ] Вуз, этап 4: показ значков 🔄 для замен вуза (данные уже пишутся)
-- [ ] Разнести `admin.py` (1099 строк) и `editor.py` (924 строки) по модулям
-- [ ] `_split_subject_teacher` — приватный дубль публичной функции
-  (`parsers/eios.py`), слить
+- [x] Вуз, этап 4: показ значков 🔄 для замен вуза — **сделано**
+  (проверено 27.10: 160 замен, 77 строк `changed=1`, «Химия (лек) 🔄»)
+- [ ] Разнести `admin.py` (1417 строк) и `editor.py` (1136 строк) по модулям
+- [x] `_split_subject_teacher` — приватного дубля в `editor.py` больше нет
 - [ ] `_skip_kb` и `cancel_kb` в `editor.py` — две одинаковые обёртки
 
-Всего тестов: **164**.
+Всего тестов: **510** (на 27.10.2026).
 
 ---
 
@@ -252,7 +252,5 @@ ssh virprom-home 'sqlite3 /home/virprom/schedule-pipeline/data/database.db "sele
 ### Тесты
 
 ```bash
-PYTHONPATH=. python tests/test_schedule_logic.py    # группы курсов
-PYTHONPATH=. python tests/test_schedule_layers.py   # чётность недели, merge_day
-PYTHONPATH=. python tests/test_parser.py            # разбор .docx
+.venv/bin/python -m pytest -q     # всё: 510 тестов, без сети и Telegram
 ```
