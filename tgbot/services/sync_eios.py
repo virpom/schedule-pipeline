@@ -388,6 +388,18 @@ def _merge_para_clash(slots: list) -> list:
     return [seen[p] for p in sorted(seen)]
 
 
+async def _publish_day(repo: RequestsRepo, date: datetime.date) -> None:
+    """Отметить день как опубликованный.
+
+    Нужно и полному ``materialize``, и пересборке одного дня после правки
+    старосты. Без этого день, пересобранный только правкой (например,
+    замена на дату за пределами 14-дневного окна), для студента выглядел
+    «расписание ещё не выложено» — он ждал публикации, которой не будет.
+    """
+    if await repo.schedule_files.get_hash(date) is None:
+        await repo.schedule_files.set_hash(date, f"eios-{date.isoformat()}")
+
+
 async def materialize_day(repo: RequestsRepo, date: datetime.date) -> int:
     """Пересобрать один день в ``college_lesson``.
 
@@ -436,6 +448,7 @@ async def materialize_day(repo: RequestsRepo, date: datetime.date) -> int:
                 "action": slot.action or "",
             })
     await repo.college_lessons.replace_date(date, rows)
+    await _publish_day(repo, date)
     return len(rows)
 
 
@@ -506,8 +519,7 @@ async def materialize(repo: RequestsRepo, days: int = MATERIALIZE_DAYS) -> int:
         # Расписание пришло с сайта — значит день опубликован. Раньше
         # schedule_file заполнял старый парсер, после перехода на ЭИОС её
         # перестали обновлять, и студент на пустой день видел «не выложено».
-        if await repo.schedule_files.get_hash(date) is None:
-            await repo.schedule_files.set_hash(date, f"eios-{date.isoformat()}")
+        await _publish_day(repo, date)
 
     log.info("материализовано %d дней в college_lesson", written)
     return written
