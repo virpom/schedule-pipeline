@@ -62,7 +62,15 @@ class BellScheduleRepo(BaseRepo):
             para: int,
             start: datetime.time,
             end: datetime.time,
+            h1_end: datetime.time | None = None,
+            h2_start: datetime.time | None = None,
     ) -> None:
+        # Перерыв между академическими часами. Без него пара становится
+        # сплошным блоком: экран теряет «09:00–09:45 / 09:50–10:35», а у
+        # bell_mode=full пропадают напоминания о перемене. На проде
+        # перерыв есть у 38 пар из 39 — структура реальная.
+        h1 = h1_end or end
+        h2 = h2_start or end
         await self.session.execute(
             insert(BellSchedule)
             .values(
@@ -70,13 +78,13 @@ class BellScheduleRepo(BaseRepo):
                 course_group=course_group,
                 para=para,
                 start=start,
-                h1_end=end,
-                h2_start=end,
+                h1_end=h1,
+                h2_start=h2,
                 end=end,
             )
             .on_conflict_do_update(
                 index_elements=["day_type", "course_group", "para"],
-                set_=dict(start=start, h1_end=end, h2_start=end, end=end),
+                set_=dict(start=start, h1_end=h1, h2_start=h2, end=end),
             )
         )
         await self.session.commit()

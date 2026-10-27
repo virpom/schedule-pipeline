@@ -789,7 +789,10 @@ async def set_bell(message: Message, repo: RequestsRepo, config: Config):
     if len(parts) != 5:
         await message.answer(
             "Формат: /setbell DAY_TYPE COURSE_GROUP PARA HH:MM-HH:MM\n"
-            "Пример: /setbell MONDAY I_IV 1 09:25-10:10"
+            "Пример: /setbell MONDAY I_IV 1 09:25-10:10\n\n"
+            "С перерывом внутри пары — четыре времени:\n"
+            "/setbell OTHER I_IV 2 10:45-11:30-11:55-12:40\n"
+            "(начало-конец 1-го часа-начало 2-го-конец пары)"
         )
         return
 
@@ -801,11 +804,19 @@ async def set_bell(message: Message, repo: RequestsRepo, config: Config):
 
     try:
         para = int(para_s)
-        start_s, end_s = time_s.split("-")
-        start = datetime.time.fromisoformat(start_s)
-        end = datetime.time.fromisoformat(end_s)
+        times = time_s.split("-")
+        if len(times) == 2:
+            start, end = (datetime.time.fromisoformat(t) for t in times)
+            h1_end = h2_start = None
+        elif len(times) == 4:
+            start, h1_end, h2_start, end = (
+                datetime.time.fromisoformat(t) for t in times)
+        else:
+            raise ValueError("ожидалось 2 или 4 времени")
     except ValueError:
-        await message.answer("Неверный формат. Пример: /setbell MONDAY I_IV 1 09:25-10:10")
+        await message.answer(
+            "Неверный формат. Пример: /setbell MONDAY I_IV 1 09:25-10:10\n"
+            "С перерывом: /setbell OTHER I_IV 2 10:45-11:30-11:55-12:40")
         return
 
     # Дальше проверки смысла: формат верный, а звонок бессмысленный.
@@ -821,6 +832,13 @@ async def set_bell(message: Message, repo: RequestsRepo, config: Config):
         await message.answer(
             f"Конец ({end:%H:%M}) должен быть позже начала ({start:%H:%M}).")
         return
+    # Перерыв должен лежать внутри пары, иначе экран нарисует
+    # «11:55–11:30» и напоминания встанут не по порядку.
+    if h1_end and h2_start and not start < h1_end <= h2_start < end:
+        await message.answer(
+            f"Перерыв должен идти по порядку: {start:%H:%M} < "
+            f"конец 1-го часа ≤ начало 2-го < {end:%H:%M}.")
+        return
     # ALL — это не «все курсы», а слот «Разговоров о важном» (para=0).
     # С para != 0 такая строка не отрисуется никогда.
     if course_group == "ALL" and para != 0:
@@ -829,8 +847,13 @@ async def set_bell(message: Message, repo: RequestsRepo, config: Config):
             "Для пар используй I_IV или II_III.")
         return
 
-    await repo.bell_schedule.upsert(day_type, course_group, para, start, end)
-    await message.answer(f"Сохранено: {day_type} {course_group} п{para} {start:%H:%M}–{end:%H:%M}")
+    await repo.bell_schedule.upsert(day_type, course_group, para, start, end,
+                                    h1_end=h1_end, h2_start=h2_start)
+    if h1_end and h2_start:
+        when = f"{start:%H:%M}–{h1_end:%H:%M} / {h2_start:%H:%M}–{end:%H:%M}"
+    else:
+        when = f"{start:%H:%M}–{end:%H:%M}"
+    await message.answer(f"Сохранено: {day_type} {course_group} п{para} {when}")
 
 
 # ---- admin callbacks ----

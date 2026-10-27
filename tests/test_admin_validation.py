@@ -225,8 +225,10 @@ class FakeBell:
     def __init__(self):
         self.rows = []
 
-    async def upsert(self, day_type, course_group, para, start, end):
-        self.rows.append((day_type, course_group, para, start, end))
+    async def upsert(self, day_type, course_group, para, start, end,
+                     h1_end=None, h2_start=None):
+        self.rows.append((day_type, course_group, para, start, end,
+                          h1_end, h2_start))
 
 
 class BellRepo(FakeRepo):
