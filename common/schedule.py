@@ -1,5 +1,6 @@
 import datetime
 import re
+from html import escape
 
 DAYS_OF_WEEK = ("ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС")
 # Последняя пара дня. Шестая бывает: в звонках для неё есть строка
@@ -291,7 +292,7 @@ def format_day(
             if getattr(lesson, "action", "") == SUB_CANCEL:
                 # Отменённую пару не выбрасываем из списка: иначе день
                 # выглядит пустым, и непонятно — отменили или не было.
-                lines.append(f"{p}) <s><b>{time_str}</b>  {lesson.subject}</s>"
+                lines.append(f"{p}) <s><b>{time_str}</b>  {_esc(lesson.subject)}</s>"
                              f"  ❌ <i>отменено</i>")
                 continue
             mark = f" {SUB_MARK}" if getattr(lesson, "changed", False) else ""
@@ -303,9 +304,9 @@ def format_day(
                 if bs and bs_last and detail != DETAIL_BRIEF:
                     time_str = f"{bs.start:%H:%M}–{bs_last.end:%H:%M}"
                 lines.append(f"{lesson.para}–{para_end}) <b>{time_str}</b>"
-                             f"  {lesson.subject}{mark}")
+                             f"  {_esc(lesson.subject)}{mark}")
             else:
-                lines.append(f"{p}) <b>{time_str}</b>  {lesson.subject}{mark}")
+                lines.append(f"{p}) <b>{time_str}</b>  {_esc(lesson.subject)}{mark}")
             if meta == "group":
                 # Суффикс @vuz — служебный, человеку он не нужен.
                 # strip_unit снимает @vuz и с каждого имени в склейке:
@@ -315,6 +316,7 @@ def format_day(
                 m = " · ".join(x for x in (names, lesson.room) if x)
             else:
                 m = " · ".join(x for x in (lesson.teacher, lesson.room) if x)
+            m = _esc(m)
             if m:
                 lines.append(m)
 
@@ -325,6 +327,20 @@ def format_day(
                 lines.append(_lunch_line(lunch))
 
     return "\n".join(lines)
+
+
+def _esc(value) -> str:
+    """Экранировать пользовательский текст перед вставкой в HTML.
+
+    Бот шлёт всё с parse_mode=HTML, а предмет, преподаватель, кабинет и
+    заметка приходят с сайта и из редактора. «Математика < 5» ломает
+    отправку целиком: Telegram отвечает BadRequest, и экран дня не
+    открывается ни у кого в группе.
+
+    Экранируем на выводе, а не на записи: поиск по предмету и
+    преподавателю идёт через LIKE, и «&lt;» в базе сломал бы его.
+    """
+    return escape(str(value)) if value is not None else ""
 
 
 def day_header(date: datetime.date) -> str:
@@ -340,7 +356,7 @@ def empty_day(date: datetime.date, note: str | None = None) -> str:
     """
     text = f"{day_header(date)}\n\nЗанятий нет 🙌"
     if note:
-        text += f"\n<i>{note}</i>"
+        text += f"\n<i>{escape(note)}</i>"
     return text
 
 

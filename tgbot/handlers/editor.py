@@ -10,6 +10,7 @@
 """
 import datetime
 import logging
+from html import escape
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -209,6 +210,20 @@ def _parity_mark(date: datetime.date) -> str:
     return "🔵 чётная" if week_parity(date, PARITY_OFFSET) == PARITY_EVEN else "🔴 нечётная"
 
 
+# Поля модели объявлены String(256/128/64..512), но SQLite длину не
+# проверяет — в предмет влезало сколько угодно. Тогда экран дня пробивал
+# лимит Telegram в 4096 символов и не открывался ни у кого в группе.
+# Берём минимум из объявленных длин: subject 256, room 64.
+_MAX_FIELD = {"предмет": 256, "преподаватель": 128, "кабинет": 64}
+
+
+def _too_long(value: str, what: str) -> str | None:
+    limit = _MAX_FIELD[what]
+    if len(value) <= limit:
+        return None
+    return f"Слишком длинный {what} ({len(value)} символов, максимум {limit})."
+
+
 def base_day_text(group: str, weekday: int, parity: str, slots: list[Slot]) -> str:
     lines = [
         f"{EDITOR_TITLE}",
@@ -222,7 +237,7 @@ def base_day_text(group: str, weekday: int, parity: str, slots: list[Slot]) -> s
     else:
         for s in slots:
             meta = " · ".join(x for x in (s.teacher, s.room) if x)
-            lines.append(f"<b>{s.para})</b> {s.subject}")
+            lines.append(f"<b>{s.para})</b> {escape(s.subject)}")
             if meta:
                 lines.append(f"      {meta}")
     lines += ["", "Нажми на пару, чтобы изменить 👇"]
@@ -244,7 +259,7 @@ def sub_day_text(group: str, date: datetime.date, slots: list[Slot]) -> str:
         for s in slots:
             meta = " · ".join(x for x in (s.teacher, s.room) if x)
             flag = " 🔄" if s.changed else ""
-            lines.append(f"<b>{s.para})</b> {s.subject}{flag}")
+            lines.append(f"<b>{s.para})</b> {escape(s.subject)}{flag}")
             if meta:
                 lines.append(f"      {meta}")
     lines += ["", "Нажми на пару, чтобы поставить замену 👇"]
@@ -487,7 +502,7 @@ async def cb_subject_suggestion(cb: CallbackQuery, repo: RequestsRepo, state: FS
     subject = suggestions[idx]
     await state.update_data(subject=subject)
     await cb.message.edit_text(
-        f"{EDITOR_TITLE}\n\nПредмет: <b>{subject}</b>\n\n"
+        f"{EDITOR_TITLE}\n\nПредмет: <b>{escape(subject)}</b>\n\n"
         "👨‍🏫 Теперь напиши <b>фамилию преподавателя</b> или нажми «Пропустить».",
         reply_markup=_skip_kb("ed:skip_teacher"),
     )
@@ -594,7 +609,8 @@ async def _save_base(event, repo: RequestsRepo, state: FSMContext, via_cb: bool)
             + (f" · уведомлено: {notified}" if notified else "")
             + "\n\n"
             f"{WEEKDAY_FULL[weekday - 1]}, {PARITY_LABELS.get(parity, parity)} неделя, "
-            f"{para} пара → <b>{subject}</b>\n\n" + base_day_text(group, weekday, parity, slots))
+            f"{para} пара → <b>{escape(subject)}</b>\n\n"
+            + base_day_text(group, weekday, parity, slots))
     if via_cb:
         await event.message.edit_text(text, reply_markup=paras_kb(weekday, parity, slots, last=max_para(group)))
         await event.answer()
@@ -799,7 +815,7 @@ async def cb_sub_subject_suggestion(cb: CallbackQuery, repo: RequestsRepo, state
         return
     await state.update_data(subject=suggestions[idx])
     await cb.message.edit_text(
-        f"{EDITOR_TITLE}\n\nПредмет: <b>{suggestions[idx]}</b>\n\n"
+        f"{EDITOR_TITLE}\n\nПредмет: <b>{escape(suggestions[idx])}</b>\n\n"
         "👨‍🏫 Напиши <b>фамилию преподавателя</b> или нажми «Пропустить».",
         reply_markup=_skip_kb("ed:sub_skip_teacher"),
     )
@@ -891,7 +907,7 @@ async def _save_sub(event, repo: RequestsRepo, state: FSMContext, via_cb: bool):
     text = (head
             + (f" · уведомлено: {notified}" if notified else "")
             + f"\n\n{date.strftime('%d.%m.%Y')}, {para} пара → "
-            f"<b>{subject}</b>\n\n" + sub_day_text(group, date, slots))
+            f"<b>{escape(subject)}</b>\n\n" + sub_day_text(group, date, slots))
     kb = sub_slots_kb(date.isoformat(), slots, subs_by_para, last=max_para(group))
     if via_cb:
         await event.message.edit_text(text, reply_markup=kb)
@@ -1118,10 +1134,14 @@ async def on_subject(message: Message, repo: RequestsRepo, state: FSMContext):
     if not subject:
         await message.answer("Напиши название предмета текстом.")
         return
+    bad = _too_long(subject, "предмет")
+    if bad:
+        await message.answer(bad)
+        return
     await state.update_data(subject=subject)
     data = await state.get_data()
     await message.answer(
-        f"{EDITOR_TITLE}\n\nПредмет: <b>{subject}</b>\n\n"
+        f"{EDITOR_TITLE}\n\nПредмет: <b>{escape(subject)}</b>\n\n"
         "👨‍🏫 Напиши <b>фамилию преподавателя</b> или нажми «Пропустить».",
         reply_markup=_skip_kb("ed:sub_skip_teacher" if data.get("layer") == "sub"
                               else "ed:skip_teacher"),
@@ -1131,7 +1151,12 @@ async def on_subject(message: Message, repo: RequestsRepo, state: FSMContext):
 
 @editor_router.message(EditorState.teacher)
 async def on_teacher(message: Message, repo: RequestsRepo, state: FSMContext):
-    await state.update_data(teacher=(message.text or "").strip())
+    teacher = (message.text or "").strip()
+    bad = _too_long(teacher, "преподаватель")
+    if bad:
+        await message.answer(bad)
+        return
+    await state.update_data(teacher=teacher)
     # Колбэк по слою, как в on_subject: у базовой правки даты нет, и
     # ed:sub_skip_room падал в _save_sub с KeyError: 'date' — правка
     # терялась молча, без ошибки и без подтверждения.
@@ -1146,7 +1171,12 @@ async def on_teacher(message: Message, repo: RequestsRepo, state: FSMContext):
 
 @editor_router.message(EditorState.room)
 async def on_room(message: Message, repo: RequestsRepo, state: FSMContext):
-    await state.update_data(room=(message.text or "").strip())
+    room = (message.text or "").strip()
+    bad = _too_long(room, "кабинет")
+    if bad:
+        await message.answer(bad)
+        return
+    await state.update_data(room=room)
     data = await state.get_data()
     if data.get("layer") == "sub":
         await _save_sub(message, repo, state, via_cb=False)

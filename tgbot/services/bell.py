@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import logging
+from html import escape
 
 from common.schedule import (
     BELL_FULL,
@@ -75,9 +76,9 @@ async def _tick(bot, session_pool, now: datetime.datetime) -> None:
             bs0 = bell.get((dt, cg, l.para)) or bell.get((dt, "I_IV", l.para))
             if bs0 and user.bell_mode in (BELL_START_END, BELL_FULL):
                 mark = " 🔄" if getattr(l, "changed", False) else ""
-                text = f"🔔 {l.para} пара · {l.subject}{mark}"
+                text = f"🔔 {l.para} пара · {escape(l.subject)}{mark}"
                 if l.room:
-                    text += f" · {l.room}"
+                    text += f" · {escape(l.room)}"
                 events.append((bs0.start, f"s:{l.para}", text))
 
             for p in range(l.para, para_end + 1):
