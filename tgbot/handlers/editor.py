@@ -472,9 +472,16 @@ async def _save_base(event, repo: RequestsRepo, state: FSMContext, via_cb: bool)
 
     old = await repo.base_lessons.get_day(group, weekday, parity)
     old_slot = next((l for l in old if l.para == para), None)
+    # `weeks` — часть ключа upsert. У вуза 1340 из 1971 строк имеют
+    # непустой список недель, поэтому upsert с дефолтным "" не находит
+    # строку и делает INSERT: пара 7 появляется дважды, а новая строка
+    # видна на всех неделях сразу (_fits_week для пустого weeks = True).
+    # Берём weeks у той строки, которую правим.
+    weeks = (old_slot.weeks or "") if old_slot else ""
 
     await repo.base_lessons.upsert(group, parity, weekday, para, subject, teacher, room,
-                                   source="manual", updated_by=event.from_user.id)
+                                   source="manual", updated_by=event.from_user.id,
+                                   weeks=weeks)
     await repo.edit_log.log(
         group, "base", "edit" if old_slot else "add", user_id=event.from_user.id,
         para=para,
@@ -484,7 +491,8 @@ async def _save_base(event, repo: RequestsRepo, state: FSMContext, via_cb: bool)
         old_value={"subject": old_slot.subject, "teacher": old_slot.teacher,
                    "room": old_slot.room} if old_slot else None,
         new_value={"weekday": weekday, "parity": parity, "para": para,
-                   "subject": subject, "teacher": teacher, "room": room},
+                   "subject": subject, "teacher": teacher, "room": room,
+                   "weeks": weeks},
     )
     # База повторяется каждую неделю — пересобираем все дни окна,
     # иначе студент увидит правку только после следующего опроса.
@@ -533,7 +541,10 @@ async def cb_del_base(cb: CallbackQuery, repo: RequestsRepo):
 
     lessons = await repo.base_lessons.get_day(group, weekday, parity)
     old_slot = next((l for l in lessons if l.para == para), None)
-    await repo.base_lessons.delete_slot(group, parity, weekday, para)
+    # `weeks` — часть условия удаления. Без неё delete_slot ищет строку
+    # с weeks='' и у вуза не удаляет ничего.
+    await repo.base_lessons.delete_slot(group, parity, weekday, para,
+                                        weeks=(old_slot.weeks or "") if old_slot else "")
     await repo.edit_log.log(
         group, "base", "delete", user_id=cb.from_user.id, para=para,
         old_value={"subject": old_slot.subject, "teacher": old_slot.teacher,
@@ -904,14 +915,18 @@ async def cb_undo(cb: CallbackQuery, repo: RequestsRepo):
             # пробовали вернуть old_value, а он пустой, и пара оставалась
             # на месте: «Откатить» не работало для добавленных пар.
             if weekday and parity:
-                await repo.base_lessons.delete_slot(group, parity, weekday, last.para)
+                await repo.base_lessons.delete_slot(group, parity, weekday, last.para,
+                                                    weeks=new.get("weeks", ""))
             msg = "↩️ Добавленная пара убрана"
         elif old.get("subject"):
             if weekday and parity:
                 await repo.base_lessons.upsert(
                     group, parity, weekday, last.para, old["subject"],
                     teacher=old.get("teacher", ""), room=old.get("room", ""),
-                    source="manual", updated_by=cb.from_user.id)
+                    source="manual", updated_by=cb.from_user.id,
+                    # weeks — часть ключа; без неё откат вузовской правки
+                    # создал бы дубль вместо возврата строки.
+                    weeks=old.get("weeks", ""))
             msg = f"↩️ Возвращено: <b>{old['subject']}</b>"
         else:
             # Пара была удалена — из журнала её содержимое не восстановить.
