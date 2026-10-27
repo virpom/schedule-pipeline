@@ -207,7 +207,13 @@ class CollegeLessonRepo(BaseRepo):
         return [l for l in result.scalars().all() if teacher_matches(l.teacher, teacher_name)]
 
     async def get_dates_for_teacher(self, teacher_name: str) -> list[datetime.date]:
-        surname = teacher_name.split()[0] if teacher_name.split() else teacher_name
+        # None сюда доходил только из состояния «роль teacher без
+        # фамилии», и падало с AttributeError. Защита на границе, а не
+        # на вызывающем: первый же новый вызов без проверки уронил бы
+        # обработчик.
+        if not (teacher_name or "").strip():
+            return []
+        surname = teacher_name.split()[0]
         result = await self.session.execute(
             select(CollegeLesson.date, CollegeLesson.teacher)
             .where(CollegeLesson.teacher.like(f"%{surname}%"))
@@ -217,7 +223,9 @@ class CollegeLessonRepo(BaseRepo):
         return sorted(dates, reverse=True)
 
     async def get_all_for_teacher(self, teacher_name: str) -> list[CollegeLesson]:
-        surname = teacher_name.split()[0] if teacher_name.split() else teacher_name
+        if not (teacher_name or "").strip():
+            return []
+        surname = teacher_name.split()[0]
         result = await self.session.execute(
             select(CollegeLesson)
             .where(CollegeLesson.teacher.like(f"%{surname}%"))

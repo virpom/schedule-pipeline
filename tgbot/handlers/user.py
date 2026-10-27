@@ -445,8 +445,11 @@ async def cb_role_student(cb: CallbackQuery, repo: RequestsRepo, user: User):
 
 
 @user_router.callback_query(F.data == "role:teacher")
-async def cb_role_teacher(cb: CallbackQuery, repo: RequestsRepo, user: User):
-    await repo.users.set_role(user.id, "teacher")
+async def cb_role_teacher(cb: CallbackQuery, user: User):
+    # Роль здесь НЕ пишется: если человек уйдёт на этом шаге, в базе
+    # останется role='teacher' без фамилии, и он застрянет — /start
+    # снова спросит роль, а выбрать фамилию будет негде. Роль ставит
+    # cb_teacher вместе с фамилией.
     await cb.message.edit_text("👨‍🏫 Где ты преподаёшь?", reply_markup=TEACHER_UNIT_KB)
     await cb.answer()
 
