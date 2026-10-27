@@ -23,6 +23,7 @@ from aiogram.types import (
 
 from common.schedule import (
     MAX_PARA,
+    max_para,
     PARITY_ANY,
     PARITY_EVEN,
     PARITY_LABELS,
@@ -104,11 +105,15 @@ def parity_kb(weekday: int) -> InlineKeyboardMarkup:
     ])
 
 
-def paras_kb(weekday: int, parity: str, slots: list[Slot], prefix: str = "ed:bs") -> InlineKeyboardMarkup:
-    """Список пар дня с текущим содержимым."""
+def paras_kb(weekday: int, parity: str, slots: list[Slot], prefix: str = "ed:bs",
+             last: int = MAX_PARA) -> InlineKeyboardMarkup:
+    """Список пар дня с текущим содержимым.
+
+    ``last`` — сколько слотов показать: 6 у колледжа, 8 у вуза.
+    """
     by_para = {s.para: s for s in slots}
     rows = []
-    for p in range(1, MAX_PARA + 1):
+    for p in range(1, last + 1):
         slot = by_para.get(p)
         label = f"{p}) {slot.subject[:24]}" if slot else f"{p}) — пусто"
         if slot and slot.changed:
@@ -149,10 +154,11 @@ def sub_dates_kb(group: str, today: datetime.date) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def sub_slots_kb(date_iso: str, slots: list[Slot], subs_by_para: dict) -> InlineKeyboardMarkup:
+def sub_slots_kb(date_iso: str, slots: list[Slot], subs_by_para: dict,
+                 last: int = MAX_PARA) -> InlineKeyboardMarkup:
     by_para = {s.para: s for s in slots}
     rows = []
-    for p in range(1, MAX_PARA + 1):
+    for p in range(1, last + 1):
         sub = subs_by_para.get(p)
         slot = by_para.get(p)
         if sub and sub.action == SUB_CANCEL:
@@ -331,7 +337,7 @@ async def _render_base_slots(cb: CallbackQuery, repo: RequestsRepo, group: str,
     slots = [Slot(l.para, l.subject, l.teacher, l.room) for l in lessons]
     await cb.message.edit_text(
         base_day_text(group, weekday, parity, slots),
-        reply_markup=paras_kb(weekday, parity, slots),
+        reply_markup=paras_kb(weekday, parity, slots, last=max_para(group)),
     )
 
 
@@ -510,10 +516,10 @@ async def _save_base(event, repo: RequestsRepo, state: FSMContext, via_cb: bool)
             f"{WEEKDAY_FULL[weekday - 1]}, {PARITY_LABELS.get(parity, parity)} неделя, "
             f"{para} пара → <b>{subject}</b>\n\n" + base_day_text(group, weekday, parity, slots))
     if via_cb:
-        await event.message.edit_text(text, reply_markup=paras_kb(weekday, parity, slots))
+        await event.message.edit_text(text, reply_markup=paras_kb(weekday, parity, slots, last=max_para(group)))
         await event.answer()
     else:
-        await event.answer(text, reply_markup=paras_kb(weekday, parity, slots))
+        await event.answer(text, reply_markup=paras_kb(weekday, parity, slots, last=max_para(group)))
 
 
 @editor_router.callback_query(F.data.startswith("ed:del:"))
@@ -538,7 +544,7 @@ async def cb_del_base(cb: CallbackQuery, repo: RequestsRepo):
     slots = [Slot(l.para, l.subject, l.teacher, l.room) for l in lessons]
     await cb.message.edit_text(
         "🗑 Пара убрана.\n\n" + base_day_text(group, weekday, parity, slots),
-        reply_markup=paras_kb(weekday, parity, slots),
+        reply_markup=paras_kb(weekday, parity, slots, last=max_para(group)),
     )
     await cb.answer("Убрано")
 
@@ -572,7 +578,7 @@ async def _render_sub_day(cb: CallbackQuery, repo: RequestsRepo, group: str,
     subs_by_para = {s.para: s for s in subs}
     await cb.message.edit_text(
         sub_day_text(group, date, slots),
-        reply_markup=sub_slots_kb(date.isoformat(), slots, subs_by_para),
+        reply_markup=sub_slots_kb(date.isoformat(), slots, subs_by_para, last=max_para(group)),
     )
 
 
@@ -788,7 +794,7 @@ async def _save_sub(event, repo: RequestsRepo, state: FSMContext, via_cb: bool):
             + (f" · уведомлено: {notified}" if notified else "")
             + f"\n\n{date.strftime('%d.%m.%Y')}, {para} пара → "
             f"<b>{subject}</b>\n\n" + sub_day_text(group, date, slots))
-    kb = sub_slots_kb(date.isoformat(), slots, subs_by_para)
+    kb = sub_slots_kb(date.isoformat(), slots, subs_by_para, last=max_para(group))
     if via_cb:
         await event.message.edit_text(text, reply_markup=kb)
         await event.answer()
