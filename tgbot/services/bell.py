@@ -14,6 +14,12 @@ from infrastructure.database.repo.requests import RequestsRepo
 from tgbot.services.broadcaster import send_message
 
 
+# Дата последней уборки bell_reminder. Хранится на функции, чтобы не
+# тащить `global` в горячий `_tick`; рестарт просто уберётся ещё раз —
+# лишний DELETE по индексу ничего не стоит.
+_purge = {"date": None}
+
+
 async def _tick(bot, session_pool, now: datetime.datetime) -> None:
     today = now.date()
     now_min = now.replace(second=0, microsecond=0).time()
@@ -23,6 +29,15 @@ async def _tick(bot, session_pool, now: datetime.datetime) -> None:
         bell, lunches = await repo.bell_schedule.get_context()
         subscribers = await repo.users.get_bell_subscribers()
         group_course_map = await repo.users.get_group_course_map()
+        # Раз в сутки прибираем вчерашние отметки: они мёртвые, is_sent
+        # смотрит только сегодня, а таблица растёт линейно. Строго `<`
+        # — иначе при перезапуске в течение дня человек получит повторные
+        # звонки.
+        if today != _purge["date"]:
+            removed = await repo.reminders.delete_before(today)
+            _purge["date"] = today
+            if removed:
+                logging.info("bell_reminder: удалено %d старых отметок", removed)
 
     dt = day_type_from_date(today)
     for user in subscribers:
