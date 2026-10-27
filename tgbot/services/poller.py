@@ -250,6 +250,10 @@ async def notify_new_schedule(bot, session_pool, changes: list[tuple[datetime.da
     items: list[tuple[int, str, str | None]] = []
     for date, is_new, groups in sorted(changes, key=lambda x: x[0]):
         weekday = photos.weekday_folder(date)
+        # Одно фото на день для всех. Раньше random_photo звался на каждого
+        # подписчика и делал os.listdir — 3080 чтений диска при 14 датах,
+        # и каждый получал свою картинку за один и тот же день.
+        day_photo = photos.random_photo(photos_path, weekday)
         prefix = "🆕 <b>Новое расписание</b>\n\n" if is_new else "🔄 <b>Расписание изменилось</b>\n\n"
         for user in subscribers:
             # Будить только тех, чья группа (или чьи пары) поменялась.
@@ -281,7 +285,7 @@ async def notify_new_schedule(bot, session_pool, changes: list[tuple[datetime.da
                 )
             else:
                 text = format_no_lessons(date)
-            photo = photos.random_photo(photos_path, weekday) if (user.send_image and not is_teacher) else None
+            photo = day_photo if (user.send_image and not is_teacher) else None
             items.append((user.id, prefix + text, photo))
         for chat in chats:
             if not chat.group:
@@ -293,8 +297,7 @@ async def notify_new_schedule(bot, session_pool, changes: list[tuple[datetime.da
                 text = format_day(date, lessons, bell, lunches, "brief")
             else:
                 text = format_no_lessons(date)
-            photo = photos.random_photo(photos_path, weekday)
-            items.append((chat.id, prefix + text, photo))
+            items.append((chat.id, prefix + text, day_photo))
 
     await broadcast_schedule(bot, items, rate=rate)
 
