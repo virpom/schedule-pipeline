@@ -591,7 +591,8 @@ async def cb_group(cb: CallbackQuery, repo: RequestsRepo, user: User):
     group = cb.data.split(":", 1)[1]
     await repo.users.set_role(user.id, "student")
     await repo.users.set_group(user.id, group)
-    await repo.users.set_unit(user.id, "college")
+    # `unit` больше не пишем: поле убрано миграцией 0010, подразделение
+    # кодируется суффиксом @vuz в самом имени группы.
     user.role = "student"
     user.group = group
     if user.course:
