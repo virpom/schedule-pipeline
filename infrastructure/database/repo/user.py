@@ -81,13 +81,6 @@ class UserRepo(BaseRepo):
         )
         await self.session.commit()
 
-    async def set_unit(self, user_id: int, unit: str) -> None:
-        """Подразделение: college | vuz."""
-        await self.session.execute(
-            update(User).where(User.id == user_id).values(unit=unit)
-        )
-        await self.session.commit()
-
     async def set_course(self, user_id: int, course: Optional[int]) -> None:
         await self.session.execute(
             update(User).where(User.id == user_id).values(course=course)

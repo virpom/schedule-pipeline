@@ -222,6 +222,25 @@ class CollegeLessonRepo(BaseRepo):
         dates = {d for d, t in result.all() if teacher_matches(t, teacher_name)}
         return sorted(dates, reverse=True)
 
+    async def is_vuz_teacher(self, teacher_name: str) -> bool:
+        """Преподаёт ли этот человек в вузе.
+
+        Заменяет `users.unit` для преподавателей: у них нет группы, и
+        суффикса `@vuz` взять неоткуда. Раньше `unit` оставался
+        «college» у всех троих, поэтому преподаватель вуза видел
+        колледжную сетку звонков — 5 пар вместо 8.
+        """
+        if not (teacher_name or "").strip():
+            return False
+        surname = teacher_name.split()[0]
+        result = await self.session.execute(
+            select(BaseLesson.group, BaseLesson.teacher)
+            .where(BaseLesson.group.like(f"%{VUZ_SUFFIX}"))
+            .where(BaseLesson.teacher.like(f"%{surname}%"))
+            .limit(200)
+        )
+        return any(teacher_matches(t, teacher_name) for _, t in result.all())
+
     async def get_all_for_teacher(self, teacher_name: str) -> list[CollegeLesson]:
         if not (teacher_name or "").strip():
             return []

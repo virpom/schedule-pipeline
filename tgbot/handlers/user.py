@@ -459,7 +459,6 @@ async def cb_role_switch(cb: CallbackQuery, repo: RequestsRepo, user: User):
     await repo.users.set_group(user.id, None)
     await repo.users.set_teacher_name(user.id, None)
     await repo.users.set_course(user.id, None)
-    await repo.users.set_unit(user.id, "college")
     await cb.message.edit_text("🎓 Кто ты?", reply_markup=ROLE_KB)
     await cb.answer()
 
@@ -533,13 +532,11 @@ async def cb_vuz_group(cb: CallbackQuery, repo: RequestsRepo, user: User):
     info = await repo.vuz_groups.get(name)
     await repo.users.set_role(user.id, "student")
     await repo.users.set_group(user.id, name)
-    await repo.users.set_unit(user.id, "vuz")
     course = info.course if info else None
     if course:
         await repo.users.set_course(user.id, course)
     user.role = "student"
     user.group = name
-    user.unit = "vuz"
     user.course = course
     text, kb = await _render_menu(repo, user)
     await cb.message.edit_text(
@@ -596,7 +593,6 @@ async def cb_group(cb: CallbackQuery, repo: RequestsRepo, user: User):
     await repo.users.set_unit(user.id, "college")
     user.role = "student"
     user.group = group
-    user.unit = "college"
     if user.course:
         text, kb = await _render_menu(repo, user)
         await cb.message.edit_text(f"Твоя группа: <b>{group}</b>\n\n{text}", reply_markup=kb)
@@ -761,8 +757,15 @@ async def cb_bell(cb: CallbackQuery, repo: RequestsRepo, user: User):
     видели «Разговоры о важном», деление на курсы и 5 пар вместо 8.
     """
     bell, lunches = await repo.bell_schedule.get_context()
-    is_vuz_user = (is_vuz(user.group) if user.group
-                   else user.unit == "vuz")
+    if user.group:
+        is_vuz_user = is_vuz(user.group)
+    elif _is_teacher(user):
+        # У преподавателя нет группы: подразделение берём из его пар.
+        # Раньше читался `user.unit`, но он у всех трёх преподавателей
+        # оставался «college» — сетка вуза не показывалась никогда.
+        is_vuz_user = await repo.college_lessons.is_vuz_teacher(user.teacher_name)
+    else:
+        is_vuz_user = False
     await cb.message.edit_text(format_bell(bell, lunches, vuz=is_vuz_user),
                                reply_markup=BACK_KB)
     await cb.answer()

@@ -19,7 +19,6 @@ class User(Base, TimestampMixin):
     role: Mapped[str] = mapped_column(String(16), server_default=text("'student'"))
     # college | vuz — какое подразделение выбрал человек. Группы обоих
     # живут в одних таблицах и различаются суффиксом @vuz.
-    unit: Mapped[str] = mapped_column(String(16), server_default=text("'college'"))
     group: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     teacher_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     course: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
