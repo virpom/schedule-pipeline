@@ -217,3 +217,68 @@ async def test_setvuzanchor_survives_rebuild_failure(admin, monkeypatch):
     msg = FakeMessage(f"/setvuzanchor {today}")
     await admin.set_vuz_anchor(msg, FakeRepo(), FakeConfig())
     assert "не удалось" in msg.last.lower()
+
+
+# --- /setbell -------------------------------------------------------------
+
+class FakeBell:
+    def __init__(self):
+        self.rows = []
+
+    async def upsert(self, day_type, course_group, para, start, end):
+        self.rows.append((day_type, course_group, para, start, end))
+
+
+class BellRepo(FakeRepo):
+    def __init__(self):
+        super().__init__()
+        self.bell_schedule = FakeBell()
+
+
+@pytest.mark.asyncio
+async def test_setbell_rejects_inverted_times(admin):
+    """Пара не может кончаться раньше, чем начинаться.
+
+    bell.py вешает «Конец пары» на end — напоминание ушло бы раньше
+    начала.
+    """
+    msg, repo = FakeMessage("/setbell OTHER I_IV 1 10:10-09:25"), BellRepo()
+    await admin.set_bell(msg, repo, FakeConfig())
+    assert "позже начала" in msg.last
+    assert not repo.bell_schedule.rows
+
+
+@pytest.mark.asyncio
+async def test_setbell_rejects_out_of_range_para(admin):
+    """99-я пара — мёртвая строка, 0 — слот «Разговоров о важном»."""
+    for text in ("/setbell OTHER I_IV 99 09:00-09:45",
+                 "/setbell OTHER I_IV 0 09:00-09:45"):
+        msg, repo = FakeMessage(text), BellRepo()
+        await admin.set_bell(msg, repo, FakeConfig())
+        assert "от 1 до 8" in msg.last, text
+        assert not repo.bell_schedule.rows, text
+
+
+@pytest.mark.asyncio
+async def test_setbell_rejects_all_with_para(admin):
+    """ALL — это слот «Разговоров о важном», а не «все курсы»."""
+    msg, repo = FakeMessage("/setbell OTHER ALL 3 09:00-09:45"), BellRepo()
+    await admin.set_bell(msg, repo, FakeConfig())
+    assert "Разговоров" in msg.last
+    assert not repo.bell_schedule.rows
+
+
+@pytest.mark.asyncio
+async def test_setbell_accepts_valid(admin):
+    msg, repo = FakeMessage("/setbell OTHER I_IV 3 09:00-10:30"), BellRepo()
+    await admin.set_bell(msg, repo, FakeConfig())
+    assert repo.bell_schedule.rows, msg.last
+    assert repo.bell_schedule.rows[0][2] == 3
+
+
+@pytest.mark.asyncio
+async def test_setbell_accepts_vuz_eighth(admin):
+    """У вуза 8 пар — восьмая должна приниматься."""
+    msg, repo = FakeMessage("/setbell OTHER VUZ 8 18:00-19:30"), BellRepo()
+    await admin.set_bell(msg, repo, FakeConfig())
+    assert repo.bell_schedule.rows

@@ -24,7 +24,9 @@ from tgbot.services.poller import notify_new_schedule
 admin_router = Router()
 
 VALID_DAY = {"MONDAY", "OTHER"}
-VALID_COURSE = {"ALL", "I_IV", "II_III"}
+# VUZ — сетка вуза (8 пар). Без неё /setbell не мог править её вообще,
+# хотя в базе эти строки есть и replace_bells их бережёт.
+VALID_COURSE = {"ALL", "I_IV", "II_III", "VUZ"}
 
 
 class AdminState(StatesGroup):
@@ -797,7 +799,7 @@ async def set_bell(message: Message, repo: RequestsRepo, config: Config):
     day_type, course_group, para_s, time_s = parts[1].upper(), parts[2].upper(), parts[3], parts[4]
 
     if day_type not in VALID_DAY or course_group not in VALID_COURSE:
-        await message.answer("DAY_TYPE: MONDAY|OTHER, COURSE_GROUP: ALL|I_IV|II_III")
+        await message.answer("DAY_TYPE: MONDAY|OTHER, COURSE_GROUP: ALL|I_IV|II_III|VUZ")
         return
 
     try:
@@ -807,6 +809,27 @@ async def set_bell(message: Message, repo: RequestsRepo, config: Config):
         end = datetime.time.fromisoformat(end_s)
     except ValueError:
         await message.answer("Неверный формат. Пример: /setbell MONDAY I_IV 1 09:25-10:10")
+        return
+
+    # Дальше проверки смысла: формат верный, а звонок бессмысленный.
+    # 8 — потому что у вуза 8 пар (_format_bell_vuz), у колледжа 6.
+    if not 1 <= para <= 8:
+        await message.answer(
+            "Номер пары — от 1 до 8.\n"
+            "0 зарезервирован под «Разговоры о важном», его так не задать.")
+        return
+    # Пара, кончающаяся раньше начала, ломает напоминания: bell.py
+    # вешает «Конец пары» на end, то есть раньше start.
+    if start >= end:
+        await message.answer(
+            f"Конец ({end:%H:%M}) должен быть позже начала ({start:%H:%M}).")
+        return
+    # ALL — это не «все курсы», а слот «Разговоров о важном» (para=0).
+    # С para != 0 такая строка не отрисуется никогда.
+    if course_group == "ALL" and para != 0:
+        await message.answer(
+            "COURSE_GROUP=ALL бывает только у «Разговоров о важном» (para=0).\n"
+            "Для пар используй I_IV или II_III.")
         return
 
     await repo.bell_schedule.upsert(day_type, course_group, para, start, end)
