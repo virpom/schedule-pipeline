@@ -8,7 +8,7 @@ from aiohttp import ClientSession
 from common.schedule import bells_group, format_day, format_no_lessons
 from config import Config
 from infrastructure.database.repo.requests import RequestsRepo
-from parsers import eios
+from parsers import eios, vuz
 from tgbot.services import alerts, photos, source_state, sync_eios, sync_vuz
 from tgbot.services.broadcaster import broadcast_schedule
 from tgbot.services.notify_edits import snapshot_past_days
@@ -25,10 +25,15 @@ async def _report_failure(bot, session_pool, config: Config, error: Exception) -
     try:
         async with session_pool() as db:
             repo = RequestsRepo(db)
-            if isinstance(error, eios.EiosParseError):
+            if isinstance(error, (eios.EiosParseError, vuz.VuzParseError)):
+                # Вуз бросает свой VuzParseError. Раньше он уходил в
+                # общий except у синхронизации вуза, и админ не узнавал,
+                # что структура файла вуза сломалась: бот молча работал
+                # на старых данных, пока не кончится окно 14 дней.
+                where = "вуза" if isinstance(error, vuz.VuzParseError) else ""
                 await alerts.alert(
                     bot, repo, config, "structure",
-                    f"Сайт отвечает, но файлы не разбираются:\n"
+                    f"Сайт отвечает, но файлы {where}не разбираются:\n"
                     f"<code>{_short(error)}</code>\n\n"
                     f"Скорее всего изменилась структура страницы или файлов. "
                     f"Расписание работает на последних данных, но новые "
@@ -132,8 +137,12 @@ async def poll_once(bot, session_pool, config: Config) -> list[tuple[datetime.da
                 for form in vuz_result.get("anchor_off") or []:
                     logging.error("якорь недель вуза не сходится (%s), "
                                   "проверь /setvuzanchor", form)
-        except Exception:
-            logging.exception("синхронизация вуза не удалась")
+        except Exception as e:
+            # Сбой вуза раньше писал только строку в лог. Колледж в том
+            # же цикле зовёт _report_failure: сломанная структура сама не
+            # починится, и человек должен узнать.
+            logging.warning("синхронизация вуза не удалась: %s", e)
+            await _report_failure(bot, session_pool, config, e)
 
         try:
             async with session_pool() as db:
