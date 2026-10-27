@@ -299,25 +299,9 @@ async def notify_new_schedule(bot, session_pool, changes: list[tuple[datetime.da
     await broadcast_schedule(bot, items, rate=rate)
 
 
-def _in_night(now: datetime.datetime, start_str: str, end_str: str) -> bool:
-    if not start_str or not end_str:
-        return False
-    try:
-        start = datetime.time.fromisoformat(start_str)
-        end = datetime.time.fromisoformat(end_str)
-    except ValueError:
-        return False
-    # Кривое значение могло попасть в БД до того, как /setnight начал
-    # отбивать часы с поясом. Сравнение aware с naive — TypeError,
-    # который поллер ловит общим except и молча перестаёт опрашивать.
-    if start.tzinfo is not None or end.tzinfo is not None:
-        return False
-    if start == end:
-        return False
-    t = now.time()
-    if start < end:
-        return start <= t < end
-    return t >= start or t < end
+# Логика ночного окна живёт в source_state: порог устаревания должен
+# знать то же окно, иначе ночью он объявляет сбой там, где его нет.
+_in_night = source_state.in_night
 
 
 async def poller_loop(bot, session_pool, config: Config) -> None:

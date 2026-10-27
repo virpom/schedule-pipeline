@@ -14,9 +14,15 @@ LAST_OK = datetime.datetime(2026, 10, 24, 9, 30)
 
 
 def test_warning_says_when_site_went_down():
+    """`when` — время последнего УСПЕХА, а не начала сбоя.
+
+    Прежний текст «Сайт колледжа не отвечает с 22:57» читался наоборот:
+    будто в 22:57 всё сломалось, хотя именно тогда всё и получилось.
+    """
     text = format_stale_warning(LAST_OK)
-    assert "24.10 09:30" in text
-    assert "Замены" in text
+    assert "24.10 в 09:30" in text
+    assert "Последняя успешная проверка" in text
+    assert "не отвечает с" not in text, "старая двусмысленная формулировка"
 
 
 def test_warning_without_any_successful_sync():
@@ -34,7 +40,7 @@ def test_no_lessons_has_no_warning_when_fresh():
 def test_unverified_does_not_claim_there_are_no_lessons():
     """Без связи с сайтом нельзя утверждать, что пар нет."""
     text = format_unverified(D, LAST_OK)
-    assert "не отвечает" in text
+    assert "Последняя успешная проверка" in text
     assert "Занятий нет 🙌" not in text
 
 
@@ -58,7 +64,7 @@ def test_warning_appended_not_replacing_schedule():
     base = "📅 Среда\n\n1) 09:00  Математика"
     full = base + format_stale_warning(LAST_OK)
     assert full.startswith(base)
-    assert "не отвечает" in full
+    assert "Последняя успешная проверка" in full
 
 
 def test_stale_threshold():

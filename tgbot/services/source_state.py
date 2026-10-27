@@ -62,7 +62,8 @@ async def is_stale_vuz(repo: RequestsRepo) -> bool:
     when = await last_ok_vuz(repo)
     if when is None:
         return True
-    return datetime.datetime.now() - when > await stale_after(repo)
+    settings = await repo.settings.get_all()
+    return datetime.datetime.now() - when > await _grace(repo, settings)
 
 
 async def last_ok(repo: RequestsRepo) -> datetime.datetime | None:
@@ -75,6 +76,63 @@ async def last_ok(repo: RequestsRepo) -> datetime.datetime | None:
         return None
 
 
+def in_night(now: datetime.datetime, start_str: str, end_str: str) -> bool:
+    """Попадает ли момент в ночное окно, когда поллер намеренно спит.
+
+    Вынесено из поллера: порог устаревания должен знать то же самое
+    окно, иначе ночью он объявляет сбой там, где его нет.
+    """
+    if not start_str or not end_str:
+        return False
+    try:
+        start = datetime.time.fromisoformat(start_str)
+        end = datetime.time.fromisoformat(end_str)
+    except ValueError:
+        return False
+    # Кривое значение могло попасть в БД до того, как /setnight начал
+    # отбивать часы с поясом. Сравнение aware с naive — TypeError,
+    # который поллер ловит общим except и молча перестаёт опрашивать.
+    if start.tzinfo is not None or end.tzinfo is not None:
+        return False
+    if start == end:
+        return False
+    t = now.time()
+    if start < end:
+        return start <= t < end
+    return t >= start or t < end
+
+
+def _night_length(settings: dict) -> datetime.timedelta:
+    """Длительность ночного окна. Кривое значение — ноль."""
+    try:
+        start = datetime.time.fromisoformat(settings["night_start"])
+        end = datetime.time.fromisoformat(settings["night_end"])
+    except (KeyError, TypeError, ValueError):
+        return datetime.timedelta()
+    if start == end:
+        return datetime.timedelta()
+    today = datetime.date.today()
+    delta = (datetime.datetime.combine(today, end)
+             - datetime.datetime.combine(today, start))
+    if delta < datetime.timedelta():
+        delta += datetime.timedelta(days=1)
+    return delta
+
+
+async def _grace(repo: RequestsRepo, settings: dict) -> datetime.timedelta:
+    """Порог с поправкой на ночь: пока поллер спит, данные не стареют.
+
+    Без поправки предупреждение «сайт не отвечает» висело с 23:27 до
+    07:05 — треть суток каждую ночь, хотя сайт жив. Порог на это время
+    растягивается на длину ночного окна.
+    """
+    grace = await stale_after(repo)
+    if in_night(datetime.datetime.now(),
+                settings.get("night_start"), settings.get("night_end")):
+        grace += _night_length(settings)
+    return grace
+
+
 async def is_stale(repo: RequestsRepo) -> bool:
     """Данные с сайта не обновлялись дольше порога.
 
@@ -84,4 +142,5 @@ async def is_stale(repo: RequestsRepo) -> bool:
     when = await last_ok(repo)
     if when is None:
         return True
-    return datetime.datetime.now() - when > await stale_after(repo)
+    settings = await repo.settings.get_all()
+    return datetime.datetime.now() - when > await _grace(repo, settings)
