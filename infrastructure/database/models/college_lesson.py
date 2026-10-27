@@ -30,6 +30,10 @@ class CollegeLesson(Base, TableNameMixin):
     teacher: Mapped[str] = mapped_column(String(128), default="")
     # 512, а не 64: у вуза здесь бывает ссылка на онлайн-пару.
     room: Mapped[str] = mapped_column(String(512), default="")
+    # Время пары из самой ячейки («с 18.00 до 21.00», «5-я пара»). Пять
+    # пар колледжа идут не по звонку: без этого студент видел время
+    # обычной пары и приходил на два часа раньше.
+    time_note: Mapped[str] = mapped_column(String(64), default="")
     source_url: Mapped[str] = mapped_column(String(512), default="")
     source: Mapped[str] = mapped_column(String(8), server_default=text("'site'"))
     # Пара пришла из листка замен. Нужен, чтобы пометить её значком в

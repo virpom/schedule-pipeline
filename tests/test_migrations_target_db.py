@@ -38,7 +38,7 @@ def test_migrations_go_to_given_path():
                 "select name from sqlite_master where type='table'")]
             assert len(tables) >= 16, f"таблиц всего {len(tables)}"
             version = conn.execute("select version_num from alembic_version").fetchone()
-            assert version[0] == "0008_room_len"
+            assert version[0] == "0009_time_note"
         finally:
             conn.close()
 
@@ -68,7 +68,7 @@ def test_schema_matches_models():
         try:
             cols = [r[1] for r in conn.execute("PRAGMA table_info(college_lesson)")]
             assert "id" in cols, "нет id — миграция 0007 не применилась"
-            assert len(cols) == 12, cols
+            assert len(cols) == 13, cols
 
             idx = list(conn.execute("PRAGMA index_list(college_lesson)"))
             # SQLite сам называет автоиндекс, поэтому проверяем флаг

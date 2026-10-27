@@ -105,6 +105,7 @@ async def replace_base_lessons(repo: RequestsRepo, lessons: list[ParsedLesson]) 
                 subject=(lesson.subject or "")[:128],
                 teacher=(lesson.teacher or "")[:128],
                 room="",
+                time_note=(lesson.time_note or "")[:64],
                 source=SOURCE_SITE,
                 updated_at=now,
             )
@@ -442,6 +443,7 @@ async def materialize_day(repo: RequestsRepo, date: datetime.date) -> int:
                 "subject": (slot.subject or "")[:256],
                 "teacher": (slot.teacher or "")[:128],
                 "room": (slot.room or "")[:64],
+                "time_note": (slot.time_note or "")[:64],
                 "source_url": "",
                 "source": SOURCE_SITE,
                 "changed": slot.changed,
@@ -507,6 +509,7 @@ async def materialize(repo: RequestsRepo, days: int = MATERIALIZE_DAYS) -> int:
                     "subject": (slot.subject or "")[:256],
                     "teacher": (slot.teacher or "")[:128],
                     "room": (slot.room or "")[:64],
+                    "time_note": (slot.time_note or "")[:64],
                     "source_url": "",
                     "source": SOURCE_SITE,
                     "changed": slot.changed,

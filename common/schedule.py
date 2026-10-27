@@ -164,6 +164,12 @@ def _para_brief(bs) -> str:
     return f"{bs.start:%H:%M}–{bs.end:%H:%M}"
 
 
+def _is_para_number_note(note: str, para: int) -> bool:
+    """«5-я пара» при para=5 — не время, а подтверждение номера."""
+    m = re.fullmatch(r"(\d+)-?я?\s*пара", note.strip().lower())
+    return bool(m) and int(m.group(1)) == para
+
+
 def _para_full(bs, lunch) -> str:
     if bs.h1_end == bs.h2_start:
         return f"{bs.start:%H:%M}–{bs.end:%H:%M}"
@@ -245,7 +251,14 @@ def format_day(
         para_end = getattr(lesson, "para_end", None) or lesson.para
         for p in range(lesson.para, para_end + 1):
             bs = bell.get((dt, cg, p)) or bell.get((dt, "I_IV", p))
-            if not bs:
+            # Время из самой ячейки сильнее звонка: пять пар колледжа
+            # идут не по сетке, и студент, прочитав звонок, приходил на
+            # два часа раньше. «5-я пара» — не время, а подтверждение
+            # номера: такой note дублирует звонок и только шумит.
+            note = (getattr(lesson, "time_note", "") or "").strip()
+            if note and not _is_para_number_note(note, p):
+                time_str = note
+            elif not bs:
                 time_str = f"пара {p}"
             elif detail == DETAIL_FULL:
                 inline = lunch if (lunch and lunch.position == "inside" and lunch.para == p) else None

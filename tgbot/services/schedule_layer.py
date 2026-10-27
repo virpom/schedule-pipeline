@@ -18,11 +18,11 @@ class Slot:
     """Итоговая пара дня — то, что видит студент."""
 
     __slots__ = ("para", "subject", "teacher", "room", "changed", "action",
-                 "comment", "group")
+                 "comment", "group", "time_note")
 
     def __init__(self, para: int, subject: str, teacher: str = "", room: str = "",
                  changed: bool = False, action: str = "", comment: str = "",
-                 group: str = ""):
+                 group: str = "", time_note: str = ""):
         self.para = para
         self.subject = subject
         self.teacher = teacher
@@ -30,6 +30,10 @@ class Slot:
         self.changed = changed      # пришло из замены
         self.action = action        # replace | add | ""
         self.comment = comment
+        # Время пары, если оно стоит в самой ячейке («с 18.00 до 21.00»).
+        # Пять пар колледжа идут не по звонку; без этого поля студент
+        # видел время обычной пары и приходил на два часа раньше.
+        self.time_note = time_note
         # Группа нужна format_day: по ней выбираются звонки и подпись
         # под парой. У преподавателя вуза слот собирается из base_lesson,
         # и без этого поля день вообще не открывался.
@@ -76,7 +80,7 @@ async def get_day_slots(repo: RequestsRepo, group: str, date: datetime.date,
             # и не понимал, отменили пару или её никогда не было.
             slots.append(Slot(lesson.para, lesson.subject, lesson.teacher,
                               lesson.room, changed=True, action=SUB_CANCEL,
-                              group=group))
+                              group=group, time_note=getattr(lesson, "time_note", "") or ""))
             continue
         if sub and sub.action in ("replace", "add"):
             slots.append(Slot(lesson.para, sub.subject, sub.teacher, sub.room,
@@ -84,7 +88,7 @@ async def get_day_slots(repo: RequestsRepo, group: str, date: datetime.date,
                               group=group))
         else:
             slots.append(Slot(lesson.para, lesson.subject, lesson.teacher, lesson.room,
-                              group=group))
+                              group=group, time_note=getattr(lesson, "time_note", "") or ""))
 
     # Замена на пару, которой нет в базовом расписании, — это новая пара,
     # а не «добавление». У вуза такие часты: перенос на субботу, разовая
