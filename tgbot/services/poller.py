@@ -187,7 +187,6 @@ async def poll_once(bot, session_pool, config: Config) -> list[tuple[datetime.da
         # материализация соберёт те же данные на новые даты.
         async with session_pool() as db:
             repo = RequestsRepo(db)
-            had_lessons = await repo.college_lessons.count_lessons()
             before = await repo.college_lessons.digest_by_date()
             try:
                 await sync_eios.materialize(repo)
@@ -230,8 +229,13 @@ async def poll_once(bot, session_pool, config: Config) -> list[tuple[datetime.da
             for i in range(3):
                 changed[today + datetime.timedelta(days=i)] = set()
 
+        # «Новое» — это день, которого в базе не было ДО материализации.
+        # Раньше здесь стояло `had_lessons == 0` — общее число пар во всей
+        # таблице, без привязки к дате. На непустой базе (3927 строк) оно
+        # неверно никогда, и студент вместо «🆕 Новое расписание» всегда
+        # видел «🔄 Изменилось», даже в первый день семестра.
         for date in sorted(changed):
-            changes.append((date, had_lessons == 0 and date == today, changed[date]))
+            changes.append((date, date not in before, changed[date]))
     return changes
 
 

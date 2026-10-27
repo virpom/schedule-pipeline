@@ -111,10 +111,6 @@ class CollegeLessonRepo(BaseRepo):
         )
         return list(result.scalars().all())
 
-    async def count_lessons(self) -> int:
-        result = await self.session.execute(select(func.count()).select_from(CollegeLesson))
-        return result.scalar_one()
-
     async def digest_by_date(self) -> dict[datetime.date, dict[str, str]]:
         """Отпечаток содержимого каждой группы на каждую дату.
 
