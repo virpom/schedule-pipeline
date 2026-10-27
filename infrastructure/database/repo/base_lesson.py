@@ -3,7 +3,7 @@ import datetime
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert
 
-from common.schedule import PARITY_ANY, teacher_matches
+from common.schedule import PARITY_ANY, VUZ_SUFFIX, teacher_matches
 from infrastructure.database.models import BaseLesson
 from infrastructure.database.repo.base import BaseRepo
 
@@ -119,6 +119,24 @@ class BaseLessonRepo(BaseRepo):
             select(BaseLesson.group).distinct().order_by(BaseLesson.group)
         )
         return [g for (g,) in result.all()]
+
+    async def get_teacher_groups(self, teacher_name: str, weekday: int) -> list[str]:
+        """Группы вуза, где преподаватель ведёт пары в этот день недели.
+
+        Нужен, чтобы собрать расписание преподавателя через итоговый
+        слой (с заменами), а не чтением base_lesson напрямую.
+        """
+        surname = (teacher_name or "").strip().split()[0] if (teacher_name or "").strip() else ""
+        if not surname:
+            return []
+        result = await self.session.execute(
+            select(BaseLesson.group).distinct().where(
+                BaseLesson.group.like(f"%{VUZ_SUFFIX}"),
+                BaseLesson.weekday == weekday,
+                BaseLesson.teacher.like(f"%{surname}%"),
+            )
+        )
+        return [r for r in result.scalars().all() if r]
 
     async def get_for_teacher(self, teacher_name: str, weekday: int | None = None,
                               week: int | None = None,

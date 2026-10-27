@@ -16,8 +16,6 @@ from common.schedule import (
     BELL_START_END,
     DETAIL_LABELS,
     DETAIL_ORDER,
-    PARITY_EVEN,
-    PARITY_ODD,
     bells_group,
     course_from_group,
     format_bell,
@@ -332,33 +330,62 @@ async def _require_identity(cb: CallbackQuery, user: User) -> bool:
 
 
 async def _vuz_teacher_day(repo: RequestsRepo, user: User, date: datetime.date):
-    """Пары преподавателя вуза на дату — из базового слоя вуза.
+    """Пары преподавателя вуза на дату — через итоговый слой.
 
-    Преподаватель может вести и колледж, и вуз: у вуза пары лежат в
-    base_lesson со списком недель, у колледжа — в college_lesson.
-    Поэтому источников два и они складываются.
+    Раньше читали base_lesson напрямую, и это давало две беды разом:
+    замены вуза не применялись (их 160), а одна пара дублировалась по
+    числу групп, где преподаватель ведёт, потому что ключ склейки в
+    format_day требует точного совпадения предмета.
+
+    Теперь идём по группам, где он ведёт пары в этот день, и берём
+    get_day_slots — тот же путь, что у студента: с заменами, weeks и
+    чётностью.
     """
-    from tgbot.services import sync_vuz
-    anchor = await sync_vuz.get_anchor(repo)
-    week = sync_vuz.vuz_week(date, anchor)
-    # Чётность считаем здесь: репозиторий не должен знать правило
-    # нумерации недель вуза. Без неё преподаватель видел пары чужой
-    # недели — те, которых в этот день нет ни у одной группы.
-    parity = PARITY_EVEN if week % 2 == 0 else PARITY_ODD
-    rows = await repo.base_lessons.get_for_teacher(
-        user.teacher_name, weekday=date.isoweekday(), week=week, parity=parity)
-    return [_vuz_lesson_to_slot(r) for r in rows]
+    from tgbot.services.schedule_layer import get_day_slots
+    groups = await repo.base_lessons.get_teacher_groups(
+        user.teacher_name, weekday=date.isoweekday())
+    slots = []
+    for group in groups:
+        for slot in await get_day_slots(repo, group, date):
+            # Преподаватель ведёт несколько групп: в чужой группе у него
+            # могут быть только свои пары.
+            if not _slot_is_his(slot, user.teacher_name):
+                continue
+            slot.date = date
+            slots.append(slot)
+    return _dedupe_slots(slots)
 
 
-def _vuz_lesson_to_slot(lesson):
-    """Привести пару вуза к виду, который понимает format_day.
+def _slot_is_his(slot, teacher_name: str) -> bool:
+    from common.schedule import teacher_matches
+    return teacher_matches(slot.teacher, teacher_name)
 
-    Группа нужна: по ней выбираются звонки (у вуза своя сетка, 8 пар
-    до 22:00) и она же подписывает пару.
+
+def _dedupe_slots(slots: list):
+    """Одна пара — одна строка.
+
+    Преподаватель в пяти группах давал пять одинаковых строк: format_day
+    склеивает по точному совпадению предмета, а «(лек.)» и «(лек)» —
+    разные ключи. Здесь ключ нормализован, а группы собираются подпись.
     """
-    from tgbot.services.schedule_layer import Slot
-    return Slot(lesson.para, lesson.subject, lesson.teacher, lesson.room,
-                group=lesson.group)
+    import re
+
+    def key(s):
+        return (s.para, s.para_end, re.sub(r"[\s.()]+", "", (s.subject or "")).lower(),
+                (s.teacher or "").lower())
+
+    merged: dict[tuple, object] = {}
+    for s in slots:
+        k = key(s)
+        prev = merged.get(k)
+        if prev is None:
+            merged[k] = s
+            continue
+        groups = [g for g in (prev.group or "").split(", ") if g]
+        if s.group and s.group not in groups:
+            groups.append(s.group)
+        prev.group = ", ".join(groups)
+    return list(merged.values())
 
 
 async def _user_lessons(repo: RequestsRepo, user: User, date: datetime.date):
@@ -371,7 +398,16 @@ async def _user_lessons(repo: RequestsRepo, user: User, date: datetime.date):
 
 async def _user_lessons_range(repo: RequestsRepo, user: User, start: datetime.date, end: datetime.date):
     if _is_teacher(user):
-        return await repo.college_lessons.get_for_teacher_range(user.teacher_name, start, end)
+        rows = list(await repo.college_lessons.get_for_teacher_range(
+            user.teacher_name, start, end))
+        # Вуз в неделю не попадал вовсе: у преподавателя только с
+        # вузовскими парами экран «Неделя» был пустым, хотя «Сегодня»
+        # показывал шесть дней с парами.
+        day = start
+        while day <= end:
+            rows.extend(await _vuz_teacher_day(repo, user, day))
+            day += datetime.timedelta(days=1)
+        return sorted(rows, key=lambda l: (l.date, l.para))
     return await repo.college_lessons.get_for_group_range(user.group, start, end)
 
 
