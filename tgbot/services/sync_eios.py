@@ -133,9 +133,17 @@ async def replace_substitutions(repo: RequestsRepo, subs: list[ParsedSub]) -> in
     )
 
     now = datetime.datetime.now()
+    today = now.date()
     seen: set[tuple[datetime.date, str, int]] = set()
     added = 0
     for sub in subs:
+        # Прошедшие даты в листке замен не нужны: редактор показывает
+        # «вчера..+6», материализация идёт вперёд, рассылка — по
+        # отпечаткам будущих дат. Раньше их отсекал get_dates(since=today)
+        # при сборке рассылки, а когда рассылку перевели на отпечатки,
+        # отсекать перестало что-либо: на проде 201 строка из 256.
+        if sub.date < today:
+            continue
         key = (sub.date, sub.group, sub.para)
         if key in seen or key in manual_keys:
             continue

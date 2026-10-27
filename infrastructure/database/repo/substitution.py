@@ -19,6 +19,20 @@ class SubstitutionRepo(BaseRepo):
         result = await self.session.execute(q)
         return result.scalar_one()
 
+    async def delete_before(self, date: datetime.date) -> int:
+        """Убрать замены за дни до указанного.
+
+        Раньше прошедшие отсекал get_dates(since=today) при сборке
+        рассылки; после перехода на отпечатки дат их перестал отсекать
+        кто-либо, и в таблице лежало 201 из 256 строк. Редактор
+        показывает «вчера..+6», поэтому храним с запасом в один день.
+        """
+        result = await self.session.execute(
+            delete(Substitution).where(Substitution.date < date)
+        )
+        await self.session.commit()
+        return result.rowcount or 0
+
     async def get_for_date(self, group: str, date: datetime.date) -> list[Substitution]:
         result = await self.session.execute(
             select(Substitution)
@@ -55,17 +69,3 @@ class SubstitutionRepo(BaseRepo):
         )
         await self.session.commit()
 
-    async def get_dates(self, since: datetime.date) -> list[datetime.date]:
-        """Даты, на которые есть замены, начиная с указанной.
-
-        Нужно для рассылки: листок замен выдаётся сразу на несколько дней
-        вперёд (например, на субботу и понедельник), и уведомлять надо про
-        каждую из этих дат, а не про фиксированное окно «сегодня + 2 дня».
-        """
-        result = await self.session.execute(
-            select(Substitution.date)
-            .where(Substitution.date >= since)
-            .distinct()
-            .order_by(Substitution.date)
-        )
-        return [d for (d,) in result.all()]

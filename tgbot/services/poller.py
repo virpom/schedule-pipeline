@@ -119,9 +119,17 @@ async def _purge_past(session_pool, today: datetime.date | None = None) -> None:
     _purge["date"] = today
     try:
         async with session_pool() as db:
-            removed = await RequestsRepo(db).college_lessons.delete_before(today)
+            repo = RequestsRepo(db)
+            removed = await repo.college_lessons.delete_before(today)
+            # Замены старше вчерашнего дня не нужны никому: редактор
+            # показывает ровно «вчера..+6», рассылка идёт по college_lesson.
+            # На проде 27.10 их было 201 из 256.
+            stale_subs = await repo.substitutions.delete_before(
+                today - datetime.timedelta(days=1))
         if removed:
             logging.info("college_lesson: удалено %d прошедших пар", removed)
+        if stale_subs:
+            logging.info("substitution: удалено %d прошедших замен", stale_subs)
     except Exception:
         # Не считаем день отработанным: повторим на следующем проходе.
         _purge["date"] = None

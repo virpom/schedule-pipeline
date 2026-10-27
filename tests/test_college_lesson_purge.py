@@ -43,12 +43,19 @@ def test_purge_once_per_day():
     poller._purge["date"] = None
     calls = []
 
+    class _Subs:
+        @staticmethod
+        async def delete_before(d):
+            return 0
+
     class _Repo:
         class college_lessons:
             @staticmethod
             async def delete_before(d):
                 calls.append(d)
                 return 5
+
+        substitutions = _Subs()
 
     real = poller.RequestsRepo
     poller.RequestsRepo = lambda db: _Repo()

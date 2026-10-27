@@ -27,9 +27,10 @@ async def make_env():
 def test_vuz_substitution_dates_are_collected():
     """Даты замен вуза попадают в выборку для рассылки.
 
-    notify_new_schedule получает список дат из substitutions.get_dates().
-    Если замены вуза там есть, студент вуза получит уведомление — его
-    расписание берётся из college_lesson по его группе.
+    Даты для рассылки больше не берутся из substitutions.get_dates():
+    поллер сравнивает отпечатки дат в college_lesson, а материализация
+    применяет и замены вуза, и замены сайта. Проверяем, что обе замены
+    легли в слой — иначе материализация их не увидит.
     """
     async def scenario():
         engine, pool = await make_env()
@@ -44,8 +45,10 @@ def test_vuz_substitution_dates_are_collected():
                     date=today + dt.timedelta(days=1), group="ТЭ-26ФП",
                     para=1, action="replace", subject="Замена", source="site")
 
-                dates = set(await repo.substitutions.get_dates(today))
-                assert today + dt.timedelta(days=1) in dates
+                for grp in ("ЭК-26-2@vuz", "ТЭ-26ФП"):
+                    subs = await repo.substitutions.get_for_date(
+                        grp, today + dt.timedelta(days=1))
+                    assert subs, f"замена {grp} потерялась"
         finally:
             await engine.dispose()
     run(scenario())

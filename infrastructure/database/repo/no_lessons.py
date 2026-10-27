@@ -1,7 +1,6 @@
 import datetime
 
-from sqlalchemy import delete, select
-from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy import select
 
 from infrastructure.database.models import NoLessons
 from infrastructure.database.repo.base import BaseRepo
@@ -14,8 +13,3 @@ class NoLessonsRepo(BaseRepo):
         )
         return result.scalar_one_or_none()
 
-    async def replace_date(self, date: datetime.date, rows: list[dict]) -> None:
-        await self.session.execute(delete(NoLessons).where(NoLessons.date == date))
-        if rows:
-            await self.session.execute(insert(NoLessons).values(rows))
-        await self.session.commit()

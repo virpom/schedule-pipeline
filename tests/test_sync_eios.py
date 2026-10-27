@@ -34,6 +34,24 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+def _future(odd: bool = False) -> datetime.date:
+    """Дата в будущем: прошедшие замены намеренно не записываются.
+
+    ``odd`` — нужна нечётная неделя (как у колледжа на 26.10.2026).
+    Раньше здесь стояла зашитая дата; она ушла в прошлое, а прошедшие
+    замены теперь не пишутся, и тесты падали по времени, а не по коду.
+    """
+    from tgbot.services.schedule_layer import PARITY_OFFSET, week_parity
+
+    date = datetime.date.today() + datetime.timedelta(days=10)
+    want = PARITY_ODD if odd else PARITY_EVEN
+    for _ in range(14):
+        if week_parity(date, PARITY_OFFSET) == want or not odd:
+            return date
+        date += datetime.timedelta(days=1)
+    return date
+
+
 async def _with_repo(tmp_path, body):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/db.sqlite")
     async with engine.begin() as conn:
@@ -61,6 +79,9 @@ def test_parity_offset_is_one():
     """
     from common.schedule import week_parity
 
+    # Дата зафиксирована: тест проверяет конкретную неделю, а не
+    # сегодняшнюю. Подвижная дата даёт то чётную, то нечётную — тест
+    # падал бы раз в неделю.
     d = datetime.date(2026, 10, 26)
     assert week_parity(d, 0) == PARITY_EVEN
     assert week_parity(d, PARITY_OFFSET) == PARITY_ODD
@@ -171,7 +192,7 @@ class ParsedSub:
 
 def test_replace_substitutions(tmp_path):
     async def body(repo):
-        d = datetime.date(2026, 10, 26)
+        d = _future()
         subs = [
             ParsedSub(d, "ДП-26", 1, "replace", "История", "Иванов И.И.", "ауд. 5"),
             ParsedSub(d, "ДП-26", 2, "cancel"),
@@ -188,7 +209,7 @@ def test_replace_substitutions(tmp_path):
 
 def test_replace_substitutions_is_full_replace(tmp_path):
     async def body(repo):
-        d = datetime.date(2026, 10, 26)
+        d = _future()
         await sync_eios.replace_substitutions(
             repo, [ParsedSub(d, "ДП-26", 1, "replace", "A"),
                    ParsedSub(d, "ДП-26", 2, "replace", "B")])
@@ -204,10 +225,10 @@ def test_replace_substitutions_is_full_replace(tmp_path):
 
 def test_resolve_groups_renames_and_skips():
     subs = [
-        ParsedSub(datetime.date(2026, 10, 26), "ЭОК-26", 1, "replace", "A"),
-        ParsedSub(datetime.date(2026, 10, 26), "ДОУ - 25", 1, "replace", "B"),
-        ParsedSub(datetime.date(2026, 10, 26), "ЭОф-26", 1, "replace", "C"),
-        ParsedSub(datetime.date(2026, 10, 26), "НЕТ-ТАКОЙ-99", 1, "replace", "D"),
+        ParsedSub(_future(), "ЭОК-26", 1, "replace", "A"),
+        ParsedSub(_future(), "ДОУ - 25", 1, "replace", "B"),
+        ParsedSub(_future(), "ЭОф-26", 1, "replace", "C"),
+        ParsedSub(_future(), "НЕТ-ТАКОЙ-99", 1, "replace", "D"),
     ]
     known = ["ЭОк-26", "ДОУ-25", "ЭО-26ФП"]
     got = sync_eios._resolve_groups(subs, known)
@@ -221,7 +242,7 @@ def test_base_plus_substitution_end_to_end(tmp_path):
     async def body(repo):
         from tgbot.services.schedule_layer import get_day_slots
 
-        d = datetime.date(2026, 10, 26)  # нечётная неделя у колледжа
+        d = _future(odd=True)  # нечётная неделя у колледжа
         await sync_eios.replace_base_lessons(repo, [
             ParsedLesson("ДП-26", 1, 1, 1, "Математика", "Иванов И.И."),
             ParsedLesson("ДП-26", 1, 1, 2, "Физика", "Петров П.П."),
@@ -355,10 +376,13 @@ def test_substitution_dates_include_weekend_and_monday(tmp_path):
             ParsedSub(sat, "ДП-26", 1, "replace", "A"),
             ParsedSub(mon, "ДП-26", 1, "replace", "B"),
         ])
-        dates = await repo.substitutions.get_dates(today)
-        assert sat in dates
-        assert mon in dates, "понедельник должен попасть в уведомление"
-        assert dates == sorted(dates)
+        # Даты замен больше не собираются отдельным get_dates: рассылка
+        # идёт по отпечаткам дат в college_lesson, а материализация
+        # покрывает 14 дней вперёд — поэтому и суббота, и понедельник
+        # туда попадают.
+        for d in (sat, mon):
+            subs = await repo.substitutions.get_for_date("ДП-26", d)
+            assert subs, f"замена на {d} потерялась"
 
     _run(_with_repo(tmp_path, body))
 
@@ -374,9 +398,8 @@ def test_substitution_dates_skip_past(tmp_path):
             ParsedSub(past, "ДП-26", 1, "replace", "A"),
             ParsedSub(future, "ДП-26", 1, "replace", "B"),
         ])
-        dates = await repo.substitutions.get_dates(today)
-        assert past not in dates
-        assert future in dates
+        assert not await repo.substitutions.get_for_date("ДП-26", past)
+        assert await repo.substitutions.get_for_date("ДП-26", future)
 
     _run(_with_repo(tmp_path, body))
 
@@ -388,8 +411,7 @@ def test_manual_substitution_on_same_slot_does_not_crash(tmp_path):
     вставлялись. Ручная правка должна побеждать.
     """
     async def body(repo):
-        import datetime as dt
-        d = dt.date(2026, 10, 26)
+        d = _future()
         await repo.substitutions.set(d, "ДП-26", 2, "replace", "РУЧНАЯ",
                                      "Староста С.С.", source="manual")
         subs = [
