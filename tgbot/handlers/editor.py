@@ -494,9 +494,9 @@ async def _save_base(event, repo: RequestsRepo, state: FSMContext, via_cb: bool)
                    "subject": subject, "teacher": teacher, "room": room,
                    "weeks": weeks},
     )
-    # База повторяется каждую неделю — пересобираем все дни окна,
-    # иначе студент увидит правку только после следующего опроса.
-    rebuilt = await _rebuild(repo)
+    # Правка базы повторяется каждую неделю, но только в свой день и
+    # свою чётность — пересобираем два дня окна из четырнадцати.
+    rebuilt = await _rebuild(repo, weekday=weekday, parity=parity)
     # Симметрично _save_sub. Без очистки состояние остаётся
     # EditorState.room, и любое следующее сообщение старосты («спасибо»)
     # перезаписывает пару с room="спасибо" — вместе с _rebuild и
@@ -550,7 +550,7 @@ async def cb_del_base(cb: CallbackQuery, repo: RequestsRepo):
         old_value={"subject": old_slot.subject, "teacher": old_slot.teacher,
                    "room": old_slot.room} if old_slot else None,
     )
-    await _rebuild(repo)
+    await _rebuild(repo, weekday=weekday, parity=parity)
     lessons = await repo.base_lessons.get_day(group, weekday, parity)
     slots = [Slot(l.para, l.subject, l.teacher, l.room) for l in lessons]
     await cb.message.edit_text(
@@ -933,8 +933,8 @@ async def cb_undo(cb: CallbackQuery, repo: RequestsRepo):
             msg = "↩️ Откат: пара была удалена (восстанови вручную)"
         # Студент читает college_lesson, а не слои: без пересборки откат
         # доедет до него только через следующий проход поллера. Для базы
-        # пересобираем все дни — правка повторяется каждую неделю.
-        await _rebuild(repo)
+        # пересобираем дни этого weekday и чётности, а не все 14.
+        await _rebuild(repo, weekday=weekday, parity=parity)
     else:
         # Замену возвращаем, а не просто снимаем: если поверх уже стояла
         # замена, set() её перезаписал, и удаление стёрло бы обе.
@@ -957,7 +957,8 @@ async def cb_undo(cb: CallbackQuery, repo: RequestsRepo):
     await cb_log(cb, repo)
 
 
-async def _rebuild(repo: RequestsRepo, date: datetime.date | None = None) -> bool:
+async def _rebuild(repo: RequestsRepo, date: datetime.date | None = None,
+                   weekday: int | None = None, parity: str | None = None) -> bool:
     """Пересобрать college_lesson после правки. ``False`` — не вышло.
 
     Студент читает готовую таблицу, а не слои. Без пересборки замена
@@ -965,7 +966,11 @@ async def _rebuild(repo: RequestsRepo, date: datetime.date | None = None) -> boo
     минут, а если сайт лежал, то вообще никогда.
 
     ``date`` задан — пересобираем только этот день (правка на дату).
-    Не задан — все дни окна (правка базы повторяется каждую неделю).
+    ``weekday`` задан — только дни окна на этот день недели и чётность:
+    правка базы повторяется каждую неделю, но не каждый день, а полная
+    пересборка 14 дней блокировала бота на 3.6 с (замер на проде
+    27.10: materialize 3.62 с против materialize_day 0.33 с).
+    Ничего не задано — все дни окна.
 
     Возвращает результат, чтобы обработчик не врал «✅ Сохранено», когда
     расписание не пересобралось. Правку при этом не откатываем: она уже
@@ -973,10 +978,12 @@ async def _rebuild(repo: RequestsRepo, date: datetime.date | None = None) -> boo
     """
     from tgbot.services import sync_eios
     try:
-        if date is None:
-            await sync_eios.materialize(repo)
-        else:
+        if date is not None:
             await sync_eios.materialize_day(repo, date)
+        elif weekday is not None:
+            await sync_eios.materialize_weekday(repo, weekday, parity)
+        else:
+            await sync_eios.materialize(repo)
         return True
     except Exception:
         logging.exception("не удалось пересобрать college_lesson")

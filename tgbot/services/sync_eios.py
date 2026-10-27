@@ -461,6 +461,34 @@ async def materialize_day(repo: RequestsRepo, date: datetime.date) -> int:
     return len(rows)
 
 
+async def materialize_weekday(repo: RequestsRepo, weekday: int,
+                              parity: str | None = None,
+                              days: int = MATERIALIZE_DAYS) -> int:
+    """Пересобрать дни окна, попадающие на ``weekday`` (и чётность).
+
+    Правка базы повторяется каждую неделю, но только в свой день и свою
+    чётность. Полная пересборка делала 1806 вызовов get_day_slots и
+    блокировала бота на 3.6 с (замер на проде 27.10); здесь — два дня из
+    четырнадцати.
+    """
+    from tgbot.services.schedule_layer import PARITY_OFFSET, week_parity
+
+    today = datetime.date.today()
+    written = 0
+    for offset in range(days):
+        date = today + datetime.timedelta(days=offset)
+        if date.isoweekday() != weekday:
+            continue
+        # PARITY_OFFSET обязателен: колледж считает чётность не по ISO,
+        # а со сдвигом — иначе пересобрали бы день чужой недели.
+        if parity and parity != PARITY_ANY and week_parity(date, PARITY_OFFSET) != parity:
+            continue
+        await materialize_day(repo, date)
+        written += 1
+    log.info("пересобрано %d дней на weekday=%s parity=%s", written, weekday, parity)
+    return written
+
+
 async def materialize(repo: RequestsRepo, days: int = MATERIALIZE_DAYS) -> int:
     """Собрать итоговое расписание из слоёв и положить в ``college_lesson``.
 

@@ -36,12 +36,14 @@ def test_undo_rebuilds_before_deleting_log_entry():
 
 
 def test_undo_rebuilds_base_for_all_days():
-    """Правка базы повторяется каждую неделю — пересобираем все дни.
+    """Правка базы повторяется каждую неделю — но не каждый день.
 
-    `_rebuild(repo)` без даты. Для замены — только тот день.
+    С плана 008 пересобираем дни этого weekday и чётности (два из
+    четырнадцати), а не всё окно: полная пересборка блокировала бота на
+    3.6 с. Для замены — только тот день.
     """
     src = inspect.getsource(editor.cb_undo)
-    assert "_rebuild(repo)" in src, "база пересобирается не полностью"
+    assert "_rebuild(repo, weekday=weekday" in src, "база пересобирается не по weekday"
     assert "_rebuild(repo, last.date)" in src, "замена пересобирается не на дату"
 
 
