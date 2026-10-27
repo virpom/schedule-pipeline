@@ -106,6 +106,28 @@ async def _report_parse_failure(bot, repo: RequestsRepo, config: Config,
         logging.exception("не удалось отправить тревогу о структуре")
 
 
+# Раз в сутки чистим прошедшие дни. Материализация идёт только вперёд,
+# поэтому старые даты не перезаписываются никогда и копятся навсегда
+# (на проде 27.10 — 1434 строки из 4359). История уже в day_snapshot.
+_purge = {"date": None}
+
+
+async def _purge_past(session_pool, today: datetime.date | None = None) -> None:
+    today = today or datetime.date.today()
+    if today == _purge["date"]:
+        return
+    _purge["date"] = today
+    try:
+        async with session_pool() as db:
+            removed = await RequestsRepo(db).college_lessons.delete_before(today)
+        if removed:
+            logging.info("college_lesson: удалено %d прошедших пар", removed)
+    except Exception:
+        # Не считаем день отработанным: повторим на следующем проходе.
+        _purge["date"] = None
+        logging.exception("не удалось почистить прошедшие пары")
+
+
 async def poll_once(bot, session_pool, config: Config) -> list[tuple[datetime.date, bool]]:
     """Синхронизировать расписание СПО из ЭИОС.
 
@@ -329,6 +351,7 @@ async def poller_loop(bot, session_pool, config: Config) -> None:
             interval = int(settings["poll_interval"])
             rate = float(settings["notify_rate"])
             now = datetime.datetime.now()
+            await _purge_past(session_pool)
 
             # Архив прошедших дней: раз в час, чтобы зафиксировать, что было
             # (сайт может обновить файл задним числом — история не потеряется).

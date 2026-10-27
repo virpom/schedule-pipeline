@@ -39,6 +39,23 @@ class CollegeLessonRepo(BaseRepo):
         await self.session.execute(insert(CollegeLesson).values(lessons))
         await self.session.commit()
 
+    async def delete_before(self, date: datetime.date) -> int:
+        """Убрать пары за дни до указанного.
+
+        Материализация идёт только вперёд (14 дней), поэтому прошедшие
+        даты не перезаписываются никогда и копятся навсегда. На проде
+        27.10 их было 1434 из 4359 — треть таблицы. История прошедших
+        дней уже лежит в ``day_snapshot``, так что эти строки мёртвые.
+
+        Строго `<`, не `<=`: сегодняшние пары нужны ещё весь день —
+        студент открывает расписание после последней пары.
+        """
+        result = await self.session.execute(
+            delete(CollegeLesson).where(CollegeLesson.date < date)
+        )
+        await self.session.commit()
+        return result.rowcount or 0
+
     async def replace_date(self, date: datetime.date, lessons: list[dict]) -> None:
         """Заменить все пары за дату одной транзакцией.
 
