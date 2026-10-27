@@ -35,13 +35,18 @@ class UserRepo(BaseRepo):
             language: str,
             username: Optional[str] = None,
     ) -> User:
+        # Колонка NOT NULL, а language_code у части клиентов Telegram
+        # приходит None: без подстановки новый пользователь падал с
+        # IntegrityError прямо в middleware и не мог записаться вообще.
         insert_stmt = (
             insert(User)
             .values(
                 id=user_id,
                 username=username,
-                full_name=full_name,
-                language=language,
+                # full_name тоже NOT NULL, а у аккаунтов без имени
+                # Telegram отдаёт пустую строку или None.
+                full_name=(full_name or "").strip() or f"Пользователь {user_id}",
+                language=language or "ru",
                 last_seen=datetime.datetime.now(),
                 subscribed=True,
                 send_image=False,

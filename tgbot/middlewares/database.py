@@ -24,7 +24,10 @@ class DatabaseMiddleware(BaseMiddleware):
             user = await repo.users.get_or_create_user(
                 event.from_user.id,
                 event.from_user.full_name,
-                event.from_user.language_code,
+                # language_code бывает None (Telegram отдаёт его не всем
+                # клиентам), а колонка NOT NULL: без подстановки новый
+                # пользователь падал с IntegrityError и не мог записаться.
+                event.from_user.language_code or "ru",
                 event.from_user.username,
             )
 
