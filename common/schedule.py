@@ -259,6 +259,10 @@ def format_day(
               or course_group_from_group(grp) if grp else None)
         lunch = lunches.get((dt, cg)) or lunches.get((dt, "I_IV"))
         para_end = getattr(lesson, "para_end", None) or lesson.para
+        # Спаренная пара — одно занятие на два часа. Печатаем одной
+        # строкой «1–2) 09:00–12:40», а не двумя с перерывом между ними:
+        # студент читал это как два разных предмета подряд.
+        paired = para_end > lesson.para
         for p in range(lesson.para, para_end + 1):
             bs = bell.get((dt, cg, p)) or bell.get((dt, "I_IV", p))
             # Время из самой ячейки сильнее звонка: пять пар колледжа
@@ -286,8 +290,17 @@ def format_day(
                              f"  ❌ <i>отменено</i>")
                 continue
             mark = f" {SUB_MARK}" if getattr(lesson, "changed", False) else ""
-            line = f"{p}) <b>{time_str}</b>  {lesson.subject}{mark}"
-            lines.append(line)
+            if paired:
+                if p > lesson.para:
+                    continue        # строка уже напечатана на первой паре
+                bs_last = (bell.get((dt, cg, para_end))
+                           or bell.get((dt, "I_IV", para_end)))
+                if bs and bs_last and detail != DETAIL_BRIEF:
+                    time_str = f"{bs.start:%H:%M}–{bs_last.end:%H:%M}"
+                lines.append(f"{lesson.para}–{para_end}) <b>{time_str}</b>"
+                             f"  {lesson.subject}{mark}")
+            else:
+                lines.append(f"{p}) <b>{time_str}</b>  {lesson.subject}{mark}")
             if meta == "group":
                 # Суффикс @vuz — служебный, человеку он не нужен.
                 # strip_unit снимает @vuz и с каждого имени в склейке:
