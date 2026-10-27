@@ -36,8 +36,11 @@ async def alert(bot: Bot, repo: RequestsRepo, config: Config, kind: str, text: s
     if await repo.settings.get(key) == digest:
         return  # об этом уже сообщили, не спамим
 
-    await repo.settings.set(key, digest)
-    await _send(bot, config, f"⚠️ <b>Проблема с расписанием</b>\n\n{text}")
+    if await _send(bot, config, f"⚠️ <b>Проблема с расписанием</b>\n\n{text}"):
+        # Запоминаем только доставленное. Раньше хеш писался до отправки,
+        # и если админ заблокировал бота, тревога считалась сообщённой и
+        # не повторялась никогда — тихая потеря на самом важном пути.
+        await repo.settings.set(key, digest)
     log.warning("тревога админу (%s): %s", kind, text)
 
 
@@ -47,15 +50,23 @@ async def clear(bot: Bot, repo: RequestsRepo, config: Config, kind: str, text: s
     if not await repo.settings.get(key):
         return  # тревоги не было — нечего и закрывать
 
-    await repo.settings.set(key, "")
-    await _send(bot, config, f"✅ <b>Восстановилось</b>\n\n{text}")
+    if await _send(bot, config, f"✅ <b>Восстановилось</b>\n\n{text}"):
+        await repo.settings.set(key, "")
     log.info("тревога снята (%s)", kind)
 
 
-async def _send(bot: Bot, config: Config, text: str) -> None:
+async def _send(bot: Bot, config: Config, text: str) -> bool:
+    """True, если доставлено хотя бы одному админу.
+
+    Вызывающий пишет отметку только при успехе: иначе неотправленная
+    тревога считалась бы сообщённой и больше бы не повторилась.
+    """
+    delivered = False
     for admin_id in config.tg_bot.admin_ids:
         try:
             await bot.send_message(admin_id, text)
+            delivered = True
         except TelegramAPIError as e:
             # Админ мог заблокировать бота — это не повод ронять поллер.
             log.warning("не удалось отправить тревогу %s: %s", admin_id, e)
+    return delivered
