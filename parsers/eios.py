@@ -488,6 +488,24 @@ def split_substitution_text(text: str) -> tuple[str, str, str]:
 # --- звонки ------------------------------------------------------------------
 
 
+_ROV_RE = re.compile(r"разговоры\s+о\s+важном", re.I)
+
+
+def _is_razgovory(cells: list[str]) -> bool:
+    """Строка «Разговоры о важном» — без номера пары, время в одной ячейке."""
+    return bool(_ROV_RE.search(" ".join(cells)))
+
+
+def _parse_range(text: str) -> tuple[datetime.time, datetime.time] | None:
+    """«с 9.00 до 9.20 – «Разговоры…»» → (09:00, 09:20)."""
+    found = _TIME_RE.findall(text or "")
+    if len(found) < 2:
+        return None
+    start = datetime.time(int(found[0][0]), int(found[0][1]))
+    end = datetime.time(int(found[1][0]), int(found[1][1]))
+    return (start, end) if start < end else None
+
+
 def parse_bells(data: bytes, day_type: str) -> list[BellSlot]:
     """Разобрать файл расписания звонков.
 
@@ -516,9 +534,19 @@ def parse_bells(data: bytes, day_type: str) -> list[BellSlot]:
             if len(cells) < 7:
                 continue
             m = re.match(r"\s*(\d)\s*пара", cells[0])
-            if not m:
+            if m:
+                para = int(m.group(1))
+            elif _is_razgovory(cells):
+                # «Разговоры о важном» — единственная строка без номера
+                # пары. Время лежит в одной ячейке («с 9.00 до 9.20»),
+                # а не в двух, поэтому разбираем отдельно и кладём в
+                # слот para=0 с course_group=ALL.
+                times = _parse_range(cells[1])
+                if times:
+                    halves.setdefault(0, {}).setdefault("ALL", []).append(times)
                 continue
-            para = int(m.group(1))
+            else:
+                continue
 
             for group_key, offset in (("I_IV", 1), ("II_III", 4)):
                 start_cell, end_cell = cells[offset], cells[offset + 2]
