@@ -84,6 +84,13 @@ async def send_photo(
         return await send_photo(bot, user_id, photo, caption)
     except exceptions.TelegramAPIError:
         logging.exception(f"Target [ID:{user_id}]: failed")
+    except OSError as e:
+        # FSInputFile читает файл лениво — FileNotFoundError и
+        # PermissionError вылетают уже внутри send_photo, а они не
+        # подклассы TelegramAPIError: без этой ветки исключение уходило
+        # наружу и роняло всю рассылку, а не одного получателя.
+        logging.error("Target [ID:%s]: файл фото недоступен: %s (%s)",
+                      user_id, photo, e)
     else:
         return True
     return False
@@ -100,10 +107,16 @@ async def broadcast_schedule(
     delay = 1.0 / max(rate, 0.1)
     sent = 0
     for user_id, text, photo in items:
-        if photo:
-            ok = await send_photo(bot, user_id, photo, text)
-        else:
-            ok = await send_message(bot, user_id, text)
+        # Второй уровень защиты: даже неожиданное исключение на одном
+        # получателе не должно лишать расписания остальных.
+        try:
+            if photo:
+                ok = await send_photo(bot, user_id, photo, text)
+            else:
+                ok = await send_message(bot, user_id, text)
+        except Exception:
+            logging.exception("broadcast: сбой на %s, продолжаем", user_id)
+            ok = False
         if ok:
             sent += 1
         await asyncio.sleep(delay)
@@ -128,8 +141,11 @@ async def broadcast_many(
     delay = 1.0 / max(rate, 0.1)
     sent = 0
     for user_id, text in items:
-        if await send_message(bot, user_id, text):
-            sent += 1
+        try:
+            if await send_message(bot, user_id, text):
+                sent += 1
+        except Exception:
+            logging.exception("broadcast: сбой на %s, продолжаем", user_id)
         await asyncio.sleep(delay)
     logging.info("broadcast_many: %d/%d sent at %.1f msg/s", sent, len(items), rate)
     return sent
