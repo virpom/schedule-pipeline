@@ -165,8 +165,18 @@ async def replace_vuz_groups(
     группу. По имени группы факультет не определить.
 
     Чистим только свою форму: очная и очно-заочная живут в одной таблице.
+    Но и по именам тоже: группа могла переехать из другой формы, а `name`
+    — первичный ключ. Без этого `add` падал с IntegrityError, и весь
+    проход вуза обрывался — расписание очной формы переставало
+    обновляться молча, на каждом следующем опросе тоже.
     """
-    await repo.session.execute(delete(VuzGroup).where(VuzGroup.form == form))
+    names = [g.name for g in groups]
+    # `in_([])` всегда ложно — пустой список ведёт себя как раньше.
+    await repo.session.execute(
+        delete(VuzGroup).where(
+            (VuzGroup.form == form) | (VuzGroup.name.in_(names))
+        )
+    )
     for group in groups:
         repo.session.add(
             VuzGroup(
