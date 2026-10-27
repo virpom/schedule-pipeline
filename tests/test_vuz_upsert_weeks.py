@@ -80,7 +80,8 @@ def test_editor_save_passes_weeks():
 
     src = inspect.getsource(editor._save_base)
     assert "weeks=weeks" in src, "_save_base не передаёт weeks"
-    assert 'old_slot.weeks or ""' in src, "weeks не берётся из правимой строки"
+    assert 'data.get("weeks")' in src, "weeks не берётся из выбора в меню пары"
+    assert '(l.weeks or "") == weeks' in src, "строка не сопоставлена по weeks"
 
 
 def test_editor_delete_passes_weeks():

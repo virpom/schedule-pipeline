@@ -124,12 +124,17 @@ def paras_kb(weekday: int, parity: str, slots: list[Slot], prefix: str = "ed:bs"
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def slot_actions_kb(weekday: int, parity: str, para: int, has_value: bool) -> InlineKeyboardMarkup:
+def slot_actions_kb(weekday: int, parity: str, para: int, has_value: bool,
+                    weeks: str = "") -> InlineKeyboardMarkup:
+    # weeks едет в callback: без него upsert создаёт дубль, а
+    # delete_slot не находит строку. 64 байта хватает — список недель
+    # у вуза короткий ("5,6,7,8" / "9,10,11,12,13").
+    wk = weeks or "_"
     rows = [[InlineKeyboardButton(
-        text="✏️ Изменить", callback_data=f"ed:edit:{weekday}:{parity}:{para}")]]
+        text="✏️ Изменить", callback_data=f"ed:edit:{weekday}:{parity}:{para}:{wk}")]]
     if has_value:
         rows.append([InlineKeyboardButton(
-            text="🗑 Убрать пару", callback_data=f"ed:del:{weekday}:{parity}:{para}")])
+            text="🗑 Убрать пару", callback_data=f"ed:del:{weekday}:{parity}:{para}:{wk}")])
     rows.append([InlineKeyboardButton(text="⬅️ Назад",
                                       callback_data=f"ed:bpar:{weekday}:{parity}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -334,7 +339,8 @@ async def cb_base_day(cb: CallbackQuery, repo: RequestsRepo):
 async def _render_base_slots(cb: CallbackQuery, repo: RequestsRepo, group: str,
                              weekday: int, parity: str):
     lessons = await repo.base_lessons.get_day(group, weekday, parity)
-    slots = [Slot(l.para, l.subject, l.teacher, l.room) for l in lessons]
+    slots = [Slot(l.para, l.subject, l.teacher, l.room, weeks=l.weeks or "")
+             for l in lessons]
     await cb.message.edit_text(
         base_day_text(group, weekday, parity, slots),
         reply_markup=paras_kb(weekday, parity, slots, last=max_para(group)),
@@ -375,17 +381,70 @@ async def cb_base_slot(cb: CallbackQuery, repo: RequestsRepo):
     _, _, weekday_s, parity, para_s = cb.data.split(":")
     weekday, para = int(weekday_s), int(para_s)
     lessons = await repo.base_lessons.get_day(group, weekday, parity)
-    slot = next((Slot(l.para, l.subject, l.teacher, l.room) for l in lessons
-                 if l.para == para), None)
+    here = [Slot(l.para, l.subject, l.teacher, l.room, weeks=l.weeks or "")
+            for l in lessons if l.para == para]
 
     text = (f"{EDITOR_TITLE}\n\n<b>{WEEKDAY_FULL[weekday - 1]}</b>, "
             f"{PARITY_LABELS.get(parity, parity)} неделя, <b>{para} пара</b>\n\n")
-    text += (f"Сейчас: <b>{slot.subject}</b>\n"
-             f"{' · '.join(x for x in (slot.teacher, slot.room) if x) or '—'}"
-             if slot else "<i>Пусто</i>")
+    if not here:
+        text += "<i>Пусто</i>"
+    elif len(here) == 1:
+        slot = here[0]
+        text += (f"Сейчас: <b>{slot.subject}</b>\n"
+                 f"{' · '.join(x for x in (slot.teacher, slot.room) if x) or '—'}")
+        if slot.weeks:
+            text += f"\n<i>недели: {slot.weeks}</i>"
+    else:
+        # У вуза в одном слоте живут несколько дисциплин по разным
+        # неделям (на проде 425 таких слотов). Раньше редактор брал
+        # первую и правил не ту.
+        text += (f"<b>{len(here)} варианта на разных неделях</b> — "
+                 f"какой правим?\n")
+        for i, slot in enumerate(here):
+            text += (f"\n{i + 1}. <b>{slot.subject}</b>"
+                     f"\n    недели: {slot.weeks or 'все'}")
+            meta = " · ".join(x for x in (slot.teacher, slot.room) if x)
+            if meta:
+                text += f"\n    {meta}"
     text += "\n\nЧто делаем? 👇"
-    await cb.message.edit_text(text, reply_markup=slot_actions_kb(
-        weekday, parity, para, has_value=slot is not None))
+    if len(here) > 1:
+        # Несколько вариантов — сначала выбрать недели, потом действие.
+        # Иначе «Изменить» угадала бы, какую строку править.
+        kb_rows = [[InlineKeyboardButton(
+            text=f"{i + 1}) {(s.subject or '')[:30]}",
+            callback_data=f"ed:pick:{weekday}:{parity}:{para}:{i}")]
+            for i, s in enumerate(here)]
+        kb_rows.append([InlineKeyboardButton(
+            text="⬅️ Назад", callback_data=f"ed:bp:{weekday}:{parity}")])
+        markup = InlineKeyboardMarkup(inline_keyboard=kb_rows)
+    else:
+        markup = slot_actions_kb(weekday, parity, para, has_value=bool(here))
+    await cb.message.edit_text(text, reply_markup=markup)
+    await cb.answer()
+
+
+@editor_router.callback_query(F.data.startswith("ed:pick:"))
+async def cb_pick_variant(cb: CallbackQuery, repo: RequestsRepo):
+    """Выбрать, какую из строк слота правим, и запомнить её weeks."""
+    _, _, weekday_s, parity, para_s, idx_s = cb.data.split(":")
+    weekday, para, idx = int(weekday_s), int(para_s), int(idx_s)
+    group = await editor_group(repo, cb.from_user.id)
+    if not group:
+        await cb.answer("Нет прав", show_alert=True)
+        return
+    lessons = await repo.base_lessons.get_day(group, weekday, parity)
+    here = [l for l in lessons if l.para == para]
+    if idx >= len(here):
+        await cb.answer("Устарело", show_alert=True)
+        return
+    weeks = here[idx].weeks or ""
+    await cb.message.edit_text(
+        f"{EDITOR_TITLE}\n\n<b>{WEEKDAY_FULL[weekday - 1]}</b>, "
+        f"{PARITY_LABELS.get(parity, parity)} неделя, <b>{para} пара</b>\n"
+        f"недели: <i>{weeks or 'все'}</i>\n\n"
+        f"Сейчас: <b>{here[idx].subject}</b>\n\nЧто делаем? 👇",
+        reply_markup=slot_actions_kb(
+            weekday, parity, para, has_value=True, weeks=weeks))
     await cb.answer()
 
 
@@ -395,11 +454,15 @@ async def cb_edit_base(cb: CallbackQuery, repo: RequestsRepo, state: FSMContext)
     if not group:
         await cb.answer("Нет прав", show_alert=True)
         return
-    _, _, weekday_s, parity, para_s = cb.data.split(":")
+    parts = cb.data.split(":")
+    _, _, weekday_s, parity, para_s = parts[:5]
     weekday, para = int(weekday_s), int(para_s)
+    # weeks приходит из кнопки; "_" — «все недели» (пустой список).
+    weeks = "" if len(parts) < 6 or parts[5] == "_" else parts[5]
 
     suggestions = await _subject_suggestions(repo, group)
-    await state.update_data(layer="base", weekday=weekday, parity=parity, para=para)
+    await state.update_data(layer="base", weekday=weekday, parity=parity, para=para,
+                            weeks=weeks)
     await state.set_state(EditorState.subject)
 
     await cb.message.edit_text(
@@ -470,14 +533,14 @@ async def _save_base(event, repo: RequestsRepo, state: FSMContext, via_cb: bool)
         await state.clear()
         return
 
+    # `weeks` — часть ключа upsert. У вуза в одном слоте живут
+    # несколько дисциплин по разным неделям (на проде 425 слотов), и без
+    # weeks upsert не находит строку, делает INSERT, а новая строка
+    # видна на всех неделях сразу. Недели выбраны человеком в меню пары.
+    weeks = (data.get("weeks") or "")
     old = await repo.base_lessons.get_day(group, weekday, parity)
-    old_slot = next((l for l in old if l.para == para), None)
-    # `weeks` — часть ключа upsert. У вуза 1340 из 1971 строк имеют
-    # непустой список недель, поэтому upsert с дефолтным "" не находит
-    # строку и делает INSERT: пара 7 появляется дважды, а новая строка
-    # видна на всех неделях сразу (_fits_week для пустого weeks = True).
-    # Берём weeks у той строки, которую правим.
-    weeks = (old_slot.weeks or "") if old_slot else ""
+    old_slot = next((l for l in old
+                     if l.para == para and (l.weeks or "") == weeks), None)
 
     await repo.base_lessons.upsert(group, parity, weekday, para, subject, teacher, room,
                                    source="manual", updated_by=event.from_user.id,
@@ -536,11 +599,17 @@ async def cb_del_base(cb: CallbackQuery, repo: RequestsRepo):
     if not group:
         await cb.answer("Нет прав", show_alert=True)
         return
-    _, _, weekday_s, parity, para_s = cb.data.split(":")
+    parts = cb.data.split(":")
+    _, _, weekday_s, parity, para_s = parts[:5]
     weekday, para = int(weekday_s), int(para_s)
+    weeks_in = "" if len(parts) < 6 or parts[5] == "_" else parts[5]
 
     lessons = await repo.base_lessons.get_day(group, weekday, parity)
-    old_slot = next((l for l in lessons if l.para == para), None)
+    old_slot = next((l for l in lessons
+                     if l.para == para and (l.weeks or "") == weeks_in), None)
+    if old_slot is None:
+        await cb.answer("Строка уже изменилась, открой день заново", show_alert=True)
+        return
     # `weeks` — часть условия удаления. Без неё delete_slot ищет строку
     # с weeks='' и у вуза не удаляет ничего.
     await repo.base_lessons.delete_slot(group, parity, weekday, para,

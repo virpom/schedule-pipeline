@@ -18,12 +18,12 @@ class Slot:
     """Итоговая пара дня — то, что видит студент."""
 
     __slots__ = ("para", "subject", "teacher", "room", "changed", "action",
-                 "comment", "group", "time_note", "para_end", "date")
+                 "comment", "group", "time_note", "para_end", "date", "weeks")
 
     def __init__(self, para: int, subject: str, teacher: str = "", room: str = "",
                  changed: bool = False, action: str = "", comment: str = "",
                  group: str = "", time_note: str = "", para_end: int | None = None,
-                 date=None):
+                 date=None, weeks: str = ""):
         self.para = para
         self.subject = subject
         self.teacher = teacher
@@ -42,6 +42,10 @@ class Slot:
         # Дата нужна недельному экрану: format_week группирует по ней.
         # У дневного экрана всегда одна дата, поэтому по умолчанию пусто.
         self.date = date
+        # Недели, на которых идёт пара. У вуза в одном слоте живут
+        # несколько дисциплин по разным неделям: без этого поля редактор
+        # схлопывал их в одну и правил не ту.
+        self.weeks = weeks
         # Группа нужна format_day: по ней выбираются звонки и подпись
         # под парой. У преподавателя вуза слот собирается из base_lesson,
         # и без этого поля день вообще не открывался.
