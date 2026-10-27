@@ -38,7 +38,7 @@ def test_migrations_go_to_given_path():
                 "select name from sqlite_master where type='table'")]
             assert len(tables) >= 16, f"таблиц всего {len(tables)}"
             version = conn.execute("select version_num from alembic_version").fetchone()
-            assert version[0] == "0010_drop_unit"
+            assert version[0] == "0011_drop_bell_notify"
         finally:
             conn.close()
 
