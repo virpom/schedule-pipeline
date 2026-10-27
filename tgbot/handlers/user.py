@@ -49,6 +49,16 @@ BACK_KB = InlineKeyboardMarkup(
     inline_keyboard=[[InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")]]
 )
 
+# С экрана дня и недели нужен путь к соседним дням: раньше оттуда был
+# только «В меню», и переход «сегодня -> завтра» стоил двух нажатий
+# через меню — на самое частое действие в боте.
+NAV_KB = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="📅 Сегодня", callback_data="day:today"),
+     InlineKeyboardButton(text="📅 Завтра", callback_data="day:tomorrow")],
+    [InlineKeyboardButton(text="🗓 7 дней", callback_data="week")],
+    [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
+])
+
 ROLE_KB = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="🎓 Студент", callback_data="role:student")],
     [InlineKeyboardButton(text="👨‍🏫 Преподаватель", callback_data="role:teacher")],
@@ -127,7 +137,7 @@ def menu_kb(user: User, support_link: str = "", is_editor: bool = False) -> Inli
     rows = [
         [InlineKeyboardButton(text="📅 Сегодня", callback_data="day:today"),
          InlineKeyboardButton(text="📅 Завтра", callback_data="day:tomorrow")],
-        [InlineKeyboardButton(text="🗓 Неделя", callback_data="week"),
+        [InlineKeyboardButton(text="🗓 7 дней", callback_data="week"),
          InlineKeyboardButton(text="📜 История", callback_data="hist")],
         [InlineKeyboardButton(text="🔎 Предмет", callback_data="find")],
         [InlineKeyboardButton(text="⏰ Звонки", callback_data="bell"),
@@ -759,7 +769,7 @@ async def _day_text(repo: RequestsRepo, user: User, date: datetime.date) -> str:
 
 
 async def _show_day(cb: CallbackQuery, repo: RequestsRepo, user: User, date: datetime.date):
-    await cb.message.edit_text(await _day_text(repo, user, date), reply_markup=BACK_KB)
+    await cb.message.edit_text(await _day_text(repo, user, date), reply_markup=NAV_KB)
     await cb.answer()
 
 
@@ -796,7 +806,7 @@ async def _week_text(repo: RequestsRepo, user: User) -> str:
 async def cb_week(cb: CallbackQuery, repo: RequestsRepo, user: User):
     if not await _require_identity(cb, user):
         return
-    await cb.message.edit_text(await _week_text(repo, user), reply_markup=BACK_KB)
+    await cb.message.edit_text(await _week_text(repo, user), reply_markup=NAV_KB)
     await cb.answer()
 
 
@@ -1081,7 +1091,7 @@ async def group_answer(message: Message, repo: RequestsRepo, user: User, state: 
 BOTTOM_KB = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="📅 Сегодня"),
                KeyboardButton(text="📅 Завтра"),
-               KeyboardButton(text="🗓 Неделя")]],
+               KeyboardButton(text="🗓 7 дней")]],
     resize_keyboard=True,
     is_persistent=True,
 )
@@ -1093,7 +1103,7 @@ async def btn_today(message: Message, repo: RequestsRepo, user: User):
         await message.answer("Сначала выбери группу или фамилию 🎯", reply_markup=ROLE_KB)
         return
     await message.answer(await _day_text(repo, user, datetime.date.today()),
-                         reply_markup=BACK_KB)
+                         reply_markup=NAV_KB)
 
 
 @user_router.message(F.text == "📅 Завтра")
@@ -1103,15 +1113,15 @@ async def btn_tomorrow(message: Message, repo: RequestsRepo, user: User):
         return
     await message.answer(
         await _day_text(repo, user, datetime.date.today() + datetime.timedelta(days=1)),
-        reply_markup=BACK_KB)
+        reply_markup=NAV_KB)
 
 
-@user_router.message(F.text == "🗓 Неделя")
+@user_router.message(F.text.in_({"🗓 7 дней", "🗓 Неделя"}))
 async def btn_week(message: Message, repo: RequestsRepo, user: User):
     if not _has_identity(user):
         await message.answer("Сначала выбери группу или фамилию 🎯", reply_markup=ROLE_KB)
         return
-    await message.answer(await _week_text(repo, user), reply_markup=BACK_KB)
+    await message.answer(await _week_text(repo, user), reply_markup=NAV_KB)
 
 
 @user_router.message(F.text, ~F.text.startswith("/"))
