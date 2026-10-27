@@ -8,6 +8,7 @@ from common.schedule import (
     bells_group,
     course_group_from_group,
     day_type_from_date,
+    VUZ_GROUP,
 )
 from config import Config
 from infrastructure.database.repo.requests import RequestsRepo
@@ -64,7 +65,11 @@ async def _tick(bot, session_pool, now: datetime.datetime) -> None:
         for l in lessons:
             cg = _cg(l.group)
             para_end = getattr(l, "para_end", None) or l.para
-            lunch = lunches.get((dt, cg)) or lunches.get((dt, "I_IV"))
+            # У вуза своего обеда нет: запасная ветка на I_IV присылала
+            # звонок «обед» посреди вузовской пары.
+            lunch = lunches.get((dt, cg))
+            if lunch is None and cg != VUZ_GROUP:
+                lunch = lunches.get((dt, "I_IV"))
 
             # start bell
             bs0 = bell.get((dt, cg, l.para)) or bell.get((dt, "I_IV", l.para))
@@ -96,7 +101,10 @@ async def _tick(bot, session_pool, now: datetime.datetime) -> None:
                 None,
             )
             if lunch_lesson:
-                lunch = lunches.get((dt, _cg(lunch_lesson.group))) or lunches.get((dt, "I_IV"))
+                cg2 = _cg(lunch_lesson.group)
+                lunch = lunches.get((dt, cg2))
+                if lunch is None and cg2 != VUZ_GROUP:
+                    lunch = lunches.get((dt, "I_IV"))
                 if lunch:
                     events.append((lunch.lunch_start, "lunch", "🍽 Обед"))
                     events.append((lunch.lunch_end, "lunch_end", "🍽 Обед закончился"))

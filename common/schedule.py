@@ -257,7 +257,12 @@ def format_day(
         grp = getattr(lesson, "group", None)
         cg = ((group_course_group or {}).get(grp)
               or course_group_from_group(grp) if grp else None)
-        lunch = lunches.get((dt, cg)) or lunches.get((dt, "I_IV"))
+        # У вуза своего обеда нет вообще, а строки с course_group='VUZ'
+        # в bell_lunch ноль. Запасная ветка на I_IV вставляла обед
+        # колледжа внутрь вузовской пары: 11:05 -> 11:30 (обед) -> 11:15.
+        lunch = lunches.get((dt, cg))
+        if lunch is None and cg != VUZ_GROUP:
+            lunch = lunches.get((dt, "I_IV"))
         para_end = getattr(lesson, "para_end", None) or lesson.para
         # Спаренная пара — одно занятие на два часа. Печатаем одной
         # строкой «1–2) 09:00–12:40», а не двумя с перерывом между ними:
