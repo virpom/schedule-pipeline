@@ -95,20 +95,23 @@ async def _tick(bot, session_pool, now: datetime.datetime) -> None:
                     if not (lunch and lunch.position == "after" and lunch.para == p):
                         events.append((bp.end, f"e:{p}", "🔔 Конец пары"))
 
-        # lunch (big break) — anchored to the para where lunch sits (2-я пара)
-        if user.bell_mode == BELL_FULL:
-            lunch_lesson = next(
-                (l for l in lessons if l.para <= 2 <= (getattr(l, "para_end", None) or l.para)),
-                None,
-            )
-            if lunch_lesson:
-                cg2 = _cg(lunch_lesson.group)
-                lunch = lunches.get((dt, cg2))
-                if lunch is None and cg2 != VUZ_GROUP:
-                    lunch = lunches.get((dt, "I_IV"))
-                if lunch:
-                    events.append((lunch.lunch_start, "lunch", "🍽 Обед"))
-                    events.append((lunch.lunch_end, "lunch_end", "🍽 Обед закончился"))
+        # Обед стоит там, где его положили в bell_lunch, а не на паре 2:
+        # раньше границы были зашиты двойкой, и в день, где пары
+        # начинаются с третьей, обед не приходил вовсе.
+        if user.bell_mode == BELL_FULL and lessons:
+            cg_first = _cg(lessons[0].group)
+            lunch = lunches.get((dt, cg_first))
+            if lunch is None and cg_first != VUZ_GROUP:
+                lunch = lunches.get((dt, "I_IV"))
+            lunch_para = getattr(lunch, "para", None)
+            # Обед приходит, только если на его паре в этот день вообще
+            # что-то стоит: в день из двух пар третьей не бывает.
+            if lunch is not None and any(
+                l.para <= lunch_para <= (getattr(l, "para_end", None) or l.para)
+                for l in lessons
+            ):
+                events.append((lunch.lunch_start, "lunch", "🍽 Обед"))
+                events.append((lunch.lunch_end, "lunch_end", "🍽 Обед закончился"))
 
         for t, key, text in events:
             if t != now_min:
