@@ -427,6 +427,19 @@ async def set_group_cmd(message: Message, repo: RequestsRepo, user: User):
         await message.answer("Формат: /group ТЭ-26ФП")
         return
     group = parts[1].strip().upper()
+    # `/group` — единственный текстовый ввод группы, и он писал вслепую:
+    # `/group ХХХ-99` записывался, день выходил пустым, и студент решал,
+    # что пар нет. Настоящая причина — опечатка.
+    known = await repo.base_lessons.get_groups()
+    if group not in known:
+        # Частая опечатка — одна буква или префикс; подсказываем похожие.
+        close = [g for g in known if group[:4] and (group[:4] in g or g[:4] in group)][:5]
+        hint = "\n\nМожет быть: " + ", ".join(close) if close else ""
+        await message.answer(
+            f"Группы «{group}» нет в расписании.{hint}\n\n"
+            f"Посмотреть список: /menu",
+            reply_markup=BACK_KB)
+        return
     await repo.users.set_role(user.id, "student")
     await repo.users.set_group(user.id, group)
     user.role = "student"
@@ -970,7 +983,7 @@ async def cb_find_teacher(cb: CallbackQuery, state: FSMContext):
 
 
 @user_router.message(TeacherSearch.waiting)
-async def teacher_answer(message: Message, repo: RequestsRepo, state: FSMContext):
+async def teacher_answer(message: Message, repo: RequestsRepo, user: User, state: FSMContext):
     await state.clear()
     q = message.text.strip()
     lessons = await repo.college_lessons.get_all_lessons()
@@ -988,7 +1001,8 @@ async def teacher_answer(message: Message, repo: RequestsRepo, state: FSMContext
         by_date.setdefault(l.date, []).append(l)
     entries = [(d, by_date[d]) for d in sorted(by_date)]
     await message.answer(
-        f"👨‍🏫 «{q}»:\n\n" + format_teacher_results(entries, bell, lunches),
+        f"👨‍🏫 «{q}»:\n\n"
+        + format_teacher_results(entries, bell, lunches, user.bell_detail),
         reply_markup=BACK_KB,
     )
 
@@ -1004,7 +1018,7 @@ async def cb_find_group(cb: CallbackQuery, state: FSMContext):
 
 
 @user_router.message(GroupSearch.waiting)
-async def group_answer(message: Message, repo: RequestsRepo, state: FSMContext):
+async def group_answer(message: Message, repo: RequestsRepo, user: User, state: FSMContext):
     await state.clear()
     group = message.text.strip().upper()
     bell, lunches = await repo.bell_schedule.get_context()
@@ -1019,7 +1033,8 @@ async def group_answer(message: Message, repo: RequestsRepo, state: FSMContext):
         by_date.setdefault(l.date, []).append(l)
     entries = [(d, by_date[d]) for d in sorted(by_date)]
     await message.answer(
-        f"👥 «{group}» — неделя:\n\n" + format_teacher_results(entries, bell, lunches),
+        f"👥 «{group}» — неделя:\n\n"
+        + format_teacher_results(entries, bell, lunches, user.bell_detail),
         reply_markup=BACK_KB,
     )
 
