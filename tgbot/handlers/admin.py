@@ -678,8 +678,15 @@ async def cb_broadcast_group(cb: CallbackQuery, config: Config, state: FSMContex
 
 
 @admin_router.message(AdminState.set_group_broadcast)
-async def m_group_broadcast(message: Message, state: FSMContext):
+async def m_group_broadcast(message: Message, repo: RequestsRepo, state: FSMContext):
     group = message.text.strip().upper()
+    # Та же проверка, что в /broadcast_group. Без неё опечатка («МУСОР»)
+    # принималась за чистую монету: админ вводил текст и видел
+    # «Отправить 0 пользователям» вместо «такой группы нет».
+    users = await repo.users.get_by_group(group)
+    if not users:
+        await message.answer(f"В группе {group} никого нет. Проверь номер.")
+        return
     await state.update_data(broadcast_target=group)
     await state.set_state(AdminState.set_broadcast)
     await message.answer(f"Введи текст сообщения для группы {group}:")
