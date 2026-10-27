@@ -18,11 +18,11 @@ class Slot:
     """Итоговая пара дня — то, что видит студент."""
 
     __slots__ = ("para", "subject", "teacher", "room", "changed", "action",
-                 "comment", "group", "time_note")
+                 "comment", "group", "time_note", "para_end")
 
     def __init__(self, para: int, subject: str, teacher: str = "", room: str = "",
                  changed: bool = False, action: str = "", comment: str = "",
-                 group: str = "", time_note: str = ""):
+                 group: str = "", time_note: str = "", para_end: int | None = None):
         self.para = para
         self.subject = subject
         self.teacher = teacher
@@ -34,6 +34,10 @@ class Slot:
         # Пять пар колледжа идут не по звонку; без этого поля студент
         # видел время обычной пары и приходил на два часа раньше.
         self.time_note = time_note
+        # Последняя пара занятия. Спаренные пары (одна тема на два часа)
+        # в файле идут двумя строками подряд; без склейки студент видел
+        # два занятия с перерывом между ними вместо одного.
+        self.para_end = para_end or para
         # Группа нужна format_day: по ней выбираются звонки и подпись
         # под парой. У преподавателя вуза слот собирается из base_lesson,
         # и без этого поля день вообще не открывался.
@@ -104,4 +108,33 @@ async def get_day_slots(repo: RequestsRepo, group: str, date: datetime.date,
                               group=group))
 
     slots.sort(key=lambda s: s.para)
-    return slots
+    return _join_paired(slots)
+
+
+def _join_paired(slots: list[Slot]) -> list[Slot]:
+    """Склеить спаренные пары: одна тема на два часа подряд.
+
+    В файле колледжа такая пара идёт двумя строками с одинаковым
+    предметом и преподавателем (23 случая из 704). Без склейки студент
+    видел два занятия с перерывом вместо одного блока: например
+    «1) 09:00–10:35 … 2) 10:45–12:40 …» одной темы.
+
+    Склеиваем только пары, идущие вплотную (para и para+1) с тем же
+    предметом и преподавателем. Замены и отмены не трогаем: у них своя
+    семантика, и склейка через границу правки спрятала бы её.
+    """
+    out: list[Slot] = []
+    for slot in slots:
+        prev = out[-1] if out else None
+        same = (
+            prev is not None
+            and not slot.changed and not prev.changed
+            and slot.para == prev.para_end + 1
+            and slot.subject == prev.subject
+            and slot.teacher == prev.teacher
+        )
+        if same:
+            prev.para_end = slot.para
+            continue
+        out.append(slot)
+    return out
