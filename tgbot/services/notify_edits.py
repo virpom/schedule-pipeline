@@ -9,14 +9,10 @@ import logging
 
 from aiogram import Bot
 
-from common.schedule import WEEKDAY_FULL
+from common.schedule import DETAIL_BRIEF, format_day
 from infrastructure.database.repo.requests import RequestsRepo
 from tgbot.services.broadcaster import broadcast_many
-from tgbot.services.schedule_layer import Slot, get_day_slots
-
-
-def _fmt_day(date: datetime.date) -> str:
-    return f"{WEEKDAY_FULL[date.weekday()]}, {date.day}.{date.month:02d}"
+from tgbot.services.schedule_layer import get_day_slots
 
 
 async def notify_group_about_edit(
@@ -34,8 +30,18 @@ async def notify_group_about_edit(
     else:
         header = "🔄 <b>Изменение в расписании</b>"
         slots = await get_day_slots(repo, group, date)
-        body = f"📅 <b>{_fmt_day(date)}</b> · группа <b>{group}</b>\n"
-        body += _slots_text(slots)
+        # Раньше здесь был свой форматтер: номер пары и предмет, без
+        # времени. Уведомление приходит пушем заранее, когда студент не
+        # помнит сетку, — а время по номеру пары не восстановить: п2 это
+        # 10:45–12:40 на I_IV и 10:45–12:20 на II_III, а понедельник
+        # отличается от остальных дней на всех парах.
+        #
+        # Теперь берём format_day: ровно то, что студент видит на экране
+        # «Сегодня», и рассинхрон форматов исчезает сам.
+        bell, lunches = await repo.bell_schedule.get_context()
+        body = f"группа <b>{group}</b>\n"
+        body += format_day(date, slots, bell, lunches, DETAIL_BRIEF,
+                           meta="group", show_rov=False)
 
     text = f"{header}\n\n{body}\n\n<i>Проверь расписание командой /start</i>"
     items = [(uid, text) for uid in targets]
@@ -43,19 +49,6 @@ async def notify_group_about_edit(
     logging.info("notify_group_about_edit: %s на %s → %d/%d",
                  group, date, sent, len(targets))
     return sent
-
-
-def _slots_text(slots: list[Slot]) -> str:
-    if not slots:
-        return "Занятий нет 🙌"
-    lines = []
-    for s in slots:
-        flag = " 🔄" if s.changed else ""
-        lines.append(f"<b>{s.para})</b> {s.subject}{flag}")
-        meta = " · ".join(x for x in (s.teacher, s.room) if x)
-        if meta:
-            lines.append(f"     {meta}")
-    return "\n".join(lines)
 
 
 async def snapshot_past_days(repo: RequestsRepo, days_back: int = 3) -> int:
