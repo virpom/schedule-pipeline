@@ -89,12 +89,16 @@ async def replace_vuz_lessons(
     Ручные правки (``source != 'vuz'``) сохраняются.
     """
     # Группы своей формы: справочник vuz_group знает, кто к какой относится.
-    own_groups = [
+    # Полный список групп формы есть ещё только у самого файла. Если
+    # справочник пуст (функцию позвали раньше replace_vuz_groups), берём
+    # группы из файла. Раньше в этом случае удалялись ВСЕ группы вуза, и
+    # очная форма сносила очно-заочную — тот самый баг, от которого
+    # защищает абзац выше.
+    own = set(
         g for (g,) in await repo.session.execute(
             select(VuzGroup.name).where(VuzGroup.form == form)
         )
-    ]
-    own = set(own_groups)
+    ) or {lesson.group for lesson in lessons}
 
     manual = [
         row for (row,) in await repo.session.execute(
@@ -107,22 +111,13 @@ async def replace_vuz_lessons(
     manual_keys = {(r.group, r.week_parity, r.weekday, r.para, r.weeks or "")
                    for r in manual}
 
-    # Чистим только свою форму. Если справочника ещё нет (первый запуск),
-    # берём группы из самого файла.
-    if own:
-        await repo.session.execute(
-            delete(BaseLesson).where(
-                BaseLesson.source == SOURCE_VUZ,
-                BaseLesson.group.in_(own),
-            )
+    # Чистим только свою форму — own всегда непуст.
+    await repo.session.execute(
+        delete(BaseLesson).where(
+            BaseLesson.source == SOURCE_VUZ,
+            BaseLesson.group.in_(own),
         )
-    else:
-        await repo.session.execute(
-            delete(BaseLesson).where(
-                BaseLesson.source == SOURCE_VUZ,
-                BaseLesson.group.like(f"%{vuz.VUZ_SUFFIX}"),
-            )
-        )
+    )
 
     now = datetime.datetime.now()
     seen: set[tuple] = set()
@@ -208,11 +203,15 @@ async def replace_vuz_changes(
     # без замен, оставлял старые применяться к расписанию вуза. У
     # колледжа та же задача решена иначе — удаление идёт всегда, а
     # пустой список просто ничего не добавляет.
-    own_groups = [
+    #
+    # Пустой справочник — не повод сносить все замены вуза: берём группы
+    # своей формы из самого файла. Ветка «удалить всё по source» уносила
+    # и чужие формы, хотя комментарий к докстрингу обещает обратное.
+    own_groups = list({
         g for (g,) in await repo.session.execute(
             select(VuzGroup.name).where(VuzGroup.form == form)
         )
-    ]
+    } | {change.group for change in changes})
 
     # Только вузовские группы. Без ограничения сюда попадали ключи
     # колледжных замен, и замена вуза на тот же (дата, группа, пара)
@@ -229,17 +228,12 @@ async def replace_vuz_changes(
     ]
     manual_keys = {(r.date, r.group, r.para) for r in manual}
 
-    if own_groups:
-        await repo.session.execute(
-            delete(Substitution).where(
-                Substitution.source == SOURCE_VUZ,
-                Substitution.group.in_(own_groups),
-            )
+    await repo.session.execute(
+        delete(Substitution).where(
+            Substitution.source == SOURCE_VUZ,
+            Substitution.group.in_(own_groups),
         )
-    else:
-        await repo.session.execute(
-            delete(Substitution).where(Substitution.source == SOURCE_VUZ)
-        )
+    )
 
     now = datetime.datetime.now()
     seen: set[tuple] = set()
