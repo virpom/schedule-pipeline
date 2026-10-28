@@ -40,6 +40,7 @@ async def send_message(
         disable_notification: bool = False,
         reply_markup: InlineKeyboardMarkup = None,
         retry_after: list | None = None,
+        blocked: list | None = None,
 ) -> bool:
     try:
         await bot.send_message(
@@ -51,7 +52,13 @@ async def send_message(
     except exceptions.TelegramBadRequest as e:
         logging.error("Target [ID:%s] BadRequest: %s", user_id, e.message)
     except exceptions.TelegramForbiddenError:
-        logging.error(f"Target [ID:{user_id}]: got TelegramForbiddenError")
+        # Не «ошибка отправки», а «этот человек больше не наш адресат».
+        # Отдельным списком, чтобы рассылка сняла его с подписки: иначе
+        # он остаётся в get_subscribed() навсегда и каждый цикл тратит
+        # на него запрос и строку в логе.
+        logging.warning("Target [ID:%s]: заблокировал бота", user_id)
+        if blocked is not None:
+            blocked.append(user_id)
     except exceptions.TelegramRetryAfter as e:
         # Спать здесь нельзя: send_message зовут по одному в цикле
         # рассылки, и сон на одного останавливал всех остальных. Замер
@@ -96,13 +103,16 @@ async def send_photo(
         photo,
         caption: str = "",
         retry_after: list | None = None,
+        blocked: list | None = None,
 ) -> bool:
     try:
         await _send_photo_by_id(bot, user_id, photo, caption)
     except exceptions.TelegramBadRequest as e:
         logging.error("Target [ID:%s] BadRequest: %s", user_id, e.message)
     except exceptions.TelegramForbiddenError:
-        logging.error(f"Target [ID:{user_id}]: got TelegramForbiddenError")
+        logging.warning("Target [ID:%s]: заблокировал бота", user_id)
+        if blocked is not None:
+            blocked.append(user_id)
     except exceptions.TelegramRetryAfter as e:
         # Тот же довод, что и в send_message: сон здесь держит весь
         # цикл рассылки, а не одного адресата.
@@ -129,10 +139,18 @@ async def broadcast_schedule(
         bot: Bot,
         items: list[tuple[Union[str, int], str, Union[str, None]]],
         rate: float = 20.0,
+        blocked: list | None = None,
 ) -> int:
-    """Send schedule messages (text or photo+text) with rate limiting."""
+    """Send schedule messages (text or photo+text) with rate limiting.
+
+    ``blocked`` собирает тех, кто заблокировал бота: это не «не дошло,
+    повтори», а «адресат больше не наш». Повторять им бессмысленно,
+    поэтому их не кладём в failed.
+    """
     if not items:
         return 0
+    if blocked is None:
+        blocked = []
     delay = 1.0 / max(rate, 0.1)
     sent = 0
     failed: list[tuple[Union[str, int], str, Union[str, None]]] = []
@@ -141,16 +159,21 @@ async def broadcast_schedule(
         # получателе не должно лишать расписания остальных.
         wait = [0.0]
         try:
+            before = len(blocked)
             if photo:
-                ok = await send_photo(bot, user_id, photo, text, retry_after=wait)
+                ok = await send_photo(bot, user_id, photo, text,
+                                      retry_after=wait, blocked=blocked)
             else:
-                ok = await send_message(bot, user_id, text, retry_after=wait)
+                ok = await send_message(bot, user_id, text,
+                                        retry_after=wait, blocked=blocked)
+            blocked_here = len(blocked) > before
         except Exception:
             logging.exception("broadcast: сбой на %s, продолжаем", user_id)
             ok = False
+            blocked_here = False
         if ok:
             sent += 1
-        else:
+        elif not blocked_here:
             failed.append((user_id, text, photo))
         _stash_retry(wait[0])
         await asyncio.sleep(delay)
@@ -164,8 +187,9 @@ async def broadcast_schedule(
             await asyncio.sleep(wait)
         for user_id, text, photo in failed:
             try:
-                ok = (await send_photo(bot, user_id, photo, text) if photo
-                      else await send_message(bot, user_id, text))
+                ok = (await send_photo(bot, user_id, photo, text, blocked=blocked)
+                      if photo
+                      else await send_message(bot, user_id, text, blocked=blocked))
             except Exception:
                 logging.exception("broadcast: сбой на %s, продолжаем", user_id)
                 ok = False

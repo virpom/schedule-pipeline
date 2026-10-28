@@ -347,7 +347,17 @@ async def notify_new_schedule(bot, session_pool, changes: list[tuple[datetime.da
                 text = format_no_lessons(date)
             items.append((chat.id, prefix + text, day_photo))
 
-    await broadcast_schedule(bot, items, rate=rate)
+    blocked: list[int] = []
+    await broadcast_schedule(bot, items, rate=rate, blocked=blocked)
+    # Заблокировавшие снимаются с подписки: иначе они остаются в
+    # get_subscribed() навсегда, и каждый цикл тратит на них запрос и
+    # строку в логе. На проде их было 11 из 228.
+    if blocked:
+        async with session_pool() as db:
+            repo = RequestsRepo(db)
+            for uid in blocked:
+                await repo.users.set_subscribed(uid, False)
+        logging.warning("broadcast: снято с подписки (заблокировали бота): %d", len(blocked))
 
 
 # Логика ночного окна живёт в source_state: порог устаревания должен
