@@ -279,10 +279,17 @@ def parse_ochoe(data: bytes) -> list[BaseLesson]:
             if value:
                 groups[col] = str(value).strip()
 
+        # Объединение по вертикали высотой 2 — «одна пара на обе недели».
+        # Раньше условие было max_row == min_row + 1, то есть ровно две
+        # строки. В файле встречаются объединения высотой 3 и 10-11
+        # (шапки и колонка группы), а если методист склеит три строки под
+        # пару, парсер молча потеряет данные: ячейка попадёт в обычную
+        # ветку, верх прочтётся как чётная неделя, низ — как нечётная.
+        # Берём любое вертикальное объединение, начинающееся в паре строк.
         merged_pairs = {
             (rng.min_row, rng.min_col)
             for rng in sheet.merged_cells.ranges
-            if rng.min_col == rng.max_col and rng.max_row == rng.min_row + 1
+            if rng.min_col == rng.max_col and rng.max_row > rng.min_row
         }
 
         day: int | None = None
