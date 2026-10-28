@@ -356,10 +356,16 @@ def format_day(
 
             # Что стояло раньше. Листок замен устроен как «было → стало»,
             # и раньше колонка «было» не сохранялась вовсе. Студент видел
-            # новую пару со значком 🔄 и не знал, что она заменила: при
-            # смене преподавателя это главный вопрос.
+            # новую пару со значком 🔄 и не знал, что она заменила.
+            #
+            # Печатаем, только если «было» действительно отличается от
+            # «стало»: на проде 27 из 29 замен заменили ровно то же самое
+            # (перенесли на другую дату), и строка «было: История - Куранова»
+            # под «История · Куранова» только шумит.
             was = (getattr(lesson, "comment", "") or "").strip()
-            if was and getattr(lesson, "changed", False) and not detail == DETAIL_BRIEF:
+            if (was and getattr(lesson, "changed", False)
+                    and not detail == DETAIL_BRIEF
+                    and _was_differs(was, lesson)):
                 lines.append(f"      <i>было: {_esc(was)}</i>")
 
             if lunch and lunch.para == p and (
@@ -388,6 +394,33 @@ def _esc(value) -> str:
 def day_header(date: datetime.date) -> str:
     """Единый заголовок дня для всех состояний."""
     return f"📅 <b>{WEEKDAY_FULL[date.weekday()]}, {date.day} {MONTHS_GEN[date.month]}</b>"
+
+
+def _was_differs(was: str, lesson) -> bool:
+    """Отличается ли «было» от того, что теперь показано.
+
+    Листок замен пишет «было» строкой вида «История - Куранова Е.И.., ауд. 223»,
+    а в слоте предмет и преподаватель лежат отдельно. Сравниваем по ним, без
+    аудитории: аудитория меняется чаще всего и одна её разница — тоже повод
+    показать строку. Двойная точка после инициалов встречается в листке.
+    """
+    head = was.split(", ауд.")[0]
+    parts = head.split(" - ", 1)
+    was_subj = _plain(parts[0])
+    now_subj = _plain(getattr(lesson, "subject", "") or "")
+    if was_subj and was_subj != now_subj:
+        return True
+    if len(parts) > 1:
+        was_teach = _plain(parts[1])
+        now_teach = _plain(getattr(lesson, "teacher", "") or "")
+        if was_teach and was_teach != now_teach:
+            return True
+    return False
+
+
+def _plain(text: str) -> str:
+    """Для сравнения: без регистра, точек и лишних пробелов."""
+    return re.sub(r"[\s.]+", " ", text or "").strip().casefold()
 
 
 def empty_day(date: datetime.date, note: str | None = None) -> str:

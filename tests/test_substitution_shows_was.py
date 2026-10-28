@@ -34,15 +34,28 @@ def _slot(**kw):
 
 
 def test_was_shown_in_full_detail():
-    text = format_day(MONDAY, [_slot(comment="Обществознание – Кекеева К.А.")],
+    text = format_day(MONDAY, [_slot(comment="Обществознание - Кекеева К.А., ауд. 101")],
                       _bell(), {}, detail=DETAIL_FULL)
     assert "было" in text.lower(), text
     assert "Кекеева" in text, text
 
 
+def test_was_hidden_when_identical():
+    """27 из 29 замен на проде заменили ровно то же самое."""
+    text = format_day(MONDAY, [_slot(comment="Биология - Утева О.В., ауд. 202")],
+                      _bell(), {}, detail=DETAIL_FULL)
+    assert "было" not in text.lower(), text
+
+
+def test_was_shown_when_teacher_differs():
+    text = format_day(MONDAY, [_slot(comment="Биология - Иванова Н.А., ауд. 202")],
+                      _bell(), {}, detail=DETAIL_FULL)
+    assert "Иванова" in text, text
+
+
 def test_was_hidden_in_brief():
     """Короткая выдача не должна раздуваться."""
-    text = format_day(MONDAY, [_slot(comment="Обществознание – Кекеева К.А.")],
+    text = format_day(MONDAY, [_slot(comment="Обществознание - Кекеева К.А., ауд. 101")],
                       _bell(), {}, detail=DETAIL_BRIEF)
     assert "было" not in text.lower(), text
 
