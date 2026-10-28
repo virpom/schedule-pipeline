@@ -17,6 +17,7 @@ from common.schedule import (
     DETAIL_LABELS,
     DETAIL_ORDER,
     SUB_CANCEL,
+    VUZ_SUFFIX,
     bells_group,
     course_from_group,
     format_bell,
@@ -395,10 +396,37 @@ def _dedupe_slots(slots: list):
     return list(merged.values())
 
 
+def _vuz_key(item) -> tuple:
+    """Ключ пары вуза для сопоставления двух источников."""
+    import re
+    return (item.para,
+            re.sub(r"[\s.()]+", "", (item.subject or "")).lower(),
+            (item.room or "").lower())
+
+
+def _drop_vuz_covered(college: list, vuz: list) -> list:
+    """Убрать из college строки вуза, которые уже есть в vuz.
+
+    college_lesson содержит и вузовские строки: материализация берёт все
+    группы из base_lesson, включая @vuz. _vuz_teacher_day читает тот же
+    день через get_day_slots — с заменами и неделями. Складывая оба
+    списка, получали каждую пару дважды: у Кабышевой 28.10 было 7 + 4,
+    и все 4 — те же самые.
+
+    Оставляем вузовскую версию: она учитывает замены, college_lesson —
+    снимок материализации.
+    """
+    covered = {_vuz_key(v) for v in vuz}
+    return [c for c in college
+            if not (str(getattr(c, "group", "") or "").endswith(VUZ_SUFFIX)
+                    and _vuz_key(c) in covered)]
+
+
 async def _user_lessons(repo: RequestsRepo, user: User, date: datetime.date):
     if _is_teacher(user):
         college = await repo.college_lessons.get_for_teacher_date(user.teacher_name, date)
         vuz = await _vuz_teacher_day(repo, user, date)
+        college = _drop_vuz_covered(college, vuz)
         return sorted([*college, *vuz], key=lambda l: l.para)
     return await repo.college_lessons.get_for_group_date(user.group, date)
 
@@ -410,11 +438,15 @@ async def _user_lessons_range(repo: RequestsRepo, user: User, start: datetime.da
         # Вуз в неделю не попадал вовсе: у преподавателя только с
         # вузовскими парами экран «Неделя» был пустым, хотя «Сегодня»
         # показывал шесть дней с парами.
+        # Те же дубли, что и на экране дня: college_lesson для вуза и
+        # _vuz_teacher_day отдают одни и те же пары.
+        vuz_rows = []
         day = start
         while day <= end:
-            rows.extend(await _vuz_teacher_day(repo, user, day))
+            vuz_rows.extend(await _vuz_teacher_day(repo, user, day))
             day += datetime.timedelta(days=1)
-        return sorted(rows, key=lambda l: (l.date, l.para))
+        rows = _drop_vuz_covered(rows, vuz_rows)
+        return sorted([*rows, *vuz_rows], key=lambda l: (l.date, l.para))
     return await repo.college_lessons.get_for_group_range(user.group, start, end)
 
 
