@@ -397,10 +397,13 @@ def format_unverified(date: datetime.date, when: datetime.datetime | None) -> st
             f"{format_stale_warning(when)}")
 
 
-def format_week(entries, bell, lunches, detail: str = DETAIL_BRIEF, meta: str = "teacher", show_rov: bool = True, group_course_group: dict[str, str] | None = None) -> str:
+def format_week(entries, bell, lunches, detail: str = DETAIL_BRIEF, meta: str = "teacher", show_rov: bool = True, group_course_group: dict[str, str] | None = None, merge_groups: bool = False) -> str:
     if not entries:
         return "На этой неделе расписания пока нет 📭"
-    return "\n\n".join(format_day(d, les, bell, lunches, detail, meta, show_rov, group_course_group) for d, les in entries)
+    return "\n\n".join(
+        format_day(d, les, bell, lunches, detail, meta, show_rov,
+                   group_course_group, merge_groups=merge_groups)
+        for d, les in entries)
 
 
 def format_teacher_results(entries, bell, lunches, detail: str = DETAIL_BRIEF) -> str:

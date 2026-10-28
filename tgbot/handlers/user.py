@@ -795,7 +795,10 @@ async def _week_text(repo: RequestsRepo, user: User) -> str:
     entries = [(d, by_date[d]) for d in sorted(by_date)]
     meta = "group" if _is_teacher(user) else "teacher"
     show_rov = not _is_teacher(user)
-    return format_week(entries, bell, lunches, user.bell_detail, meta, show_rov, gcg)
+    # Тот же флаг, что на экране дня: иначе преподаватель физкультуры
+    # видит в неделе шесть строк там, где день показывает одну.
+    return format_week(entries, bell, lunches, user.bell_detail, meta,
+                       show_rov, gcg, merge_groups=_is_teacher(user))
 
 
 @user_router.callback_query(F.data == "week")
