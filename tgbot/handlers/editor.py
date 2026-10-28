@@ -115,10 +115,15 @@ def paras_kb(weekday: int, parity: str, slots: list[Slot], prefix: str = "ed:bs"
     ``last`` — сколько слотов показать: 6 у колледжа, 8 у вуза.
     """
     by_para = {s.para: s for s in slots}
+    many = {p: sum(1 for s in slots if s.para == p) for p in by_para}
     rows = []
     for p in range(1, last + 1):
         slot = by_para.get(p)
-        label = f"{p}) {slot.subject[:24]}" if slot else f"{p}) — пусто"
+        label = f"{p}) {slot.subject[:20]}" if slot else f"{p}) — пусто"
+        # У вуза на один слот несколько строк недель: без пометки кнопка
+        # называла только последнюю, а «Изменить» угадывала не ту.
+        if many.get(p, 0) > 1:
+            label += f" +{many[p] - 1}"
         if slot and slot.changed:
             label += " 🔄"
         rows.append([InlineKeyboardButton(
@@ -226,6 +231,18 @@ def _too_long(value: str, what: str) -> str | None:
     return f"Слишком длинный {what} ({len(value)} символов, максимум {limit})."
 
 
+def _by_para(slots: list[Slot]) -> dict[int, list[Slot]]:
+    """Пары дня по номеру: у вуза на один слот несколько строк недель."""
+    out: dict[int, list[Slot]] = {}
+    for s in slots:
+        out.setdefault(s.para, []).append(s)
+    return out
+
+
+def _week_mark(weeks: str) -> str:
+    return f" <i>({escape(weeks)})</i>" if weeks else ""
+
+
 def base_day_text(group: str, weekday: int, parity: str, slots: list[Slot]) -> str:
     lines = [
         f"{EDITOR_TITLE}",
@@ -237,9 +254,15 @@ def base_day_text(group: str, weekday: int, parity: str, slots: list[Slot]) -> s
     if not slots:
         lines.append("<i>Пар нет</i>")
     else:
-        for s in slots:
-            meta = " · ".join(x for x in (s.teacher, s.room) if x)
-            lines.append(f"<b>{s.para})</b> {escape(s.subject)}")
+        # У вуза get_day без week отдаёт по строке на каждые weeks:
+        # «7) Компьютерное моделирование» печаталось четыре раза подряд
+        # (план 153). Одна строка на пару, варианты через «·» с неделями —
+        # иначе четыре одинаковых названия неразличимы.
+        for para, group_slots in _by_para(slots).items():
+            lines.append(f"<b>{para})</b> " + " · ".join(
+                escape(s.subject) + _week_mark(s.weeks) for s in group_slots))
+            meta = " · ".join(dict.fromkeys(
+                x for s in group_slots for x in (s.teacher, s.room) if x))
             if meta:
                 lines.append(f"      {meta}")
     lines += ["", "Нажми на пару, чтобы изменить 👇"]
@@ -616,7 +639,10 @@ async def _save_base(event, repo: RequestsRepo, state: FSMContext, via_cb: bool)
         logging.exception("не удалось разослать уведомление о правке базы")
 
     lessons = await repo.base_lessons.get_day(group, weekday, parity)
-    slots = [Slot(l.para, l.subject, l.teacher, l.room) for l in lessons]
+    # weeks обязателен: без него строка вуза выглядела как «все недели»
+    # и после сохранения экран врал (план 153).
+    slots = [Slot(l.para, l.subject, l.teacher, l.room, weeks=l.weeks or "")
+             for l in lessons]
     # Не врать про успех: правка уже в слоях, но студент её не увидит,
     # пока поллер не пересоберёт college_lesson сам.
     head = "✅ <b>Сохранено</b>" if rebuilt else (
@@ -668,7 +694,10 @@ async def cb_del_base(cb: CallbackQuery, repo: RequestsRepo):
     )
     await _rebuild(repo, weekday=weekday, parity=parity)
     lessons = await repo.base_lessons.get_day(group, weekday, parity)
-    slots = [Slot(l.para, l.subject, l.teacher, l.room) for l in lessons]
+    # weeks обязателен: без него строка вуза выглядела как «все недели»
+    # и после сохранения экран врал (план 153).
+    slots = [Slot(l.para, l.subject, l.teacher, l.room, weeks=l.weeks or "")
+             for l in lessons]
     await cb.message.edit_text(
         "🗑 Пара убрана.\n\n" + base_day_text(group, weekday, parity, slots),
         reply_markup=paras_kb(weekday, parity, slots, last=max_para(group)),
