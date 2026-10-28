@@ -151,7 +151,9 @@ def course_from_group(group: str) -> int:
     admission = 2000 + int(m.group(1))
     now = datetime.datetime.now()
     acad_start = now.year if now.month >= 9 else now.year - 1
-    return max(1, min(acad_start - admission + 1, 4))
+    # Потолка здесь нет: он был слепым к вузу. Колледж до 5 курса не
+    # доходит, а пятикурснику вуза подпись «4 курс» — прямая ложь.
+    return max(1, acad_start - admission + 1)
 
 
 def course_group_from_group(group: str) -> str:
