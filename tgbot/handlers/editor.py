@@ -659,8 +659,12 @@ async def cb_del_base(cb: CallbackQuery, repo: RequestsRepo):
                                         weeks=(old_slot.weeks or "") if old_slot else "")
     await repo.edit_log.log(
         group, "base", "delete", user_id=cb.from_user.id, para=para,
+        # weeks — часть ключа строки. Без неё откат удаления вузовской
+        # пары (у неё weeks='1,3,5') создавал строку с weeks='' и дубль
+        # вместо восстановления. cb_undo читает это поле.
         old_value={"subject": old_slot.subject, "teacher": old_slot.teacher,
-                   "room": old_slot.room} if old_slot else None,
+                   "room": old_slot.room, "weeks": old_slot.weeks or "",
+                   "weekday": weekday, "parity": parity} if old_slot else None,
     )
     await _rebuild(repo, weekday=weekday, parity=parity)
     lessons = await repo.base_lessons.get_day(group, weekday, parity)
@@ -1091,7 +1095,11 @@ async def cb_undo(cb: CallbackQuery, repo: RequestsRepo):
     if last.layer == "base":
         old = _json(last.old_value)
         new = _json(last.new_value)
-        weekday, parity = new.get("weekday"), new.get("parity")
+        # При удалении new_value пустой, и weekday/parity там нет — откат
+        # молча ничего не делал и писал «Возвращено». Берём из old,
+        # если в new не нашлось.
+        weekday = new.get("weekday") or old.get("weekday")
+        parity = new.get("parity") or old.get("parity")
 
         if last.action == "add":
             # Пары не было — откат значит убрать её совсем. Раньше
