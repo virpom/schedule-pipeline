@@ -3,7 +3,7 @@ from typing import Optional
 
 import datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.dialects.sqlite import insert
 
 from common.schedule import bells_group
@@ -153,18 +153,22 @@ class UserRepo(BaseRepo):
             user = await self.get(int(q))
             return [user] if user else []
 
-        clean = q.lstrip("@").lower()
-        result = await self.session.execute(
-            select(User)
-            .where(
-                (func.lower(User.username) == clean)
-                | (func.lower(User.username).like(f"%{clean}%"))
-                | (func.lower(User.full_name).like(f"%{clean}%"))
-            )
-            .order_by(User.last_seen.desc().nullslast())
-            .limit(limit)
-        )
-        return list(result.scalars().all())
+        # Регистр понижаем в Python, а не в SQL: в SQLite lower() и LIKE
+        # понимают только ASCII, «Цатурян» остаётся «Цатурян», и админ,
+        # набравший фамилию строчными, получал «никто не найден».
+        #
+        # Заодно уходит LIKE: без экранирования запрос «%» совпадал со
+        # всеми. Плюс совпадение теперь не только по фамилии, но и по
+        # имени/отчеству — «Владислав» тоже находит.
+        # ponytail: get_all() тянет всю таблицу; при десятках тысяч
+        # пользователей нужна колонка full_name_lower с индексом.
+        clean = q.lstrip("@").casefold()
+        rows = await self.get_all()
+        found = [u for u in rows
+                 if clean in (u.username or "").casefold()
+                 or clean in (u.full_name or "").casefold()]
+        found.sort(key=lambda u: u.last_seen or datetime.datetime.min, reverse=True)
+        return found[:limit]
 
     async def get_all(self) -> list[User]:
         result = await self.session.execute(select(User))
