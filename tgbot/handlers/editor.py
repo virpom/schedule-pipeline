@@ -481,8 +481,10 @@ async def cb_edit_base(cb: CallbackQuery, repo: RequestsRepo, state: FSMContext)
     weeks = "" if len(parts) < 6 or parts[5] == "_" else parts[5]
 
     suggestions = await _subject_suggestions(repo, group)
+    # Без этого списка cb_subject_suggestion достаёт из FSM пустоту и
+    # отвечает «Устарело» на любую кнопку: в callback_data лежит индекс.
     await state.update_data(layer="base", weekday=weekday, parity=parity, para=para,
-                            weeks=weeks)
+                            weeks=weeks, suggestions=suggestions)
     await state.set_state(EditorState.subject)
 
     await cb.message.edit_text(
