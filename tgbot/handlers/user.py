@@ -396,12 +396,10 @@ def _dedupe_slots(slots: list):
     return list(merged.values())
 
 
-def _vuz_key(item) -> tuple:
-    """Ключ пары вуза для сопоставления двух источников."""
+def _subj_key(item) -> str:
+    """Предмет для сопоставления источников: «(лек.)» и «(лек)» — одно."""
     import re
-    return (item.para,
-            re.sub(r"[\s.()]+", "", (item.subject or "")).lower(),
-            (item.room or "").lower())
+    return re.sub(r"[\s.()]+", "", (item.subject or "")).lower()
 
 
 def _drop_vuz_covered(college: list, vuz: list) -> list:
@@ -416,10 +414,13 @@ def _drop_vuz_covered(college: list, vuz: list) -> list:
     Оставляем вузовскую версию: она учитывает замены, college_lesson —
     снимок материализации.
     """
-    covered = {_vuz_key(v) for v in vuz}
+    # Кабинет схлопываем до пустого: sources расходятся именно на нём —
+    # в college_lesson он заполнен, в слое пуст (или номера не читаются).
+    # Требуя точного совпадения, оставляли ту же пару дважды.
+    covered = {(v.para, _subj_key(v)) for v in vuz}
     return [c for c in college
             if not (str(getattr(c, "group", "") or "").endswith(VUZ_SUFFIX)
-                    and _vuz_key(c) in covered)]
+                    and (c.para, _subj_key(c)) in covered)]
 
 
 async def _user_lessons(repo: RequestsRepo, user: User, date: datetime.date):

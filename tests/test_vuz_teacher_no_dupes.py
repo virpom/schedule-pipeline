@@ -48,8 +48,19 @@ def test_subject_normalisation():
     assert _drop_vuz_covered(college, vuz) == []
 
 
-def test_room_matters():
-    """Разные кабинеты — разные пары, не склеиваем."""
+def test_room_ignored_in_key():
+    """Кабинет не входит в ключ — на нём источники и расходятся.
+
+    Прод, Кабышева 28.10, пара 7: college_lesson отдал «М-401», слой —
+    пусто. С кабинетом в ключе одна и та же пара оставалась дважды.
+    """
     college = [_row(3, "Право", "СА-26-2@vuz", room="М-101")]
-    vuz = [_row(3, "Право", None, room="М-202")]
+    vuz = [_row(3, "Право", None, room="")]
+    assert _drop_vuz_covered(college, vuz) == []
+
+
+def test_same_para_different_subject_kept():
+    """Параллельные подгруппы — разные предметы, их не склеиваем."""
+    college = [_row(7, "Физкультура", "СА-26-2@vuz")]
+    vuz = [_row(7, "Иностранный", None)]
     assert len(_drop_vuz_covered(college, vuz)) == 1
