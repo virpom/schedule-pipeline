@@ -81,7 +81,6 @@ class BaseLesson:
     """Пара из базового расписания."""
 
     group: str
-    course: int | None
     day: int  # 1..6
     para: int  # 1..6
     subject: str
@@ -270,8 +269,9 @@ def parse_ochoe(data: bytes) -> list[BaseLesson]:
 
     lessons: list[BaseLesson] = []
     for sheet in workbook.worksheets:
-        course_match = re.search(r"\d", sheet.title)
-        course = int(course_match.group()) if course_match else None
+        # Номер курса из имени листа («1 курс») в модель не пишется:
+        # колонки course в base_lesson нет, а курс для звонков берётся
+        # из группы (course_group_from_group). Считался и выбрасывался.
 
         groups: dict[int, str] = {}
         for col in range(3, sheet.max_column + 1):
@@ -327,7 +327,6 @@ def parse_ochoe(data: bytes) -> list[BaseLesson]:
                     lessons.append(
                         BaseLesson(
                             group=group,
-                            course=course,
                             day=day,
                             para=para,
                             subject=top_subject,
@@ -342,7 +341,6 @@ def parse_ochoe(data: bytes) -> list[BaseLesson]:
                         lessons.append(
                             BaseLesson(
                                 group=group,
-                                course=course,
                                 day=day,
                                 para=para,
                                 subject=top_subject,
@@ -356,7 +354,6 @@ def parse_ochoe(data: bytes) -> list[BaseLesson]:
                     lessons.append(
                         BaseLesson(
                             group=group,
-                            course=course,
                             day=day,
                             para=para,
                             subject=top_subject,
@@ -368,7 +365,6 @@ def parse_ochoe(data: bytes) -> list[BaseLesson]:
                     lessons.append(
                         BaseLesson(
                             group=group,
-                            course=course,
                             day=day,
                             para=para,
                             subject=bot_subject,
