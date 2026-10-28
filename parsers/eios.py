@@ -647,8 +647,18 @@ def match_group(name: str, known: list[str]) -> str | None:
     # Похожесть: те же символы в другом порядке либо одно вхождение в другое.
     candidates: list[tuple[float, str]] = []
     for other_key, original in by_key.items():
+        # Анаграмма НЕ считается точным совпадением: набор символов
+        # совпадает у двух разных вещей. «26ДП» — та же группа с
+        # перепутанным порядком букв и цифр. «ПД-26» — другая
+        # специальность.
+        #
+        # Отличаем по позициям цифр: у перепутанной группы номер стоит не
+        # там, где в базе, а у чужой специальности буквы меняются местами
+        # внутри своего блока, и цифры остаются на своих позициях.
         if sorted(key) == sorted(other_key):
-            score = 1.0
+            if _digit_slots(key) == _digit_slots(other_key):
+                continue            # «ПД26» и «ДП26» — разные группы
+            score = 1.0             # «26ДП» и «ДП26» — та же, перепутан номер
         elif key in other_key or other_key in key:
             score = 0.9
         else:
@@ -664,6 +674,15 @@ def match_group(name: str, known: list[str]) -> str | None:
     if len(candidates) > 1 and abs(candidates[0][0] - candidates[1][0]) < 0.05:
         return None
     return candidates[0][1]
+
+
+def _digits(text: str) -> str:
+    return "".join(ch for ch in text if ch.isdigit())
+
+
+def _digit_slots(text: str) -> tuple[int, ...]:
+    """Позиции цифр в строке: у «ДП26» это (2, 3), у «26ДП» — (0, 1)."""
+    return tuple(i for i, ch in enumerate(text) if ch.isdigit())
 
 
 def _similarity(a: str, b: str) -> float:
