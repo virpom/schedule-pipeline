@@ -16,6 +16,7 @@ from common.schedule import (
     BELL_START_END,
     DETAIL_LABELS,
     DETAIL_ORDER,
+    SUB_CANCEL,
     bells_group,
     course_from_group,
     format_bell,
@@ -722,6 +723,13 @@ async def _day_text(repo: RequestsRepo, user: User, date: datetime.date) -> str:
         stale = await source_state.is_stale(repo)
         last_ok = await source_state.last_ok(repo) if stale else None
 
+    # День из одних отмен — фактически день без пар. get_day_slots держит
+    # отменённую пару, чтобы студент видел зачёркнутую строку, а не
+    # «Занятий нет»; но «Ближайшее» от этого не должно пропадать: когда
+    # пар нет целиком, знать, когда они будут, — самое нужное.
+    all_cancelled = bool(lessons) and all(
+        getattr(l, "action", "") == SUB_CANCEL for l in lessons)
+
     if lessons:
         text = _fmt(user, date, lessons, bell, lunches, gcg)
         # Если сайт ещё ни разу не опрашивался (свежий запуск), не пугаем
@@ -755,10 +763,11 @@ async def _day_text(repo: RequestsRepo, user: User, date: datetime.date) -> str:
             # дело не доходило. Убрал настройку, которая ничего не
             # делала, вместо того чтобы оставлять иллюзию работающей.
             text = format_not_published(date)
+    if not lessons or all_cancelled:
         for i in range(1, 8):
             d = date + datetime.timedelta(days=i)
             nxt = await _user_lessons(repo, user, d)
-            if nxt:
+            if nxt and not all(getattr(l, "action", "") == SUB_CANCEL for l in nxt):
                 text += "\n\nБлижайшее —\n" + _fmt(user, d, nxt, bell, lunches, gcg)
                 break
     return text
