@@ -508,10 +508,13 @@ async def cb_subject_suggestion(cb: CallbackQuery, repo: RequestsRepo, state: FS
         return
     subject = suggestions[idx]
     await state.update_data(subject=subject)
+    group = await editor_group(repo, cb.from_user.id)
+    tsug = await _teacher_suggestions(repo, group) if group else []
+    await state.update_data(suggestions=tsug)
     await cb.message.edit_text(
         f"{EDITOR_TITLE}\n\nПредмет: <b>{escape(subject)}</b>\n\n"
-        "👨‍🏫 Теперь напиши <b>фамилию преподавателя</b> или нажми «Пропустить».",
-        reply_markup=_skip_kb("ed:skip_teacher"),
+        + _teacher_text(tsug),
+        reply_markup=_teacher_kb(tsug, back=f"ed:bs:{weekday_s}:{parity}:{para_s}"),
     )
     await state.set_state(EditorState.teacher)
     await cb.answer()
@@ -821,10 +824,13 @@ async def cb_sub_subject_suggestion(cb: CallbackQuery, repo: RequestsRepo, state
         await cb.answer("Устарело", show_alert=True)
         return
     await state.update_data(subject=suggestions[idx])
+    group = await editor_group(repo, cb.from_user.id)
+    tsug = await _teacher_suggestions(repo, group) if group else []
+    await state.update_data(suggestions=tsug)
     await cb.message.edit_text(
         f"{EDITOR_TITLE}\n\nПредмет: <b>{escape(suggestions[idx])}</b>\n\n"
-        "👨‍🏫 Напиши <b>фамилию преподавателя</b> или нажми «Пропустить».",
-        reply_markup=_skip_kb("ed:sub_skip_teacher"),
+        + _teacher_text(tsug),
+        reply_markup=_teacher_kb(tsug, back=f"ed:ss:{date_s}:{para_s}:{action}"),
     )
     await state.set_state(EditorState.teacher)
     await cb.answer()
@@ -1183,6 +1189,63 @@ def _skip_kb(cb_data: str) -> InlineKeyboardMarkup:
     ])
 
 
+async def _teacher_suggestions(repo: RequestsRepo, group: str) -> list[str]:
+    """Преподаватели этой группы — для подстановки одним нажатием.
+
+    Список по всей базе — 186 человек, в кнопки не влезает. Нужны те,
+    кто ведёт именно эту группу. Строим после нормализации, иначе в
+    кнопках будет два одинаковых человека («Кокошка И. П.» и «Кокошка
+    И.П.» — план 090).
+    """
+    from infrastructure.database.repo.college_lesson import _clean_teacher_names
+
+    raw: list[str] = []
+    for parity in (PARITY_ODD, PARITY_EVEN, PARITY_ANY):
+        for l in await repo.base_lessons.get_week(group, parity):
+            t = (l.teacher or "").strip()
+            if t:
+                raw.append(t)
+    return _clean_teacher_names(raw)
+
+
+def _teacher_text(suggestions: list[str]) -> str:
+    return ("👨‍🏫 Напиши <b>фамилию преподавателя</b> или нажми «Пропустить»."
+            + _suggest_text(suggestions, "преподаватели группы"))
+
+
+def _teacher_kb(suggestions: list[str], back: str) -> InlineKeyboardMarkup:
+    """Подсказки + «Пропустить» + «Назад».
+
+    ``back`` задаёт и слой: у замены префикс ``ed:sub_``, у базовой
+    правки — нет. Раньше эту развилку повторяли три места.
+    """
+    rows = [[InlineKeyboardButton(text=t[:48], callback_data=f"ed:tsug:{i}")]
+            for i, t in enumerate(suggestions[:5])]
+    skip = ("ed:sub_skip_teacher" if back.startswith("ed:sub:")
+            else "ed:skip_teacher")
+    rows.append([InlineKeyboardButton(text="⏭ Пропустить", callback_data=skip)])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=back)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@editor_router.callback_query(F.data.startswith("ed:tsug:"))
+async def cb_teacher_suggestion(cb: CallbackQuery, repo: RequestsRepo, state: FSMContext):
+    data = await state.get_data()
+    suggestions = data.get("suggestions") or []
+    idx = int(cb.data.rsplit(":", 1)[1])
+    if idx >= len(suggestions):
+        await cb.answer("Устарело", show_alert=True)
+        return
+    await state.update_data(teacher=suggestions[idx])
+    sub = data.get("layer") == "sub"
+    await cb.message.edit_text(
+        f"{EDITOR_TITLE}\n\n🚪 <b>Кабинет</b> или «Пропустить».",
+        reply_markup=_skip_kb("ed:sub_skip_room" if sub else "ed:skip_room"),
+    )
+    await state.set_state(EditorState.room)
+    await cb.answer()
+
+
 async def _subject_suggestions(repo: RequestsRepo, group: str) -> list[str]:
     """Предметы группы — для подстановки одним нажатием."""
     seen: dict[str, int] = {}
@@ -1206,11 +1269,15 @@ async def on_subject(message: Message, repo: RequestsRepo, state: FSMContext):
         return
     await state.update_data(subject=subject)
     data = await state.get_data()
+    group = await editor_group(repo, message.from_user.id)
+    tsug = await _teacher_suggestions(repo, group) if group else []
+    await state.update_data(suggestions=tsug)
+    sub = data.get("layer") == "sub"
+    back = "ed:sub" if sub else "ed:menu"
     await message.answer(
         f"{EDITOR_TITLE}\n\nПредмет: <b>{escape(subject)}</b>\n\n"
-        "👨‍🏫 Напиши <b>фамилию преподавателя</b> или нажми «Пропустить».",
-        reply_markup=_skip_kb("ed:sub_skip_teacher" if data.get("layer") == "sub"
-                              else "ed:skip_teacher"),
+        + _teacher_text(tsug),
+        reply_markup=_teacher_kb(tsug, back=back),
     )
     await state.set_state(EditorState.teacher)
 
