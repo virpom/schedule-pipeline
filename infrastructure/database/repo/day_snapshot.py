@@ -65,6 +65,41 @@ class DaySnapshotRepo(BaseRepo):
         )
         return sorted((d for (d,) in result.all()), reverse=True)
 
+    async def get_dates_for_teacher(self, surname: str) -> list[datetime.date]:
+        """Даты, за которые в архиве есть пары этой фамилии.
+
+        Поиск по JSON в SQLite: payload — TEXT, поэтому LIKE по подстроке
+        фамилии. Снимков немного (по одному на группу в час), так что
+        грубый фильтр здесь дешевле выгрузки всего.
+        """
+        if not (surname or "").strip():
+            return []
+        result = await self.session.execute(
+            select(DaySnapshot.date)
+            .where(DaySnapshot.payload.like(f"%{surname}%"))
+            .distinct())
+        return sorted((d for (d,) in result.all()), reverse=True)
+
+    async def get_groups(self, date: datetime.date) -> list[str]:
+        """Группы, за которые есть снимок на дату."""
+        result = await self.session.execute(
+            select(DaySnapshot.group).where(DaySnapshot.date == date))
+        return list(result.scalars().all())
+
+    async def get_teacher_from_group(
+            self, group: str, date: datetime.date, surname: str) -> list[dict]:
+        """Пары преподавателя за дату из архива группы.
+
+        У преподавателя архив не свой: снимки пишутся по группам, а
+        преподаватель видит те, где он ведёт. Без этого история
+        преподавателя пуста — college_lesson хранит только будущее,
+        прошедшее удаляется ежедневно.
+        """
+        rows = await self.get(date, group)
+        if not rows:
+            return []
+        return [r for r in rows if surname in (r.get("teacher") or "")]
+
     async def exists(self, date: datetime.date, group: str) -> bool:
         result = await self.session.execute(
             select(DaySnapshot.id).where(

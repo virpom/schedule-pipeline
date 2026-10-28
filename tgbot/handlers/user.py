@@ -854,6 +854,24 @@ async def _snapshot_lessons(repo: RequestsRepo, group: str, date: datetime.date)
     return out
 
 
+async def _teacher_snapshot_lessons(repo: RequestsRepo, user: User,
+                                    date: datetime.date):
+    """Пары преподавателя за день из архива групп.
+
+    Архив пишется по группам, поэтому перебираем группы этой даты и
+    оставляем только пары нашей фамилии.
+    """
+    surname = (user.teacher_name or "").split()[0] if user.teacher_name else ""
+    if not surname:
+        return []
+    out = []
+    for group in await repo.snapshots.get_groups(date):
+        for item in await _snapshot_lessons(repo, group, date):
+            if surname in (getattr(item, "teacher", "") or ""):
+                out.append(item)
+    return sorted(out, key=lambda l: (l.para, l.group))
+
+
 async def _hist_page(repo: RequestsRepo, user: User, before: datetime.date | None) -> tuple[str, InlineKeyboardMarkup]:
     """Окно из пяти дат, начиная с самой свежей раньше ``before``.
 
@@ -862,6 +880,13 @@ async def _hist_page(repo: RequestsRepo, user: User, before: datetime.date | Non
     """
     if _is_teacher(user):
         dates = await repo.college_lessons.get_dates_for_teacher(user.teacher_name)
+        # college_lesson хранит только будущее: прошедшие дни удаляются
+        # ежедневно. Без архива история преподавателя пуста у всех —
+        # проверено на проде, 0 прошедших дат у всех трёх.
+        for d in await repo.snapshots.get_dates_for_teacher(
+                (user.teacher_name or "").split()[0] if user.teacher_name else ""):
+            if d not in dates:
+                dates.append(d)
     else:
         dates = await repo.college_lessons.get_dates_for_group(user.group)
         # day_snapshot — архив, который пишется каждый час. Он покрывает
@@ -925,6 +950,8 @@ async def cb_hist_date(cb: CallbackQuery, repo: RequestsRepo, user: User):
     lessons = await _user_lessons(repo, user, date)
     if not lessons and not _is_teacher(user) and user.group:
         lessons = await _snapshot_lessons(repo, user.group, date)
+    if not lessons and _is_teacher(user):
+        lessons = await _teacher_snapshot_lessons(repo, user, date)
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ К истории", callback_data="hist")],
         [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
