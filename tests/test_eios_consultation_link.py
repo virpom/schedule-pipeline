@@ -57,3 +57,16 @@ def test_zaochnoe_separate():
                           base_url="https://norvuz.ru")
     assert links.zaochnoe is not None
     assert "%D0%A1%D0%9F%D0%9E/%D0%97" in links.zaochnoe or "заоч" in links.zaochnoe.lower()
+
+
+def test_first_match_wins():
+    """Из двух подходящих берётся первая на странице, а не последняя.
+
+    Колледж уже один раз положил рядом файл-двойник: тогда выигрывала
+    последняя ссылка, и парсер разбирал не тот документ.
+    """
+    from urllib.parse import unquote
+    real = "/upload/timetable.ptk/СПО/Очная форма.xlsx"
+    dup = "/upload/timetable.ptk/СПО/Очная форма (1).xlsx"
+    links = extract_links(_page(real, dup), base_url="https://norvuz.ru")
+    assert unquote(links.ochoe).endswith("Очная форма.xlsx"), links.ochoe

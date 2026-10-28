@@ -167,7 +167,11 @@ def extract_links(html: str, base_url: str = PAGE_URL) -> SourceLinks:
             # падал с «не найдено ни одной пары» каждые 5 минут.
             continue
         elif "очная" in name and name.endswith(".xlsx"):
-            result.ochoe = url
+            # Первая, а не последняя. Колледж уже один раз положил рядом
+            # файл-двойник с тем же именем — тогда выиграла последняя
+            # ссылка, и парсер разбирал консультации вместо расписания.
+            # Настоящий файл всегда выше двойников на странице.
+            result.ochoe = result.ochoe or url
 
     if not result.ochoe:
         raise EiosParseError(
