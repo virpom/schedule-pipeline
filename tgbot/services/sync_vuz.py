@@ -214,9 +214,17 @@ async def replace_vuz_changes(
         )
     ]
 
+    # Только вузовские группы. Без ограничения сюда попадали ключи
+    # колледжных замен, и замена вуза на тот же (дата, группа, пара)
+    # молча не записывалась. Сейчас группы не пересекаются (@vuz), так
+    # что вреда нет, но условие держалось на совпадении имён, а не на
+    # коде. У соседнего replace_vuz_lessons ограничение стоит.
     manual = [
         row for (row,) in await repo.session.execute(
-            select(Substitution).where(Substitution.source != SOURCE_VUZ)
+            select(Substitution).where(
+                Substitution.source != SOURCE_VUZ,
+                Substitution.group.like(f"%{vuz.VUZ_SUFFIX}"),
+            )
         )
     ]
     manual_keys = {(r.date, r.group, r.para) for r in manual}
@@ -260,7 +268,11 @@ async def replace_vuz_changes(
         added += 1
 
     await repo.session.commit()
-    return added + len(manual)
+    # Только записанное этим вызовом. Раньше здесь было
+    # added + len(manual), и в ответ попадали все ручные замены скопом,
+    # включая колледжные, — число ничего не значило. В replace_vuz_lessons
+    # тот же возврат корректен: там manual уже ограничен вузом.
+    return added
 
 
 # --- якорь недели ------------------------------------------------------------
