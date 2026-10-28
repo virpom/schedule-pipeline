@@ -125,7 +125,36 @@ async def get_day_slots(repo: RequestsRepo, group: str, date: datetime.date,
                               group=group))
 
     slots.sort(key=lambda s: s.para)
-    return _join_paired(slots)
+    return _join_paired(_collapse_same_para(slots))
+
+
+def _collapse_same_para(slots: list[Slot]) -> list[Slot]:
+    """Две пары на одном номере — параллельные подгруппы.
+
+    У вуза физкультура идёт потоком, а иностранный — по подгруппам на том
+    же слоте. base_lesson хранит их двумя строками с разными наборами
+    недель. Раньше обе доходили до вывода как два блока «7)» подряд:
+    студент видел две пары в одно время и не понимал, что выбрать.
+
+    Склеиваем через « / » — как это уже делает _merge_para_clash при
+    материализации. Разделить «чей предмет» нельзя: признака подгруппы в
+    файле нет (проверено, 0 совпадений).
+    """
+    out: list[Slot] = []
+    for slot in slots:
+        prev = out[-1] if out else None
+        if (prev is not None and slot.para == prev.para
+                and slot.para_end == slot.para
+                and slot.subject and prev.subject
+                and slot.subject != prev.subject):
+            prev.subject = f"{prev.subject} / {slot.subject}"[:256]
+            prev.teacher = " / ".join(dict.fromkeys(
+                t for t in (prev.teacher, slot.teacher) if t))[:128]
+            prev.room = " / ".join(dict.fromkeys(
+                r for r in (prev.room, slot.room) if r))
+            continue
+        out.append(slot)
+    return out
 
 
 def _join_paired(slots: list[Slot]) -> list[Slot]:
