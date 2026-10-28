@@ -159,6 +159,13 @@ def extract_links(html: str, base_url: str = PAGE_URL) -> SourceLinks:
                 result.bells_monday = url
             elif "стандарт" in name:
                 result.bells_standard = url
+        elif "консультац" in unquote(url).lower():
+            # «Консультация преподавателей/Очная форма.xlsx» — другой файл
+            # с тем же именем листа. Раньше проверка была только по имени
+            # файла, и эта ссылка перетирала настоящее расписание: парсер
+            # получал 17 строк консультаций, возвращал 0 пар, и синк
+            # падал с «не найдено ни одной пары» каждые 5 минут.
+            continue
         elif "очная" in name and name.endswith(".xlsx"):
             result.ochoe = url
 
