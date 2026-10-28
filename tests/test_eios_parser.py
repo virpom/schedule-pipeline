@@ -125,7 +125,9 @@ def test_double_surname_teacher():
 
 
 def test_vacancy_lowercase_tail():
-    assert split_subject_teacher("Геология вакансия") == ("Геология", "вакансия")
+    # Хвост отделяется от предмета, а написание приводится к канону:
+    # «вакансия» со строчной доезжала до карточки пары как есть (159).
+    assert split_subject_teacher("Геология вакансия") == ("Геология", "Вакансия")
 
 
 def test_empty_cell():
