@@ -260,7 +260,15 @@ def sub_day_text(group: str, date: datetime.date, slots: list[Slot]) -> str:
     else:
         for s in slots:
             meta = " · ".join(x for x in (s.teacher, s.room) if x)
-            flag = " 🔄" if s.changed else ""
+            # action, а не только changed: get_day_slots ставит отменённой
+            # паре оба признака, и староста видел обычный 🔄 вместо
+            # «отменено» — проверить свою же правку было нельзя.
+            if getattr(s, "action", "") == SUB_CANCEL:
+                flag = " ❌ <i>отменено</i>"
+            elif s.changed:
+                flag = " 🔄"
+            else:
+                flag = ""
             lines.append(f"<b>{s.para})</b> {escape(s.subject)}{flag}")
             if meta:
                 lines.append(f"      {meta}")
