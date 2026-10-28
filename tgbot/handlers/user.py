@@ -760,7 +760,14 @@ async def _day_text(repo: RequestsRepo, user: User, date: datetime.date) -> str:
     # этом верное, поэтому не скрываем его — только предупреждаем.
     # У вуза свой источник: сайт колледжа может лежать, а расписание вуза
     # при этом свежее. Общий флаг показывал студенту вуза чужую проблему.
-    if is_vuz(user.group):
+    # is_vuz(None) — False, а у преподавателя group пуст всегда. Без
+    # этой ветки он получал предупреждение про сайт колледжа, даже если
+    # ведёт только вуз. Смотрим, откуда реально пришли его пары.
+    vuz_only = False
+    if _is_teacher(user) and not user.group:
+        groups = [str(getattr(l, "group", "") or "") for l in lessons]
+        vuz_only = bool(groups) and all(is_vuz(g) for g in groups)
+    if is_vuz(user.group) or vuz_only:
         stale = await source_state.is_stale_vuz(repo)
         last_ok = await source_state.last_ok_vuz(repo) if stale else None
     else:
