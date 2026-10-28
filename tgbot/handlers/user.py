@@ -801,7 +801,13 @@ async def _week_text(repo: RequestsRepo, user: User) -> str:
     by_date: dict[datetime.date, list] = {}
     for l in lessons:
         by_date.setdefault(l.date, []).append(l)
-    entries = [(d, by_date[d]) for d in sorted(by_date)]
+    # Все семь дней, а не только те, где что-то есть. Раньше пустой день
+    # просто не попадал в entries, и студент не отличал «в этот день пар
+    # нет» от «этот день не показали». format_day на пустом списке сам
+    # рисует «Занятий нет».
+    entries = [(start + datetime.timedelta(days=i),
+                by_date.get(start + datetime.timedelta(days=i), []))
+               for i in range(7)]
     meta = "group" if _is_teacher(user) else "teacher"
     show_rov = not _is_teacher(user)
     # Тот же флаг, что на экране дня: иначе преподаватель физкультуры
@@ -1080,7 +1086,16 @@ async def teacher_answer(message: Message, repo: RequestsRepo, user: User, state
     by_date: dict[datetime.date, list] = {}
     for l in scope:
         by_date.setdefault(l.date, []).append(l)
-    entries = [(d, by_date[d]) for d in sorted(by_date)]
+    if upcoming:
+        # Ищем вперёд — показываем неделю целиком, как в «Неделе»:
+        # пустой день у преподавателя тоже ответ, а не пропуск.
+        entries = [(today + datetime.timedelta(days=i),
+                    by_date.get(today + datetime.timedelta(days=i), []))
+                   for i in range(7)]
+    else:
+        # Показываем прошедшее — пустые дни не нужны, это не расписание
+        # недели, а найденные пары.
+        entries = [(d, by_date[d]) for d in sorted(by_date)]
     await message.answer(
         f"👨‍🏫 «{q}»:\n\n"
         + format_teacher_results(entries, bell, lunches, user.bell_detail),
