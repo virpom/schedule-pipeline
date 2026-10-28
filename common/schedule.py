@@ -358,21 +358,22 @@ def format_day(
                              f"  {_esc(lesson.subject)}{mark}")
             else:
                 lines.append(f"{p}) <b>{time_str}</b>  {_esc(lesson.subject)}{mark}")
+            raw_group = getattr(lesson, "group", "") or ""
             if meta == "group":
                 # Суффикс @vuz — служебный, человеку он не нужен.
                 # strip_unit снимает @vuz и с каждого имени в склейке:
                 # «АП-25@vuz, ИС-25@vuz» иначе не влезает в строку.
-                raw_group = getattr(lesson, "group", "") or ""
                 names = ", ".join(strip_unit(g) for g in raw_group.split(", ") if g)
                 m = " · ".join(x for x in (names, lesson.room) if x)
-                # Склейка из разных курсов: время второй половины пары и
-                # обед посчитаны по первой группе и для второй неверны.
-                # Проще предупредить, чем посчитать две разные сетки в
-                # одной строке.
-                if stream_differs(raw_group):
-                    m += " (курсы разные — время уточни у препода)"
             else:
                 m = " · ".join(x for x in (lesson.teacher, lesson.room) if x)
+            # Склейка из разных курсов: время второй половины пары и обед
+            # посчитаны по первой группе и для второй неверны. Ветка не
+            # только студенческая: склейку делает преподаватель, звонки
+            # подставляет его сетка, и предупреждение нужно ему первому.
+            # prompt: иначе он видит одно время и не знает, что оно чужое.
+            if stream_differs(raw_group):
+                m += " (группы разных курсов — время по первой)"
             m = _esc(m)
             if m:
                 lines.append(m)
