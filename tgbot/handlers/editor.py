@@ -1020,13 +1020,16 @@ def _json(raw) -> dict:
 
 
 @editor_router.callback_query(F.data == "ed:log")
-async def cb_log(cb: CallbackQuery, repo: RequestsRepo, state: FSMContext):
+async def cb_log(cb: CallbackQuery, repo: RequestsRepo, state: FSMContext | None = None,
+                  notify: bool = True):
     # Состояние-сирота после «Назад» превращало любой текст в
     # название предмета. Чистим на каждом переходе между экранами.
-    await state.clear()
+    if state is not None:
+        await state.clear()
     group = await editor_group(repo, cb.from_user.id)
     if not group:
-        await cb.answer("Нет прав", show_alert=True)
+        if notify:
+            await cb.answer("Нет прав", show_alert=True)
         return
     entries = await repo.edit_log.get_recent(group, limit=10)
     lines = [f"{EDITOR_TITLE}", "", "📜 <b>Последние правки</b>", ""]
@@ -1045,7 +1048,11 @@ async def cb_log(cb: CallbackQuery, repo: RequestsRepo, state: FSMContext):
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="ed:back")],
         ]),
     )
-    await cb.answer()
+    # notify=False, когда вызывающий уже ответил на callback: второй
+    # answer подряд Telegram отвергает 400-й ошибкой, и она годами
+    # сыпалась в лог после каждого откатa.
+    if notify:
+        await cb.answer()
 
 
 @editor_router.callback_query(F.data == "ed:undo")
@@ -1108,7 +1115,7 @@ async def cb_undo(cb: CallbackQuery, repo: RequestsRepo):
     # повторит ту же правку, и кнопка будет выглядеть сломанной.
     await repo.edit_log.delete(last.id)
     await cb.answer(msg, show_alert=True)
-    await cb_log(cb, repo)
+    await cb_log(cb, repo, notify=False)
 
 
 async def _rebuild(repo: RequestsRepo, date: datetime.date | None = None,
