@@ -166,7 +166,12 @@ def parse_week_list(text: str) -> tuple[int, ...]:
         m = re.match(r"^(\d+)\s*[-–]\s*(\d+)$", chunk)
         if m:
             a, b = int(m.group(1)), int(m.group(2))
-            if a <= b and b - a < 40:      # защита от «2026-2027»
+            # См. ниже: верхняя граница недели — 60.
+            # Неделя — 1..60 (см. разбор одиночного числа ниже). Проверка
+            # b - a < 40 от «2026-2027» не спасала: разница 1. Год учебного
+            # года, приписанный к списку, давал weeks=(2026, 2027) и пара
+            # показывалась в чужие недели.
+            if a <= b and b <= 60:
                 numbers.extend(range(a, b + 1))
             continue
         m = re.match(r"^\d+$", chunk)
@@ -174,9 +179,12 @@ def parse_week_list(text: str) -> tuple[int, ...]:
             n = int(chunk)
             # В файле встречается опечатка «6,8,10,1218» вместо «12,18».
             # Число больше 60 неделей быть не может — разбиваем на пары.
-            if n > 60 and len(chunk) % 2 == 0:
-                numbers.extend(int(chunk[i:i + 2])
-                               for i in range(0, len(chunk), 2))
+            # Верхняя граница 9999: «1218» — склейка двух двузначных,
+            # а «20262027» — год; разделяем по длине, а не по величине.
+            if 60 < n <= 9999 and len(chunk) % 2 == 0:
+                numbers.extend(n2 for n2 in (int(chunk[i:i + 2])
+                                             for i in range(0, len(chunk), 2))
+                               if 1 <= n2 <= 60)
             elif 1 <= n <= 60:
                 numbers.append(n)
     return tuple(sorted(set(numbers)))
