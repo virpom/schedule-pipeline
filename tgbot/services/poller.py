@@ -295,21 +295,26 @@ async def notify_new_schedule(bot, session_pool, changes: list[tuple[datetime.da
         day_photo = photos.random_photo(photos_path, weekday)
         prefix = "🆕 <b>Новое расписание</b>\n\n" if is_new else "🔄 <b>Расписание изменилось</b>\n\n"
         for user in subscribers:
+            # Без группы и без фамилии искать нечего: get_for_group_date(None)
+            # даёт «WHERE "group" IS NULL» — пусто, и человек получает
+            # «Занятий нет 🙌» на каждую дату. Он подписан, но ни на что;
+            # молчим, пока он не выберет группу или не назовётся.
+            is_teacher = user.role == "teacher"
+            if is_teacher and not user.teacher_name:
+                continue
+            if not is_teacher and not user.group:
+                continue
             # Будить только тех, чья группа (или чьи пары) поменялась.
             # Пустой набор — «не знаем, что именно», тогда шлём всем.
             if groups:
-                is_teacher = user.role == "teacher"
                 if not is_teacher and user.group not in groups:
-                    continue
-                if is_teacher and not user.teacher_name:
                     continue
             async with session_pool() as db:
                 repo = RequestsRepo(db)
-                if user.role == "teacher" and user.teacher_name:
+                if is_teacher:
                     lessons = await repo.college_lessons.get_for_teacher_date(user.teacher_name, date)
                 else:
                     lessons = await repo.college_lessons.get_for_group_date(user.group, date)
-            is_teacher = user.role == "teacher"
             if is_teacher:
                 gcg = group_course_map or None
             else:
