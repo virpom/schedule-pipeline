@@ -17,7 +17,11 @@ def _clean_teacher_names(raw) -> list[str]:
     инициалов отбрасывается, если есть полный вариант: иначе в списке
     висят «Ляшко» и «Ляшко Д.В.» как два разных человека.
     """
-    names = {teacher_base(t) for t in raw if t and teacher_base(t)}
+    # Запятая разделяет людей, а не продолжает фамилию: «Багомедова У.М.,
+    # Левочкина Н.А.» — двое. Раньше вся строка оставалась одной записью,
+    # и Левочкину нельзя было найти поиском вообще.
+    names = {part for t in raw if t
+             for part in (p.strip() for p in teacher_base(t).split(",")) if part}
     surnames_with_initials = {n.split()[0] for n in names if len(n.split()) > 1}
     return sorted(
         n for n in names
