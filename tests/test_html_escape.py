@@ -73,8 +73,19 @@ def test_empty_day_note_escaped():
 
 def test_editor_texts_escaped():
     from tgbot.handlers import editor
-    for fn in (editor.base_day_text, editor.sub_day_text):
+    # _week_mark — недели варианта пары вуза (план 153).
+    for fn in (editor.base_day_text, editor.sub_day_text, editor._week_mark):
         assert "escape(" in inspect.getsource(fn), f"{fn.__name__} не экранирует"
+
+
+def test_vuz_variant_line_escaped():
+    from tgbot.handlers import editor
+    from tgbot.services.schedule_layer import Slot
+    text = editor.base_day_text("ЭК-24@vuz", 1, "ANY", [
+        Slot(7, "Физика < 5", weeks="1,3"),
+        Slot(7, "Химия & <b>теория</b>", weeks="2,4"),
+    ])
+    assert "&lt; 5" in text and "&amp;" in text and "&lt;b&gt;" in text
 
 
 def test_bell_text_escaped():
