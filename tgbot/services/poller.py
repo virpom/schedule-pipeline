@@ -321,6 +321,10 @@ async def notify_new_schedule(bot, session_pool, changes: list[tuple[datetime.da
                     meta="group" if is_teacher else "teacher",
                     show_rov=not is_teacher,
                     group_course_group=gcg,
+                    # Тот же флаг, что на экране дня и недели: иначе
+                    # преподаватель на потоке получает шесть одинаковых
+                    # строк в рассылке и одну на экране.
+                    merge_groups=is_teacher,
                 )
             else:
                 text = format_no_lessons(date)

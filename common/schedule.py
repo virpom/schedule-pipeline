@@ -204,9 +204,12 @@ def _merge_groups(lessons) -> list:
 
     Пары склеиваются, когда совпадают номер пары, конец пары, предмет
     и преподаватель, — группы дописываются в ``group`` через запятую.
-    Остальные атрибуты берутся у первой: комната у потока обычно общая,
-    а если и разная, терять её всё равно нельзя — она останется от
-    первой группы.
+
+    Кабинеты тоже дописываются. Раньше оставался кабинет первой группы,
+    а комментарий обещал обратное («терять её всё равно нельзя — она
+    останется от первой группы»): студент второй группы шёл не туда.
+    На проде 3 таких слота, напр. «Начертательная геометрия», Лаговская
+    Е.В., М-310 и М-103.
     """
     merged: dict[tuple, object] = {}
     for lesson in lessons:
@@ -224,6 +227,13 @@ def _merge_groups(lessons) -> list:
                               getattr(lesson, "group", None)) if g]
         seen.group = ", ".join(dict.fromkeys(
             part.strip() for g in groups for part in g.split(",") if part.strip()))
+        # Кабинеты по различию: у потока они обычно общие, но бывают и
+        # разные, и тогда молча показать первый — послать не туда.
+        rooms = [r for r in (getattr(seen, "room", None),
+                             getattr(lesson, "room", None)) if r]
+        if len(set(rooms)) > 1:
+            seen.room = ", ".join(dict.fromkeys(
+                part.strip() for r in rooms for part in r.split(",") if part.strip()))
     return list(merged.values())
 
 
