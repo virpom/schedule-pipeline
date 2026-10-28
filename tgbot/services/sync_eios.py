@@ -390,13 +390,29 @@ def _merge_para_clash(slots: list) -> list:
             seen[slot.para] = slot
             continue
         subjects = {prev.subject, slot.subject}
-        if len(subjects) == 1:
+        teachers = {t for t in (prev.teacher, slot.teacher) if t}
+        # Пропускаем, только если различается вообще нечего. Раньше
+        # выходили при одном предмете — и подгруппы иностранного языка
+        # теряли второго преподавателя: оставался первый, второй
+        # исчезал без строки в логе.
+        # Пропускаем только полный дубль: нечего дописывать. Раньше
+        # сравнивали одни предметы, и всё остальное пропадало.
+        if (subjects == {prev.subject} and teachers <= {prev.teacher}
+                and slot.room in ("", prev.room)):
             continue
+        # Одинаковый предмет не склеиваем сам с собой: «Язык / Язык».
+        subject = (prev.subject if len(subjects) == 1
+                   else f"{prev.subject} / {slot.subject}")
         seen[slot.para] = Slot(
             para=slot.para,
-            subject=f"{prev.subject} / {slot.subject}"[:256],
-            teacher=f"{prev.teacher} / {slot.teacher}"[:128] if prev.teacher or slot.teacher else "",
-            room=prev.room or slot.room,
+            subject=subject[:256],
+            # Только различные: при «Язык / Язык, один преподаватель»
+            # получалось «И / И», и это ломает поиск по преподавателю.
+            teacher=" / ".join(dict.fromkeys(
+                t for t in (prev.teacher, slot.teacher) if t))[:128],
+            # Кабинеты тоже дописываем, а не берём первый: у подгрупп
+            # они разные. room=prev.room or slot.room терял второй молча.
+            room=" / ".join(dict.fromkeys(r for r in (prev.room, slot.room) if r)),
             changed=prev.changed or slot.changed,
             action=prev.action or slot.action,
             comment=prev.comment,
