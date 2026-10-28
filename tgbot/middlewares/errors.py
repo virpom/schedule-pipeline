@@ -14,12 +14,29 @@ locked`` под нагрузкой, ``None`` из репозитория. Обр
 import logging
 
 from aiogram import Bot
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, ErrorEvent, Message
 
 from config import Config
 
 TEXT_CALLBACK = "⚠️ Что-то пошло не так. Попробуй ещё раз или вернись в меню."
 TEXT_MESSAGE = "⚠️ Не получилось обработать. Попробуй ещё раз."
+
+# «message is not modified» — не сбой. Человек нажал кнопку, а текст и
+# клавиатура не изменились: «Завтра» в воскресенье, повторный тап «Назад».
+# Telegram отвечает на edit_text 400-й, и это исключение доходило сюда.
+# Пользователь получал «Что-то пошло не так» на совершенно нормальном
+# действии, а админ — сообщение «Ошибка в боте» на каждое такое нажатие.
+#
+# Остальные 400-е остаются ошибками: там правда что-то не так.
+_HARMLESS = ("message is not modified",)
+
+
+def _is_harmless(exc: BaseException) -> bool:
+    if not isinstance(exc, TelegramBadRequest):
+        return False
+    text = str(exc).lower()
+    return any(marker in text for marker in _HARMLESS)
 
 
 async def on_error(event: ErrorEvent, bot: Bot, config: Config) -> None:
@@ -34,9 +51,22 @@ async def on_error(event: ErrorEvent, bot: Bot, config: Config) -> None:
     traceback искать.
     """
     exc = event.exception
+    update = event.update.event
+
+    if _is_harmless(exc):
+        # Спиннер на кнопке надо снять, иначе он висит до таймаута и
+        # человек думает, что бот завис. Но ни алерта, ни тревоги админу:
+        # никого не сломалось.
+        logging.debug("нажатие без изменений: %s", exc)
+        if isinstance(update, CallbackQuery):
+            try:
+                await update.answer()
+            except Exception:
+                pass
+        return
+
     logging.exception("необработанная ошибка", exc_info=exc)
 
-    update = event.update.event
     try:
         if isinstance(update, CallbackQuery):
             # show_alert, а не всплывающее уведомление: иначе человек
