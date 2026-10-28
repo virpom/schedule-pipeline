@@ -154,6 +154,27 @@ def course_from_group(group: str) -> int:
     return max(1, min(acad_start - admission + 1, 4))
 
 
+def stream_differs(group: str) -> bool:
+    """В склейке оказались группы из разных потоков звонков.
+
+    `course_from_group` берёт ПЕРВЫЕ две цифры строки. У склейки
+    «ПРк-25, ЮР-24А» это 25, то есть 2 курс и поток II_III, хотя вторая
+    группа — 3 курс того же потока случайно, а «ДОУф-26, ЭК-23» смешивает
+    1 и 4 курс (оба I_IV, но время звонков у потока одно, а пары шли
+    параллельно у разных курсов). Время второй половины пары и обед всё
+    равно верны только для первой группы.
+
+    Нужен для того, чтобы не выдать приглашение на верное время, когда
+    оно заведомо чужое.
+    """
+    groups = [g.strip() for g in (group or "").split(",") if g.strip()]
+    if len(groups) < 2:
+        return False
+    # Смотрим на КУРС, а не на поток: «ПРк-25, ЮР-24А» — это 2 и 3 курс,
+    # но оба потока II_III, и по потокам разницы не видно.
+    return len({course_from_group(g) for g in groups}) > 1
+
+
 def course_group_from_group(group: str) -> str:
     # У вуза своя сетка звонков: 8 пар, последняя до 22:00. Деление на
     # потоки по курсам там не нужно — время одинаковое для всех.
@@ -342,6 +363,12 @@ def format_day(
                 raw_group = getattr(lesson, "group", "") or ""
                 names = ", ".join(strip_unit(g) for g in raw_group.split(", ") if g)
                 m = " · ".join(x for x in (names, lesson.room) if x)
+                # Склейка из разных курсов: время второй половины пары и
+                # обед посчитаны по первой группе и для второй неверны.
+                # Проще предупредить, чем посчитать две разные сетки в
+                # одной строке.
+                if stream_differs(raw_group):
+                    m += " (курсы разные — время уточни у препода)"
             else:
                 m = " · ".join(x for x in (lesson.teacher, lesson.room) if x)
             m = _esc(m)
