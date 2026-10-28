@@ -204,9 +204,10 @@ async def replace_vuz_changes(
     """
     from infrastructure.database.models import Substitution
 
-    if not changes:
-        return 0
-
+    # Ранний выход стоял здесь и обходил удаление: файл, перевыложенный
+    # без замен, оставлял старые применяться к расписанию вуза. У
+    # колледжа та же задача решена иначе — удаление идёт всегда, а
+    # пустой список просто ничего не добавляет.
     own_groups = [
         g for (g,) in await repo.session.execute(
             select(VuzGroup.name).where(VuzGroup.form == form)
