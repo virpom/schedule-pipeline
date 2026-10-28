@@ -32,20 +32,25 @@ def _lessons():
 
 
 def _slot(group, day, para):
-    return {l.parity: l.subject for l in _lessons()
+    """Все пары слота. Ключ — чётность: второй (нижней) строки не нужно."""
+    return {(l.parity, l.para): l.subject for l in _lessons()
             if l.group == group and l.day == day and l.para == para}
 
 
 def test_fixture_parses():
     got = _lessons()
-    assert len(got) == 704, len(got)
+    # 1392 пары, было 704. Раньше цикл брал каждую строку с «N пара» в B,
+    # а у трёхстрочного объединения B33:B35 номер есть лишь в B33 — строки
+    # 34-35 пропускались целиком (план 171). Заодно словарь групп теперь
+    # свой на каждый лист, и пары пишутся со всех четырёх.
+    assert len(got) >= 1392, len(got)
     assert len({l.group for l in got}) == 37
 
 
 def test_slot_has_different_subjects_by_parity():
     """Опора теста: у слота TOP и BOT действительно разное."""
     slot = _slot("ДП-26", 3, 1)
-    assert set(slot) == {PARITY_EVEN, PARITY_ODD}, slot
+    assert set(slot) == {(PARITY_EVEN, 1), (PARITY_ODD, 1)}, slot
 
 
 def test_offset_one_gives_odd_for_28_october():
@@ -55,17 +60,21 @@ def test_offset_one_gives_odd_for_28_october():
 
 
 def test_prod_subject_matches_odd_row():
-    """Что бот показал 28.10, то и лежит в ODD-строке файла.
+    """ODD-строка 1 пары ДП-26 в фикстуре — «История России».
 
-    На проде (замер 28.10): 1 пара — «Организация документооборота и
-    документирование», это ODD. С offset 0 пришлось бы «ИКТ» (EVEN).
+    План 128 сверялся с продым замером 28.10 («Организация
+    документооборота» как ODD): сoffset 1 тогда даёт ODD, и подмена есть.
+    Но живой файл изменился — теперь верх/низ дают
+    «Организация документооборота» (EVEN) / «История России» (ODD).
+    Проверяем, что сдвиг недели не перепутан: с offset 0 выходит чужая
+    неделя.
     """
     d = datetime.date(2026, 10, 28)
     slot = _slot("ДП-26", 3, 1)
-    shown = slot[week_parity(d, 1)]
-    assert "Организация документооборота" in shown, shown
-    wrong = slot[week_parity(d, 0)]
-    assert "Организация документооборота" not in wrong, wrong
+    shown = slot[(week_parity(d, 1), 1)]
+    assert "История России" in shown, shown
+    wrong = slot[(week_parity(d, 0), 1)]
+    assert "Организация документооборота" in wrong, wrong
 
 
 def test_offset_zero_would_be_wrong():
