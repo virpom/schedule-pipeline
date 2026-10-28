@@ -1039,7 +1039,11 @@ async def cb_log(cb: CallbackQuery, repo: RequestsRepo, state: FSMContext | None
         for e in entries:
             when = e.created_at.strftime("%d.%m %H:%M") if e.created_at else "—"
             where = _log_place(e)
-            lines.append(f"<b>{when}</b> · {where} · {e.action}")
+            # Чья правка: «Откатить» теперь снимает только свою, и
+            # староста должен видеть, что чужие в журнале есть. Иначе
+            # «нечего откатывать» выглядит как поломка.
+            mine = "" if e.user_id == cb.from_user.id else " · 👤 другой"
+            lines.append(f"<b>{when}</b> · {where} · {e.action}{mine}")
     await cb.message.edit_text(
         "\n".join(lines),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -1061,9 +1065,13 @@ async def cb_undo(cb: CallbackQuery, repo: RequestsRepo):
     if not group:
         await cb.answer("Нет прав", show_alert=True)
         return
-    last = await repo.edit_log.get_last(group)
+    # Свой, а не «последний по группе»: на одну группу бывает два
+    # старосты, и кнопка без указания, что именно откатывается, убирала
+    # чужую правку. Староста Б видел «Возвращено: <предмет>» и не
+    # понимал, что трогает работу А.
+    last = await repo.edit_log.get_last(group, cb.from_user.id)
     if not last:
-        await cb.answer("Нечего откатывать", show_alert=True)
+        await cb.answer("Нечего откатывать — своих правок нет", show_alert=True)
         return
 
     if last.layer == "base":
