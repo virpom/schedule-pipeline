@@ -41,9 +41,15 @@ async def send_message(
         reply_markup: InlineKeyboardMarkup = None,
         retry_after: list | None = None,
         blocked: list | None = None,
+        sent_to: list | None = None,
 ) -> bool:
+    """Отправить текст. ``sent_to`` собирает ``(chat_id, message_id)``.
+
+    id нужен только для отзыва: без него ошибочную рассылку не удалить
+    ничем — Bot API не отдаёт id уже отправленного сообщения.
+    """
     try:
-        await bot.send_message(
+        msg = await bot.send_message(
             user_id,
             text,
             disable_notification=disable_notification,
@@ -74,18 +80,23 @@ async def send_message(
         logging.exception(f"Target [ID:{user_id}]: failed")
     else:
         logging.info(f"Target [ID:{user_id}]: success")
+        if sent_to is not None and getattr(msg, "message_id", None):
+            sent_to.append((getattr(msg, "chat", None) and msg.chat.id or user_id,
+                            msg.message_id))
         return True
     return False
 
 
 async def _send_photo_by_id(bot: Bot, user_id, photo, caption: str):
-    """Отправить фото по кэшу file_id, загрузив его только в первый раз."""
+    """Отправить фото по кэшу file_id, загрузив его только в первый раз.
+
+    Возвращает ``types.Message`` или None (если заглушка бота его не дала).
+    """
     key = str(photo)
     cached = _file_ids.get(key)
     if cached:
         try:
-            await bot.send_photo(user_id, cached, caption=caption)
-            return
+            return await bot.send_photo(user_id, cached, caption=caption)
         except exceptions.TelegramBadRequest as e:
             # file_id привязан к боту и может протухнуть: Telegram чистит
             # старые файлы. Без повтора один битый id сломал бы отправку
@@ -95,6 +106,7 @@ async def _send_photo_by_id(bot: Bot, user_id, photo, caption: str):
     msg = await bot.send_photo(user_id, FSInputFile(photo), caption=caption)
     if msg and getattr(msg, "photo", None):
         _file_ids[key] = msg.photo[-1].file_id
+    return msg
 
 
 async def send_photo(
@@ -104,9 +116,10 @@ async def send_photo(
         caption: str = "",
         retry_after: list | None = None,
         blocked: list | None = None,
+        sent_to: list | None = None,
 ) -> bool:
     try:
-        await _send_photo_by_id(bot, user_id, photo, caption)
+        msg = await _send_photo_by_id(bot, user_id, photo, caption)
     except exceptions.TelegramBadRequest as e:
         logging.error("Target [ID:%s] BadRequest: %s", user_id, e.message)
     except exceptions.TelegramForbiddenError:
@@ -131,6 +144,9 @@ async def send_photo(
         logging.error("Target [ID:%s]: файл фото недоступен: %s (%s)",
                       user_id, photo, e)
     else:
+        if sent_to is not None and getattr(msg, "message_id", None):
+            sent_to.append((getattr(msg, "chat", None) and msg.chat.id or user_id,
+                            msg.message_id))
         return True
     return False
 
@@ -140,12 +156,14 @@ async def broadcast_schedule(
         items: list[tuple[Union[str, int], str, Union[str, None]]],
         rate: float = 20.0,
         blocked: list | None = None,
+        sent_to: list | None = None,
 ) -> int:
     """Send schedule messages (text or photo+text) with rate limiting.
 
     ``blocked`` собирает тех, кто заблокировал бота: это не «не дошло,
     повтори», а «адресат больше не наш». Повторять им бессмысленно,
-    поэтому их не кладём в failed.
+    поэтому их не кладём в failed. ``sent_to`` накапливает
+    ``(chat_id, message_id)`` доставленного — это и есть право на отзыв.
     """
     if not items:
         return 0
@@ -162,10 +180,12 @@ async def broadcast_schedule(
             before = len(blocked)
             if photo:
                 ok = await send_photo(bot, user_id, photo, text,
-                                      retry_after=wait, blocked=blocked)
+                                      retry_after=wait, blocked=blocked,
+                                      sent_to=sent_to)
             else:
                 ok = await send_message(bot, user_id, text,
-                                        retry_after=wait, blocked=blocked)
+                                        retry_after=wait, blocked=blocked,
+                                        sent_to=sent_to)
             blocked_here = len(blocked) > before
         except Exception:
             logging.exception("broadcast: сбой на %s, продолжаем", user_id)
@@ -187,9 +207,11 @@ async def broadcast_schedule(
             await asyncio.sleep(wait)
         for user_id, text, photo in failed:
             try:
-                ok = (await send_photo(bot, user_id, photo, text, blocked=blocked)
+                ok = (await send_photo(bot, user_id, photo, text, blocked=blocked,
+                                       sent_to=sent_to)
                       if photo
-                      else await send_message(bot, user_id, text, blocked=blocked))
+                      else await send_message(bot, user_id, text, blocked=blocked,
+                                              sent_to=sent_to))
             except Exception:
                 logging.exception("broadcast: сбой на %s, продолжаем", user_id)
                 ok = False
@@ -203,6 +225,7 @@ async def broadcast_many(
         bot: Bot,
         items: list[tuple[Union[str, int], str]],
         rate: float = 5.0,
+        sent_to: list | None = None,
 ) -> int:
     """Send personalized messages with rate limiting.
 
@@ -219,7 +242,8 @@ async def broadcast_many(
     for user_id, text in items:
         wait = [0.0]
         try:
-            if await send_message(bot, user_id, text, retry_after=wait):
+            if await send_message(bot, user_id, text, retry_after=wait,
+                                  sent_to=sent_to):
                 sent += 1
             else:
                 failed.append((user_id, text))
@@ -238,7 +262,7 @@ async def broadcast_many(
             await asyncio.sleep(wait)
         for user_id, text in failed:
             try:
-                if await send_message(bot, user_id, text):
+                if await send_message(bot, user_id, text, sent_to=sent_to):
                     sent += 1
             except Exception:
                 logging.exception("broadcast: сбой на %s, продолжаем", user_id)
