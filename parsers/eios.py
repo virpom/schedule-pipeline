@@ -57,7 +57,11 @@ _TEACHER_RE = re.compile(
     rf"|{_NAME}\s+{_NAME}|[Вв]акансия)$"
 )
 _TIME_HEAD_RE = re.compile(
-    r"^\s*(?:\d+-я\s+пара\s*-\s*|с\s+\d+[.:]\d+\s+до\s*\.?[\d.:]+\s*-?\s*)",
+    # В источнике оба префикса бывают сразу: «6-я пара с 18.05 до 19.40 - ».
+    # Раньше они шли как «или-или», и такая строка проходила с непустым
+    # хвостом — время оставалось в названии предмета.
+    r"^\s*(?:\d+-я\s+пара(?:\s+с\s+\d+[.:]\d+\s+до\s*\.?[\d.:]+)?\s*-\s*"
+    r"|с\s+\d+[.:]\d+\s+до\s*\.?[\d.:]+\s*-?\s*)",
     re.IGNORECASE,
 )
 _TIME_TAIL_RE = re.compile(rf"\s+({_NAME}\s+[А-ЯЁ]\.\s*[А-ЯЁ]?\.?)\s*$")
@@ -267,6 +271,22 @@ def _strip_time_note(subject: str) -> tuple[str, str | None]:
 # --- очное расписание --------------------------------------------------------
 
 
+def _own_para(sheet, row: int, groups: dict[int, str]) -> int | None:
+    """Номер пары, написанный в самой ячейке строки: «6-я пара с 18.05 …».
+
+    Нужен для строк без номера в колонке B. Возвращает None, если ни в
+    одной ячейке строки номера нет — тогда строку читать нечем.
+    """
+    for col in groups:
+        value = sheet.cell(row, col).value
+        if not value:
+            continue
+        match = re.match(r"\s*(\d+)-я\s+пара", str(value))
+        if match:
+            return int(match.group(1))
+    return None
+
+
 def parse_ochoe(data: bytes) -> list[BaseLesson]:
     """Разобрать «Очная форма.xlsx»."""
     try:
@@ -306,12 +326,28 @@ def parse_ochoe(data: bytes) -> list[BaseLesson]:
                 day = DAY_NAMES[str(head).strip().upper()]
 
             para_cell = sheet.cell(row, 2).value
-            if not (para_cell and "пара" in str(para_cell)):
+            if day is None:
                 continue
-            para_match = _PARA_RE.search(str(para_cell))
-            if not para_match or day is None:
-                continue
-            para = int(para_match.group())
+            if para_cell and "пара" in str(para_cell):
+                para_match = _PARA_RE.search(str(para_cell))
+                if not para_match:
+                    continue
+                para = int(para_match.group())
+            else:
+                # Пара, дописанная ниже своего номера. Так бывает, когда
+                # пара занимает три строки: в B стоит «5 пара» на объединении
+                # B33:B35, а в C35 лежит «6-я пара с 18.05 до 19.40 - …» —
+                # у неё свой номер прямо в тексте. Раньше строка 35
+                # пропускалась целиком, потому что в B номера нет, и
+                # шестая пара ТЭф-23 не попадала в базу вовсе.
+                #
+                # Номер берём ТОЛЬКО если он написан в самой ячейке.
+                # Растянуть номер из B на все строки объединения — неверно:
+                # строка 34 это вторая половина пятой пары, и она легла бы
+                # поверх пятой.
+                para = _own_para(sheet, row, groups)
+                if para is None:
+                    continue
 
             for col, group in groups.items():
                 top = sheet.cell(row, col).value
