@@ -50,6 +50,10 @@ def _looks_like_legacy_db(conn) -> bool:
     return all(inspector.has_table(t) for t in _LEGACY_MARKERS)
 
 
+def _has_version_table(conn) -> bool:
+    return inspect(conn).has_table("alembic_version")
+
+
 def _stamp_baseline(conn) -> None:
     """Проставить baseline-версию напрямую, не запуская env.py."""
     conn.execute(text("CREATE TABLE IF NOT EXISTS alembic_version "
@@ -66,6 +70,23 @@ def run_migrations_sync(config: Config) -> None:
     try:
         with engine.connect() as conn:
             current = _current_revision(conn)
+            if current is None and _has_version_table(conn):
+                # Таблица версий есть, но пуста: схема уже под alembic, и
+                # `alembic stamp head` тут угадывает — down_revision
+                # неизвестен. Угадывание в любую сторону портит базу:
+                # «baseline» прогоняет все миграции заново на живой схеме
+                # (OperationalError: table base_lesson already exists),
+                # «head» объявляет недоприменённую базу актуальной.
+                # Пере-применение частично завершает upgrade и оставляет
+                # версию на середине — это и воспроизводит пустую таблицу.
+                raise RuntimeError(
+                    "Таблица alembic_version пуста, а схема на месте: "
+                    "неизвестно, какие миграции применены. Проверь схему и "
+                    "проставь версию вручную (alembic stamp <revision>); "
+                    "восстанавливай из дампа через "
+                    "'sqlite3 old.db .dump | sqlite3 new.db', а не через "
+                    "create_all"
+                )
             if current is None and _looks_like_legacy_db(conn):
                 logging.info("alembic: существующая БД — помечаю как %s", BASELINE_REVISION)
                 _stamp_baseline(conn)
