@@ -1394,10 +1394,14 @@ async def set_editor(message: Message, repo: RequestsRepo, config: Config,
 
 async def _ask_group(event, repo: RequestsRepo, state: FSMContext, user):
     """Спросить группу кнопками из известных групп."""
-    # Группы из обоих источников: из пар с сайта и из базового расписания
+    # Группы из обоих источников: из пар с сайта и из базового расписания.
+    # Вузовские отбрасываем: из 129 групп 92 — это @vuz (71%), и админ
+    # ошибался на первом же неверном нажатии. Редактор вузовскую группу
+    # открывает и показывает пары, но правка на ней не применяется —
+    # base_lesson для неё перезапишется синком при следующем опросе.
     base_groups = await repo.base_lessons.get_groups()
     site_groups = await repo.college_lessons.get_groups()
-    groups = sorted(set(base_groups) | set(site_groups))
+    groups = sorted(g for g in set(base_groups) | set(site_groups) if not is_vuz(g))
     rows = []
     for i in range(0, len(groups), 3):
         rows.append([InlineKeyboardButton(text=g, callback_data=f"adm:ed_grp:{g}")
