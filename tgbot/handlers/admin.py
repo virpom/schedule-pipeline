@@ -1166,14 +1166,17 @@ async def cb_setting(cb: CallbackQuery, config: Config, state: FSMContext):
 async def m_setting(message: Message, repo: RequestsRepo, state: FSMContext):
     current = await state.get_state()
     item = next((s for s in SETTINGS.values() if s.state.state == current), None)
-    await state.clear()
     if item is None:
+        await state.clear()
         return
     try:
         value = item.parse(message.text.strip())
     except (ValueError, TypeError):
+        # Состояние НЕ трогаем: «Попробуй ещё раз» иначе уходил бы в
+        # any_text, и следующее верное значение не попадало бы в m_setting.
         await message.answer("Неверное значение. Попробуй ещё раз.")
         return
+    await state.clear()
     for key, val in zip(item.keys, value):
         await repo.settings.set(key, val)
     await message.answer(item.ok.format(*value))
