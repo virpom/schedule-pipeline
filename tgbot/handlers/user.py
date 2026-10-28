@@ -1090,7 +1090,6 @@ async def cb_find_cancel(cb: CallbackQuery, user: User, repo: RequestsRepo, stat
     await cb.answer()
 
 
-@user_router.message(SubjectSearch.waiting)
 def _subject_pick(lessons: list, subj: str, limit: int = 5) -> list:
     """Подходящие пары, самые поздние первыми.
 
@@ -1104,6 +1103,7 @@ def _subject_pick(lessons: list, subj: str, limit: int = 5) -> list:
     return matched[:limit]
 
 
+@user_router.message(SubjectSearch.waiting)
 async def subject_answer(message: Message, repo: RequestsRepo, user: User, state: FSMContext):
     await state.clear()
     subj = message.text.strip()
