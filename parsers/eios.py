@@ -56,10 +56,8 @@ _TEACHER_RE = re.compile(
     rf"^(?:{_NAME}(?:\s*[–-]\s*{_NAME})?\s+[А-ЯЁ]\.\s*[А-ЯЁ]?\.*"
     rf"|{_NAME}\s+{_NAME}|[Вв]акансия)$"
 )
-# Обе ветки сразу: «6-я пара с 18.05 до 19.40 - » — так пишут в источнике.
 _TIME_HEAD_RE = re.compile(
-    r"^\s*(?:\d+-я\s+пара(?:\s+с\s+\d+[.:]\d+\s+до\s*\.?[\d.:]+)?\s*-\s*"
-    r"|с\s+\d+[.:]\d+\s+до\s*\.?[\d.:]+\s*-?\s*)",
+    r"^\s*(?:\d+-я\s+пара\s*-\s*|с\s+\d+[.:]\d+\s+до\s*\.?[\d.:]+\s*-?\s*)",
     re.IGNORECASE,
 )
 _TIME_TAIL_RE = re.compile(rf"\s+({_NAME}\s+[А-ЯЁ]\.\s*[А-ЯЁ]?\.?)\s*$")
@@ -301,43 +299,19 @@ def parse_ochoe(data: bytes) -> list[BaseLesson]:
             if rng.min_col == rng.max_col and rng.max_row > rng.min_row
         }
 
-        # Номер пары по каждой строке. B33:B35 — одно объединение на три
-        # строки со значением «5 пара»: у B34 и B35 значения нет, и строки
-        # раньше пропускались целиком, хотя в C35 стоит настоящая пара.
-        # Строка с «6-я пара с 18.05 до 19.40 - » в B пустая — там номер
-        # пары берётся из самого текста, иначе пара ляжет поверх п5.
-        row_para: dict[int, int] = {}
-        for rng in sheet.merged_cells.ranges:
-            if rng.min_col == 2 and rng.max_col == 2:
-                value = sheet.cell(rng.min_row, 2).value
-                found = _PARA_RE.search(str(value)) if value else None
-                if found:
-                    for merged_row in range(rng.min_row, rng.max_row + 1):
-                        row_para[merged_row] = int(found.group())
-        for row in range(1, sheet.max_row + 1):
-            para_cell = sheet.cell(row, 2).value
-            if para_cell and "пара" in str(para_cell):
-                para_match = _PARA_RE.search(str(para_cell))
-                if para_match:
-                    row_para[row] = int(para_match.group())
-            else:
-                for col in groups:
-                    subject, _ = split_subject_teacher(sheet.cell(row, col).value)
-                    m = _TIME_HEAD_RE.match(subject)
-                    own = m and re.match(r"(\d+)-я\s+пара", subject[: m.end()])
-                    if own:
-                        row_para[row] = int(own.group(1))
-                        break
-
         day: int | None = None
         for row in range(1, sheet.max_row + 1):
             head = sheet.cell(row, 1).value
             if head and str(head).strip().upper() in DAY_NAMES:
                 day = DAY_NAMES[str(head).strip().upper()]
 
-            para = row_para.get(row)
-            if para is None or day is None:
+            para_cell = sheet.cell(row, 2).value
+            if not (para_cell and "пара" in str(para_cell)):
                 continue
+            para_match = _PARA_RE.search(str(para_cell))
+            if not para_match or day is None:
+                continue
+            para = int(para_match.group())
 
             for col, group in groups.items():
                 top = sheet.cell(row, col).value
