@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert
 
 from infrastructure.database.models import BellLunch, BellSchedule
@@ -97,9 +97,21 @@ class BellScheduleRepo(BaseRepo):
         await self.session.commit()
 
     async def seed_if_empty(self) -> None:
-        result = await self.session.execute(select(func.count()).select_from(BellSchedule))
-        if result.scalar_one() > 0:
-            return
+        """Завести недостающие звонки, не трогая существующие.
+
+        Раньше метод молчал, если в таблице была хоть одна строка. Из-за
+        этого правка DEFAULT_BELL не доходила до живой базы: на проде
+        добавили 6-ю пару обычных дней и понедельника, а в bell_schedule
+        осталось 42 строки без них, и студент продолжал видеть заглушку
+        «пара 6».
+
+        Теперь досыпаем то, чего нет. Существующие строки не меняем:
+        их мог поправить админ через редактор, и затирать его правки
+        нельзя.
+        """
+        existing = {(b.day_type, b.course_group, b.para)
+                    for b in (await self.session.execute(
+                        select(BellSchedule))).scalars()}
         rows = [
             {
                 "day_type": d,
@@ -111,9 +123,15 @@ class BellScheduleRepo(BaseRepo):
                 "end": datetime.time.fromisoformat(e),
             }
             for d, c, p, s, h1e, h2s, e in DEFAULT_BELL
+            if (d, c, p) not in existing
         ]
-        await self.session.execute(insert(BellSchedule).values(rows))
+        if rows:
+            await self.session.execute(insert(BellSchedule).values(rows))
 
+        # Обеды — по тому же правилу: досыпаем недостающие, не дублируя.
+        have_lunch = {(x.day_type, x.course_group, x.para, x.position)
+                      for x in (await self.session.execute(
+                          select(BellLunch))).scalars()}
         lunch_rows = [
             {
                 "day_type": d,
@@ -124,6 +142,8 @@ class BellScheduleRepo(BaseRepo):
                 "position": pos,
             }
             for d, c, s, e, p, pos in DEFAULT_LUNCH
+            if (d, c, p, pos) not in have_lunch
         ]
-        await self.session.execute(insert(BellLunch).values(lunch_rows))
+        if lunch_rows:
+            await self.session.execute(insert(BellLunch).values(lunch_rows))
         await self.session.commit()
