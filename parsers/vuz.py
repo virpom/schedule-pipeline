@@ -779,8 +779,13 @@ def _merge_same_subject(lessons: list[VuzLesson]) -> list[VuzLesson]:
         kind = _kind(lesson.subject)
         if kind and kind not in found.subject:
             found.subject = f"{found.subject} + {kind}"
-        if not found.teacher and lesson.teacher:
-            found.teacher = lesson.teacher
+        # Дописываем, а не заполняем пустое: лекцию и практику могут
+        # вести разные люди. Раньше второй исчезал, и студент шёл на
+        # практику, не зная преподавателя; в его расписании пары тоже
+        # не было, потому что она записана на первого.
+        if lesson.teacher and lesson.teacher not in found.teacher:
+            found.teacher = (f"{found.teacher}, {lesson.teacher}"
+                             if found.teacher else lesson.teacher)
     return result
 
 
