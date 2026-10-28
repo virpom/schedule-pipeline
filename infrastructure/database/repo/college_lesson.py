@@ -184,11 +184,20 @@ class CollegeLessonRepo(BaseRepo):
         return _clean_teacher_names(t for (t,) in result.all() if t)
 
     async def get_teachers_vuz(self) -> list[str]:
-        """Преподаватели вуза: их пары лежат в base_lesson, не в college_lesson."""
+        """Преподаватели вуза.
+
+        Не только base_lesson, как было раньше: college_lesson — это
+        материализованный base_lesson ПЛЮС замены. Кто ведёт пару только
+        по замене (заменил заболевшего), в base_lesson отсутствует вовсе,
+        и найден бы не был. На проде таких трое.
+        """
         result = await self.session.execute(
             select(BaseLesson.teacher)
             .where(BaseLesson.group.like(f"%{VUZ_SUFFIX}"))
-            .distinct()
+            .union(
+                select(CollegeLesson.teacher)
+                .where(CollegeLesson.group.like(f"%{VUZ_SUFFIX}"))
+            )
         )
         return _clean_teacher_names(t for (t,) in result.all() if t)
 
