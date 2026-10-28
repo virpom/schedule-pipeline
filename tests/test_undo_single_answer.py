@@ -21,12 +21,52 @@ def test_log_has_notify_flag():
         "по умолчанию должен отвечать: кнопку зовут из меню"
 
 
-def test_log_answers_only_when_notified():
-    body = _src(editor.cb_log)
-    assert "if notify:" in body
-    # единственный cb.answer под условием
-    calls = [l for l in body.split("\n") if "cb.answer" in l and not l.strip().startswith("#")]
-    assert all("notify" in body[b"".find(b"") :] for _ in calls) or True
+def _run_log(notify: bool) -> list:
+    """Настоящий cb_log: сколько раз ответил на callback."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    answered = []
+
+    class _Log:
+        @staticmethod
+        async def get_recent(group, limit=10):
+            return []
+
+    class _Editors:
+        @staticmethod
+        async def get_group_for(uid):
+            return "ДП-26"
+
+    class _Repo:
+        edit_log = _Log()
+        editors = _Editors()
+
+    async def scenario():
+        cb = MagicMock()
+        cb.from_user.id = 1
+        cb.message = MagicMock()
+        cb.message.edit_text = AsyncMock()
+
+        async def answer(text=None, show_alert=False):
+            answered.append(text)
+
+        cb.answer = answer
+        state = MagicMock()
+        state.clear = AsyncMock()
+        await editor.cb_log(cb, _Repo(), state, notify=notify)
+
+    asyncio.run(scenario())
+    return answered
+
+
+def test_log_answers_when_notified():
+    assert len(_run_log(True)) == 1
+
+
+def test_log_silent_when_not_notified():
+    """Иначе cb_undo отвечает дважды — Telegram даёт 400."""
+    assert _run_log(False) == []
 
 
 def test_undo_calls_log_without_notify():
