@@ -11,6 +11,7 @@
 locked`` под нагрузкой, ``None`` из репозитория. Обработчик закрывает их
 все сразу, включая будущие, — поэтому он важнее точечной валидации.
 """
+import datetime
 import logging
 
 from aiogram import Bot
@@ -80,12 +81,45 @@ async def on_error(event: ErrorEvent, bot: Bot, config: Config) -> None:
         logging.exception("не удалось ответить пользователю после ошибки")
 
     where = f"{type(exc).__name__} в {_place(exc)}"
+    if not _should_alert(where):
+        return
     for admin_id in config.tg_bot.admin_ids:
         try:
             await bot.send_message(admin_id, f"⚠️ Ошибка в боте: {where}")
         except Exception:
             # Админ мог заблокировать бота — молча пропускаем.
             pass
+
+
+# Тревога по одному месту не чаще раза в час. Ошибка обычно повторяется
+# на каждом запросе: без ограничения админ получал сотню одинаковых
+# сообщений и переставал их читать — а тогда не заметит и настоящую.
+ALERT_COOLDOWN = datetime.timedelta(hours=1)
+_alerted: dict[str, datetime.datetime] = {}
+
+
+def _should_alert(where: str, now: datetime.datetime | None = None) -> bool:
+    """Пора ли тревожить админа из-за ошибки в этом месте.
+
+    Один и тот же ``файл:строка`` — раз в ALERT_COOLDOWN. Разные места
+    не глушат друг друга: если сломалось второе, о нём сообщат сразу.
+    """
+    now = now or datetime.datetime.now()
+    last = _alerted.get(where)
+    if last is not None and now - last < ALERT_COOLDOWN:
+        return False
+    _alerted[where] = now
+    # Ограничиваем размер, иначе словарь растёт с каждой новой ошибкой.
+    # Сначала выбрасываем просроченные; если и после этого много —
+    # самые старые, независимо от срока. Держать 10 000 мест, чтобы
+    # потом пожалеть о пятидесяти, смысла нет.
+    if len(_alerted) > 100:
+        for key in [k for k, v in _alerted.items() if now - v >= ALERT_COOLDOWN]:
+            _alerted.pop(key, None)
+        if len(_alerted) > 100:
+            for key, _ in sorted(_alerted.items(), key=lambda kv: kv[1])[:len(_alerted) - 100]:
+                _alerted.pop(key, None)
+    return True
 
 
 def _place(exc: BaseException) -> str:
