@@ -707,7 +707,18 @@ async def cb_menu(cb: CallbackQuery, user: User, repo: RequestsRepo, state: FSMC
     await cb.answer()
 
 
+# Что сказать человеку без группы или фамилии. Раньше он получал
+# «Занятий нет 🙌» — ложь: бот не знает его группы, а не расписание пусто.
+NO_IDENTITY = ("🎯 <b>Сначала выбери группу</b>\n\n"
+               "Пока бот не знает, где ты учишься, расписания у него для "
+               "тебя нет.")
+
+
 async def _day_text(repo: RequestsRepo, user: User, date: datetime.date) -> str:
+    # Проверка стоит здесь, а не в обработчиках: _day_text зовут и кнопка
+    # дня, и текстовое меню, и «на завтра». Одна точка — один ответ.
+    if not _has_identity(user):
+        return NO_IDENTITY
     bell, lunches = await repo.bell_schedule.get_context()
     gcg = await _course_group_map(repo, user)
     lessons = await _user_lessons(repo, user, date)
@@ -793,6 +804,8 @@ async def cb_tomorrow(cb: CallbackQuery, repo: RequestsRepo, user: User):
 
 
 async def _week_text(repo: RequestsRepo, user: User) -> str:
+    if not _has_identity(user):
+        return NO_IDENTITY
     bell, lunches = await repo.bell_schedule.get_context()
     gcg = await _course_group_map(repo, user)
     start = datetime.date.today()
