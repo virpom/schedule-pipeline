@@ -1091,6 +1091,19 @@ async def cb_find_cancel(cb: CallbackQuery, user: User, repo: RequestsRepo, stat
 
 
 @user_router.message(SubjectSearch.waiting)
+def _subject_pick(lessons: list, subj: str, limit: int = 5) -> list:
+    """Подходящие пары, самые поздние первыми.
+
+    Срез [:5] стоял ДО сортировки, а порядок задаёт репозиторий:
+    get_all_for_group отдаёт date.desc(), get_all_for_teacher — date.
+    Преподаватель под заголовком «последние занятия» получал самые
+    старые. Сортируем сами, потом режем.
+    """
+    matched = [l for l in lessons if subj.casefold() in (l.subject or "").casefold()]
+    matched.sort(key=lambda l: (l.date, l.para), reverse=True)
+    return matched[:limit]
+
+
 async def subject_answer(message: Message, repo: RequestsRepo, user: User, state: FSMContext):
     await state.clear()
     subj = message.text.strip()
@@ -1098,7 +1111,7 @@ async def subject_answer(message: Message, repo: RequestsRepo, user: User, state
         lessons = await repo.college_lessons.get_all_for_teacher(user.teacher_name)
     else:
         lessons = await repo.college_lessons.get_all_for_group(user.group)
-    matched = [l for l in lessons if subj.casefold() in l.subject.casefold()]
+    matched = _subject_pick(lessons, subj)
     if not matched:
         await message.answer(f"По «{subj}» ничего не нашлось", reply_markup=BACK_KB)
         return
