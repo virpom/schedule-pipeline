@@ -348,7 +348,18 @@ async def notify_new_schedule(bot, session_pool, changes: list[tuple[datetime.da
             items.append((chat.id, prefix + text, day_photo))
 
     blocked: list[int] = []
-    await broadcast_schedule(bot, items, rate=rate, blocked=blocked)
+    sent_to: list = []
+    await broadcast_schedule(bot, items, rate=rate, blocked=blocked,
+                             sent_to=sent_to)
+    # id доставленного — единственное, чем ошибочную рассылку расписания
+    # можно отозвать: Bot API не называет id уже отправленного сообщения.
+    if sent_to:
+        async with session_pool() as db:
+            try:
+                await RequestsRepo(db).sent_messages.add_batch(
+                    [(c, m, "schedule") for c, m in sent_to])
+            except Exception:
+                logging.exception("broadcast: не удалось сохранить id")
     # Заблокировавшие снимаются с подписки: иначе они остаются в
     # get_subscribed() навсегда, и каждый цикл тратит на них запрос и
     # строку в логе. На проде их было 11 из 228.
@@ -379,6 +390,15 @@ async def poller_loop(bot, session_pool, config: Config) -> None:
             rate = float(settings["notify_rate"])
             now = datetime.datetime.now()
             await _purge_past(session_pool)
+
+            # Id отправленного старше 48 часов бесполезны: Bot API их
+            # уже не удалит. Тот же часовой такт, что и у архива.
+            if time.monotonic() - last_snapshot >= 3600:
+                try:
+                    async with session_pool() as db:
+                        await RequestsRepo(db).sent_messages.purge_older(48)
+                except Exception:
+                    logging.exception("sent_message purge failed")
 
             # Архив прошедших дней: раз в час, чтобы зафиксировать, что было
             # (сайт может обновить файл задним числом — история не потеряется).

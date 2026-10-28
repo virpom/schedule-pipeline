@@ -9,6 +9,7 @@ from .day_snapshot import DaySnapshot
 from .schedule_edit import ScheduleEdit
 from .schedule_editor import ScheduleEditor
 from .schedule_file import ScheduleFile
+from .sent_message import SentMessage
 from .setting import Setting
 from .substitution import Substitution
 from .user import User
@@ -17,5 +18,5 @@ from .vuz_group import VuzGroup
 __all__ = [
     "Base", "BaseLesson", "BellLunch", "BellReminder", "BellSchedule", "Chat",
     "CollegeLesson", "DaySnapshot", "ScheduleEdit", "ScheduleEditor",
-    "ScheduleFile", "Setting", "Substitution", "User", "VuzGroup",
+    "ScheduleFile", "SentMessage", "Setting", "Substitution", "User", "VuzGroup",
 ]

@@ -17,7 +17,7 @@ from common.schedule import (bells_group, format_bell, format_day, is_vuz,
                              strip_unit)
 from config import Config
 from infrastructure.database.repo.requests import RequestsRepo
-from tgbot.services import photos, source_state
+from tgbot.services import photos, revoke, source_state
 from tgbot.services.broadcaster import broadcast_many
 from tgbot.services.poller import notify_new_schedule
 
@@ -113,6 +113,8 @@ def _admin_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="✏️ Редакторы", callback_data="adm:editors"),
          InlineKeyboardButton(text="📢 Рассылка", callback_data="adm:broadcast_menu")],
         [InlineKeyboardButton(text="🔔 Тест уведомления", callback_data="adm:notify")],
+        [InlineKeyboardButton(text="🗑 Отозвать последнюю рассылку",
+                              callback_data="adm:revoke")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu")],
     ])
 
@@ -517,8 +519,17 @@ async def _preview_for_user(message: Message, repo: RequestsRepo, config: Config
         await message.answer(text)
 
 
-async def _report_broadcast(bot, chat_id, items, rate):
-    sent = await broadcast_many(bot, items, rate=rate)
+async def _report_broadcast(bot, chat_id, items, rate, repo):
+    sent_to: list = []
+    sent = await broadcast_many(bot, items, rate=rate, sent_to=sent_to)
+    # Без сохранённых id ошибочную рассылку не отозвать: Bot API не
+    # называет id уже отправленного сообщения. Пишем пачкой, а не по
+    # строке — при 246 получателях это одна вставка вместо 246.
+    try:
+        await repo.sent_messages.add_batch(
+            [(c, m, "broadcast") for c, m in sent_to])
+    except Exception:
+        logging.exception("не удалось сохранить id рассылки")
     try:
         await bot.send_message(chat_id, f"Готово: отправлено {sent}/{len(items)}")
     except Exception:
@@ -776,7 +787,99 @@ async def cb_bc_send(cb: CallbackQuery, repo: RequestsRepo, config: Config, stat
     rate = float((await repo.settings.get_all())["notify_rate"])
     await cb.message.edit_text(f"Рассылка запущена ({len(items)} получателей)")
     await cb.answer()
-    _spawn(_report_broadcast(cb.message.bot, cb.message.chat.id, items, rate))
+    _spawn(_report_broadcast(cb.message.bot, cb.message.chat.id, items, rate, repo))
+
+
+@admin_router.callback_query(lambda cb: cb.data == "adm:revoke")
+async def cb_revoke(cb: CallbackQuery, repo: RequestsRepo, config: Config,
+                    session_pool):
+    """Отозвать последнюю рассылку.
+
+    Две пачки: ручная «📢 Рассылка» (kind=broadcast) и расписание
+    рассылки poller'а (kind=schedule). Id живут 48 часов — дольше Bot
+    API удалять не даёт, поэтому их чистит poller.
+    """
+    if not _is_admin_cb(cb, config):
+        return
+    found = []
+    for kind, label in (("broadcast", "ручная рассылка"),
+                        ("schedule", "рассылка расписания")):
+        batch = await repo.sent_messages.latest_batch(kind)
+        if batch:
+            found.append((batch[0], batch[1], label))
+    if not found:
+        await cb.answer("Отзывать нечего: за 48 часов рассылок не было", show_alert=True)
+        return
+    found.sort(key=lambda f: f[0], reverse=True)
+    moment, rows, label = found[0]
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗑 Да, отозвать", callback_data=f"adm:revoke_do:{moment.isoformat()}"),
+         InlineKeyboardButton(text="❌ Отмена", callback_data="adm:revoke_cancel")],
+    ])
+    await cb.message.edit_text(
+        f"🗑 <b>Отзыв</b>\n\n{label}, {revoke.describe(moment, len(rows))}. "
+        f"Удалить у всех получателей?",
+        reply_markup=kb)
+    await cb.answer()
+
+
+@admin_router.callback_query(lambda cb: cb.data.startswith("adm:revoke_do:"))
+async def cb_revoke_do(cb: CallbackQuery, repo: RequestsRepo, config: Config,
+                       session_pool):
+    if not _is_admin_cb(cb, config):
+        return
+    raw = cb.data.split(":", 2)[2]
+    try:
+        moment = datetime.datetime.fromisoformat(raw)
+    except ValueError:
+        await cb.answer("Не понял, о какой рассылке речь", show_alert=True)
+        return
+    batch = await repo.sent_messages.latest_batch("broadcast")
+    if not batch or batch[0] != moment:
+        batch = await repo.sent_messages.latest_batch("schedule")
+    if not batch or batch[0] != moment:
+        await cb.answer("Этой рассылки уже нет (или прошло 48 часов)", show_alert=True)
+        return
+    rows = batch[1]
+    # Кнопку гасим: отозвать ту же пачку дважды нечего, а второй тап
+    # после чистки id вернул бы «рассылки уже нет».
+    try:
+        await cb.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await cb.message.edit_text(f"Отзываю {len(rows)} сообщений…")
+    await cb.answer()
+    # Задача живёт дольше обработчика — как и сами рассылки. Свёртка
+    # сессии: между запросами отзыва пул не держит соединение.
+    _spawn(_revoke_job(cb.message.bot, session_pool, rows, cb.message.chat.id,
+                       moment))
+
+
+async def _revoke_job(bot, session_pool, rows, chat_id, moment) -> None:
+    removed, failed = await revoke.revoke(bot, rows)
+    try:
+        await bot.send_message(
+            chat_id, f"Отозвано {removed} из {len(rows)}"
+                     + (f", не удалось {failed}" if failed else ""))
+    except Exception:
+        pass
+    # Отозванные id больше не нужны: повторный deleteMessage вернёт
+    # «нет такого», а место в базе не бесконечно. Остаток (если что-то
+    # не удалилось) добирает суточная чистка в poller.
+    if not failed:
+        try:
+            async with session_pool() as db:
+                await RequestsRepo(db).sent_messages.purge_older_moment(moment)
+        except Exception:
+            logging.exception("revoke: не удалось почистить id")
+
+
+@admin_router.callback_query(lambda cb: cb.data == "adm:revoke_cancel")
+async def cb_revoke_cancel(cb: CallbackQuery, config: Config):
+    if not _is_admin_cb(cb, config):
+        return
+    await cb.message.edit_text("Отзыв отменён")
+    await cb.answer()
 
 
 @admin_router.callback_query(lambda cb: cb.data == "adm:bc_cancel")

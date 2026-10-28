@@ -11,6 +11,7 @@ from infrastructure.database.repo.day_snapshot import DaySnapshotRepo
 from infrastructure.database.repo.schedule_edit import ScheduleEditRepo
 from infrastructure.database.repo.schedule_editor import ScheduleEditorRepo
 from infrastructure.database.repo.schedule_file import ScheduleFileRepo
+from infrastructure.database.repo.sent_message import SentMessageRepo
 from infrastructure.database.repo.setting import SettingRepo
 from infrastructure.database.repo.substitution import SubstitutionRepo
 from infrastructure.database.repo.user import UserRepo
@@ -72,3 +73,7 @@ class RequestsRepo:
     @property
     def snapshots(self) -> DaySnapshotRepo:
         return DaySnapshotRepo(self.session)
+
+    @property
+    def sent_messages(self) -> SentMessageRepo:
+        return SentMessageRepo(self.session)

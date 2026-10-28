@@ -27,7 +27,7 @@ def _user(uid, role, group=None, teacher=None, send_image=False):
 def _run(subscribers, changes, monkeypatch):
     sent = []
 
-    async def fake_broadcast(bot, items, rate, blocked=None):
+    async def fake_broadcast(bot, items, rate, blocked=None, sent_to=None):
         sent.extend(items)
 
     async def get_subscribed():
