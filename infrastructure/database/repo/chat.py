@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert
 
 from infrastructure.database.models import Chat
@@ -20,3 +20,9 @@ class ChatRepo(BaseRepo):
     async def get_all(self) -> list[Chat]:
         result = await self.session.execute(select(Chat))
         return list(result.scalars().all())
+
+    async def remove(self, chat_id: int) -> None:
+        """Отвязать чат. Без этого запись висела вечно: бота выгнали из
+        группы, а рассылка каждый раз пыталась туда писать."""
+        await self.session.execute(delete(Chat).where(Chat.id == chat_id))
+        await self.session.commit()

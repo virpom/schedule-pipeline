@@ -20,6 +20,15 @@ class DatabaseMiddleware(BaseMiddleware):
     ) -> Any:
         async with self.session_pool() as session:
             repo = RequestsRepo(session)
+            from_user = getattr(event, "from_user", None)
+            if from_user is None:
+                # my_chat_member приходит и без from_user; заводить
+                # пользователя по событию чата незачем.
+                data["session"] = session
+                data["repo"] = repo
+                data["config"] = self.config
+                data["session_pool"] = self.session_pool
+                return await handler(event, data)
 
             user = await repo.users.get_or_create_user(
                 event.from_user.id,

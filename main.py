@@ -26,6 +26,9 @@ def setup_logging() -> None:
 def register_global_middlewares(dp: Dispatcher, session_pool, config) -> None:
     dp.message.outer_middleware(DatabaseMiddleware(session_pool, config))
     dp.callback_query.outer_middleware(DatabaseMiddleware(session_pool, config))
+    # Без этого my_chat_member не получал repo: обработчик выгона из
+    # группы падал бы с KeyError вместо отвязки чата.
+    dp.my_chat_member.outer_middleware(DatabaseMiddleware(session_pool, config))
     # Без этого исключение в обработчике оставляло пользователя без
     # ответа: спиннер на кнопке висел до таймаута, а сообщение — молча.
     dp.errors.register(on_error)

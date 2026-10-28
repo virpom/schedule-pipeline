@@ -1004,22 +1004,62 @@ async def cb_adm_teachers(cb: CallbackQuery, repo: RequestsRepo, config: Config)
     await cb.answer()
 
 
+@admin_router.my_chat_member()
+async def on_bot_left_chat(event, repo: RequestsRepo):
+    """Бота выгнали из группы — убрать запись сразу.
+
+    Кнопка отвязки есть, но админ может не заметить выгон, а рассылка
+    каждый раз пыталась бы туда писать и логировала ошибку. Ограничение
+    (``restricted``) не повод удалять: бот в чате остаётся.
+    """
+    status = getattr(event.new_chat_member, "status", None)
+    if status in ("left", "kicked"):
+        await repo.chats.remove(event.chat.id)
+        logging.info("чат %s: бота выгнали, отвязано", event.chat.id)
+
+
 @admin_router.callback_query(lambda cb: cb.data == "adm:chats")
 async def cb_adm_chats(cb: CallbackQuery, repo: RequestsRepo, config: Config):
     if not _is_admin_cb(cb, config):
         return
+    await cb.message.edit_text(await _chats_text(repo),
+                               reply_markup=await _chats_kb(repo))
+    await cb.answer()
+
+
+async def _chats_text(repo: RequestsRepo) -> str:
     chats = await repo.chats.get_all()
     if not chats:
-        lines = ["💬 <b>Чаты</b>\n\nПока нет"]
-    else:
-        lines = ["💬 <b>Чаты</b>\n"]
-        for c in chats:
-            lines.append(f"{c.id} · {c.title or '—'} → {c.group or '—'}")
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back")],
-    ])
-    await cb.message.edit_text("\n".join(lines), reply_markup=kb)
-    await cb.answer()
+        return "💬 <b>Чаты</b>\n\nПока нет"
+    lines = ["💬 <b>Чаты</b>\n"]
+    for c in chats:
+        lines.append(f"{c.id} · {c.title or '—'} → {c.group or '—'}")
+    return "\n".join(lines)
+
+
+async def _chats_kb(repo: RequestsRepo) -> InlineKeyboardMarkup:
+    """Список чатов с кнопкой отвязки у каждого.
+
+    Без неё запись висела вечно: бота выгнали из группы, а рассылка
+    каждый раз пыталась туда писать и логировала TelegramForbiddenError.
+    """
+    rows = [[InlineKeyboardButton(text=f"✖️ Отвязать {c.title or c.id}",
+                                  callback_data=f"adm:unchat:{c.id}")]
+            for c in await repo.chats.get_all()]
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@admin_router.callback_query(lambda cb: cb.data.startswith("adm:unchat:"))
+async def cb_adm_unchat(cb: CallbackQuery, repo: RequestsRepo, config: Config):
+    if not _is_admin_cb(cb, config):
+        return
+    chat_id = int(cb.data.rsplit(":", 1)[1])
+    await repo.chats.remove(chat_id)
+    logging.info("чат %s отвязан админом", chat_id)
+    await cb.message.edit_text(await _chats_text(repo),
+                               reply_markup=await _chats_kb(repo))
+    await cb.answer("Отвязано")
 
 
 # ---- настройки: ввод значением ----
