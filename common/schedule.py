@@ -448,10 +448,12 @@ def format_week(entries, bell, lunches, detail: str = DETAIL_BRIEF, meta: str = 
         for d, les in entries)
 
 
-def format_teacher_results(entries, bell, lunches, detail: str = DETAIL_BRIEF) -> str:
+def format_teacher_results(entries, bell, lunches, detail: str = DETAIL_BRIEF,
+                           merge_groups: bool = False) -> str:
     parts = []
     for date, lessons in entries:
-        parts.append(format_day(date, lessons, bell, lunches, detail, meta="group", show_rov=False))
+        parts.append(format_day(date, lessons, bell, lunches, detail, meta="group",
+                                show_rov=False, merge_groups=merge_groups))
     return "\n\n".join(parts)
 
 

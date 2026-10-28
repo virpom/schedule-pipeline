@@ -1164,7 +1164,8 @@ async def teacher_answer(message: Message, repo: RequestsRepo, user: User, state
         entries = [(d, by_date[d]) for d in sorted(by_date)]
     await message.answer(
         f"👨‍🏫 «{q}»:\n\n"
-        + format_teacher_results(entries, bell, lunches, user.bell_detail),
+        + format_teacher_results(entries, bell, lunches, user.bell_detail,
+                                 merge_groups=_is_teacher(user)),
         reply_markup=BACK_KB,
     )
 
