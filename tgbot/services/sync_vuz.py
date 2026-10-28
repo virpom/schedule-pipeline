@@ -317,8 +317,11 @@ def anchor_looks_off(good: int, total: int) -> bool:
 # --- скачивание --------------------------------------------------------------
 
 async def _download(session: ClientSession, url: str) -> bytes:
-    async with session.get(url) as response:
-        response.raise_for_status()
+    # timeout=60 как в sync_eios: сессия создаётся без своего таймаута,
+    # и aiohttp берёт дефолт 5 минут на чтение. Файл вуза тянется
+    # дольше college — проход вставал до 10 минут молча, задерживая
+    # рассылку и следующий опрос, а в логах не было ни строки.
+    async with session.get(url, raise_for_status=True, timeout=60) as response:
         return await response.read()
 
 

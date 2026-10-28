@@ -71,7 +71,7 @@ def test_first_form_failure_second_form_runs():
             return b"x"
 
     class _Session:
-        def get(self, url):
+        def get(self, url, **kwargs):
             class _Ctx:
                 async def __aenter__(self_inner):
                     return _Resp()
