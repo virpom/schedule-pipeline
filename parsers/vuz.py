@@ -451,7 +451,30 @@ def _faculty(sheet: Sheet) -> tuple[str, str]:
                 return "GTF", "Горно-технологический"
             if "ЭЛЕКТРОЭНЕРГЕТИК" in v:
                 return "FEU", "Электроэнергетики, экономики и управления"
-    return "", ""
+    # Незнакомый факультет нельзя отдавать пустым кодом: пустая подпись
+    # кнопки в Telegram стирает всю строку клавиатуры, без ошибки и без
+    # записи в лог. Новый факультет выглядел бы как «группы пропали».
+    return _faculty_fallback(sheet)
+
+
+def _faculty_fallback(sheet: Sheet) -> tuple[str, str]:
+    """Код и имя для факультета, которого нет в списке.
+
+    Берём строку шапки с «ФАКУЛЬТЕТ» в первых трёх ячейках и делаем из
+    неё код: первые буквы слов заглавными. Если и её нет — «OTH»,
+    «Другой», чтобы кнопка была непустой.
+    """
+    for r in range(min(8, sheet.nrows)):
+        for c in range(min(3, sheet.ncols)):
+            v = " ".join(sheet.text(r, c).split())
+            if "ФАКУЛЬТЕТ" in v.upper() and len(v) < 200:
+                words = [w for w in re.findall(r"[А-Яа-яЁё]{3,}", v)
+                         if w.upper() != "ФАКУЛЬТЕТ"]
+                if not words:
+                    continue
+                code = "".join(w[0].upper() for w in words)[:6] or "OTH"
+                return code, " ".join(words)[:80]
+    return "OTH", "Другой"
 
 
 def _year(sheet: Sheet) -> int:
