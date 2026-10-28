@@ -1,5 +1,6 @@
 import datetime
 import hashlib
+import re
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.sqlite import insert
@@ -7,6 +8,11 @@ from sqlalchemy.dialects.sqlite import insert
 from common.schedule import VUZ_SUFFIX, teacher_base, teacher_matches
 from infrastructure.database.models import BaseLesson, CollegeLesson
 from infrastructure.database.repo.base import BaseRepo
+
+
+# Служебные пометки в поле преподавателя. Сравниваем без учёта регистра
+# и хвоста: в файле бывает «Вакансия» с заглавной.
+_NOT_A_PERSON = re.compile(r"^\s*(ваканс|нет\s+препод|не\s+назначен)", re.I)
 
 
 def _clean_teacher_names(raw) -> list[str]:
@@ -22,6 +28,11 @@ def _clean_teacher_names(raw) -> list[str]:
     # и Левочкину нельзя было найти поиском вообще.
     names = {part for t in raw if t
              for part in (p.strip() for p in teacher_base(t).split(",")) if part}
+    # Пустая ставка записана словом в поле преподавателя: «вакансия».
+    # Это не человек, а слово проходило фильтр по непустоте — и попадало
+    # в список под буквой «В». Студент, нажавший его, становился
+    # «преподавателем вакансии».
+    names = {n for n in names if not _NOT_A_PERSON.search(n)}
     surnames_with_initials = {n.split()[0] for n in names if len(n.split()) > 1}
     return sorted(
         n for n in names
