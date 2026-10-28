@@ -34,10 +34,39 @@ def _clean_teacher_names(raw) -> list[str]:
     # «преподавателем вакансии».
     names = {n for n in names if not _NOT_A_PERSON.search(n)}
     surnames_with_initials = {n.split()[0] for n in names if len(n.split()) > 1}
-    return sorted(
-        n for n in names
-        if len(n.split()) > 1 or n.split()[0] not in surnames_with_initials
-    )
+    names = {n for n in names
+             if len(n.split()) > 1 or n.split()[0] not in surnames_with_initials}
+    # «Воробьев М.С» и «Воробьев М.С.» — один человек, но set() держит
+    # обе строки: на проде 28 таких групп (137 имён вуза, 16 дублей).
+    # Человек видел два одинаковых пункта и не знал, какой верный.
+    #
+    # Показываем вариант с точкой — он же канонический в остальном коде,
+    # — а ключ сравнения точку отбрасывает. Раньше чистка жила в
+    # teacher_base, и смена канона сломала 13 тестов.
+    # sorted, не set: порядок итерации set в CPython зависит от хешей и
+    # между запусками меняется. Без него «какой из двух вариантов
+    # победит» решал случай — тест проходил через раз.
+    by_key: dict[str, str] = {}
+    for n in sorted(names):
+        # Точку в конце и пробелы убираем, но точку ПОСЛЕ фамилии
+        # («Каверзин. А.В.») — тоже: иначе ключ расходится с формой без
+        # неё. «ВостриковК.В.» без пробела ловится тем же слиянием.
+        key = re.sub(r"[\s.]+", "", n).lower()
+        # Канон выбираем по двум признакам, в этом порядке:
+        #   1) пробел после фамилии важнее точки — «Востриков К.В.»
+        #      лучше, чем «ВостриковК.В.»;
+        #   2) при равном пробеле остаётся форма с точкой в конце —
+        #      так она записана везде в остальном коде.
+        best = by_key.get(key)
+        if best is None:
+            by_key[key] = n
+            continue
+        def rank(x):
+            return (bool(re.search(r"[а-яёa-z]\s", x, re.I)), x.endswith("."))
+        pen, bpen = rank(n), rank(best)
+        if pen > bpen:
+            by_key[key] = n
+    return sorted(by_key.values())
 
 
 class CollegeLessonRepo(BaseRepo):
