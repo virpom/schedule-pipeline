@@ -24,6 +24,7 @@ from aiogram.types import (
 )
 
 from common.schedule import (
+    DETAIL_BRIEF,
     MAX_PARA,
     max_para,
     PARITY_ANY,
@@ -268,7 +269,8 @@ def sub_day_text(group: str, date: datetime.date, slots: list[Slot]) -> str:
 
 
 def preview_text(group: str, date: datetime.date, slots: list[Slot],
-                 bell=None, lunches=None, course_group: str | None = None) -> str:
+                 bell=None, lunches=None, course_group: str | None = None,
+                 detail: str = DETAIL_BRIEF) -> str:
     """Предпросмотр ровно так, как увидят студенты.
 
     Раньше экран собирал текст своей рукой и расходился с реальным:
@@ -284,8 +286,10 @@ def preview_text(group: str, date: datetime.date, slots: list[Slot],
     gcg = {group: course_group} if course_group else None
     # meta="teacher": под парой студент видит преподавателя и кабинет,
     # а не свою же группу. Превью — взгляд студента, не преподавателя.
+    # detail был зашит в "full", а 202 из 255 студентов видят brief:
+    # староста проверял экран, которого нет ни у кого.
     return format_day(date, lessons, bell or {}, lunches or {},
-                      detail="full", meta="teacher", group_course_group=gcg)
+                      detail=detail, meta="teacher", group_course_group=gcg)
 
 
 # --- вход -----------------------------------------------------------------
@@ -929,13 +933,16 @@ async def cb_preview(cb: CallbackQuery, repo: RequestsRepo, state: FSMContext):
         await cb.answer("Нет прав", show_alert=True)
         return
     today = datetime.date.today()
-    rows = []
-    for delta in range(0, 3):
+    buttons = []
+    # Семь дней, а не три: правка базы меняет все дни окна, и «Неделя»
+    # у студента тоже семь. Три дня не давали проверить следующую неделю.
+    for delta in range(0, 7):
         d = today + datetime.timedelta(days=delta)
         label = "сегодня" if delta == 0 else "завтра" if delta == 1 else d.strftime("%d.%m")
-        rows.append([InlineKeyboardButton(
+        buttons.append(InlineKeyboardButton(
             text=f"{WEEKDAY_SHORT[d.weekday()]} {d.strftime('%d.%m')} ({label})",
-            callback_data=f"ed:pv:{d.isoformat()}")])
+            callback_data=f"ed:pv:{d.isoformat()}"))
+    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="ed:back")])
     await cb.message.edit_text(
         f"{EDITOR_TITLE}\n\n👁 <b>Как видят студенты</b>\n\nВыбери день 👇",
@@ -945,19 +952,27 @@ async def cb_preview(cb: CallbackQuery, repo: RequestsRepo, state: FSMContext):
 
 
 @editor_router.callback_query(F.data.startswith("ed:pv:"))
-async def cb_preview_day(cb: CallbackQuery, repo: RequestsRepo):
+async def cb_preview_day(cb: CallbackQuery, repo: RequestsRepo, user: User):
     group = await editor_group(repo, cb.from_user.id)
     if not group:
         await cb.answer("Нет прав", show_alert=True)
         return
     date = datetime.date.fromisoformat(cb.data.split(":")[2])
-    slots = await get_day_slots(repo, group, date)
+    # Читаем college_lesson, а не слои: студент видит именно её. Если
+    # _rebuild упал, превью из слоёв показывало правильные данные, а
+    # студент — старые, и староста не понимал, почему жалуются.
+    lessons = await repo.college_lessons.get_for_group_date(group, date)
+    slots = [Slot(l.para, l.subject, l.teacher, l.room,
+                  changed=l.changed, action=l.action or "",
+                  time_note=getattr(l, "time_note", "") or "",
+                  para_end=getattr(l, "para_end", None))
+             for l in lessons]
     # Звонки и поток нужны, чтобы предпросмотр совпадал с экраном дня:
     # без них не подставить время пары и деление на курсы.
     bell, lunches = await repo.bell_schedule.get_context()
     await cb.message.edit_text(
         preview_text(group, date, slots, bell, lunches,
-                     bells_group(group, None)),
+                     bells_group(group, None), detail=user.bell_detail),
         reply_markup=cancel_kb("ed:preview"),
     )
     await cb.answer()
