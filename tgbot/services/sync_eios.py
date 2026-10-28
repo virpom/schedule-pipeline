@@ -157,7 +157,13 @@ async def replace_substitutions(repo: RequestsRepo, subs: list[ParsedSub]) -> in
                 subject=(sub.subject or "")[:128],
                 teacher=(sub.teacher or "")[:128],
                 room=(sub.room or "")[:64],
-                comment=(sub.raw_now or "")[:256],
+                # «Было» из листка замен. Раньше сюда писалось «стало»
+                # (raw_now), то есть вторая копия subject/teacher, и не
+                # показывалось нигде. Колонка «было» парсилась и
+                # выбрасывалась — при смене преподавателя студент видел
+                # новую фамилию и не знал, что было раньше.
+                # Для action='add' было = «НЕТ», показывать нечего.
+                comment=((getattr(sub, "was", "") or "") if sub.action == "replace" else "")[:256],
                 source=SOURCE_SITE,
                 created_at=now,
             )

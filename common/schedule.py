@@ -354,6 +354,14 @@ def format_day(
             if " / " in (lesson.subject or ""):
                 lines.append("      <i>одновременно, по подгруппам</i>")
 
+            # Что стояло раньше. Листок замен устроен как «было → стало»,
+            # и раньше колонка «было» не сохранялась вовсе. Студент видел
+            # новую пару со значком 🔄 и не знал, что она заменила: при
+            # смене преподавателя это главный вопрос.
+            was = (getattr(lesson, "comment", "") or "").strip()
+            if was and getattr(lesson, "changed", False) and not detail == DETAIL_BRIEF:
+                lines.append(f"      <i>было: {_esc(was)}</i>")
+
             if lunch and lunch.para == p and (
                     detail == DETAIL_LUNCH
                     or (detail == DETAIL_FULL and lunch.position == "after")
