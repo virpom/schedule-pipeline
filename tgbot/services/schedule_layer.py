@@ -109,6 +109,15 @@ async def get_day_slots(repo: RequestsRepo, group: str, date: datetime.date,
     #
     # «Добавить» на пару, которая уже есть в базе, — это фактически замена:
     # второй слот на тот же номер пары создавать нельзя.
+    # Отмена пары, которой нет в базе. Колледж ставит «НЕТ ПАРЫ» и на
+    # пустые слоты (ДОУ-24, 26.10, пара 1). Без этой ветки такой слот
+    # просто исчезал, и нумерация начиналась с «2)»: студент видел дыру
+    # и не знал, отменили пару или её никогда не было.
+    for para, sub in sorted(sub_by_para.items()):
+        if sub.action == SUB_CANCEL and para not in used:
+            slots.append(Slot(para, sub.comment or "", "", "",
+                              changed=True, action=SUB_CANCEL,
+                              comment=sub.comment, group=group))
     for para, sub in sorted(sub_by_para.items()):
         if sub.action in ("add", "replace") and para not in used:
             slots.append(Slot(para, sub.subject, sub.teacher, sub.room,
