@@ -1,7 +1,9 @@
+import asyncio
 import datetime
 from types import SimpleNamespace
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramRetryAfter
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -825,7 +827,24 @@ async def _day_text(repo: RequestsRepo, user: User, date: datetime.date) -> str:
 
 
 async def _show_day(cb: CallbackQuery, repo: RequestsRepo, user: User, date: datetime.date):
-    await cb.message.edit_text(await _day_text(repo, user, date), reply_markup=NAV_KB)
+    """Показать карточку дня, пережив лимит правок Telegram.
+
+    В групповом чате несколько человек листают дни одной кнопкой, и
+    Telegram отвечает 429 «Flood control exceeded on EditMessageText»
+    с retry_after. Исключение доезжало до обработчика ошибок, человек
+    видел «Что-то пошло не так», а админ — тревогу (02.11.2026, шесть
+    таких за три часа, чат -1004366988460).
+
+    Ждём столько, сколько просят, и повторяем один раз. Второй 429 не
+    ловим: если не помогло, значит лимит общий и лучше честно сказать
+    «попробуй позже», чем копить очередь повторов.
+    """
+    text = await _day_text(repo, user, date)
+    try:
+        await cb.message.edit_text(text, reply_markup=NAV_KB)
+    except TelegramRetryAfter as e:
+        await asyncio.sleep(min(getattr(e, "retry_after", 5), 10))
+        await cb.message.edit_text(text, reply_markup=NAV_KB)
     await cb.answer()
 
 

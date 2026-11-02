@@ -90,23 +90,31 @@ def test_parity_offset_is_one():
 # --- загрузка базового расписания -------------------------------------------
 
 class ParsedLesson:
-    def __init__(self, group, course, day, para, subject, teacher="", parity=PARITY_BOTH):
+    """Заглушка под настоящий ParsedLesson из parsers/eios.py.
+
+    Поля course не существует с плана 155 — его убрали из парсера, а
+    заглушка продолжала его принимать. Из-за лишнего аргумента вызов
+    `ParsedLesson("ДП-26", 1, 1, "Математика", "Иванов И.И.", PARITY_BOTH)`
+    клал преподавателя в day, а чётность — в teacher. Тесты проходили,
+    потому что проверяли не то, что думали.
+    """
+    def __init__(self, group, day, para, subject, teacher="", parity=PARITY_BOTH,
+                 time_note=None):
         self.group = group
-        self.course = course
         self.day = day
         self.para = para
         self.subject = subject
         self.teacher = teacher
         self.parity = parity
-        self.time_note = None
+        self.time_note = time_note
 
 
 def test_replace_base_lessons_stores_parity(tmp_path):
     async def body(repo):
         lessons = [
-            ParsedLesson("ДП-26", 1, 1, 1, "Математика", "Иванов И.И.", PARITY_BOTH),
-            ParsedLesson("ДП-26", 1, 1, 2, "Физика", "Петров П.П.", PARSER_ODD),
-            ParsedLesson("ДП-26", 1, 1, 3, "Химия", "Сидоров С.С.", PARSER_EVEN),
+            ParsedLesson("ДП-26", 1, 1, "Математика", "Иванов И.И.", PARITY_BOTH),
+            ParsedLesson("ДП-26", 1, 2, "Физика", "Петров П.П.", PARSER_ODD),
+            ParsedLesson("ДП-26", 1, 3, "Химия", "Сидоров С.С.", PARSER_EVEN),
         ]
         added = await sync_eios.replace_base_lessons(repo, lessons)
         assert added == 3
@@ -124,11 +132,11 @@ def test_replace_base_lessons_stores_parity(tmp_path):
 def test_replace_base_lessons_is_full_replace(tmp_path):
     """Повторная загрузка убирает пары, которых больше нет в файле."""
     async def body(repo):
-        first = [ParsedLesson("ДП-26", 1, 1, p, f"Предмет {p}") for p in (1, 2, 3)]
+        first = [ParsedLesson("ДП-26", 1, p, f"Предмет {p}") for p in (1, 2, 3)]
         await sync_eios.replace_base_lessons(repo, first)
         assert await repo.base_lessons.count() == 3
 
-        second = [ParsedLesson("ДП-26", 1, 1, 1, "Только первая")]
+        second = [ParsedLesson("ДП-26", 1, 1, "Только первая")]
         await sync_eios.replace_base_lessons(repo, second)
         assert await repo.base_lessons.count() == 1
 
@@ -148,7 +156,7 @@ def test_replace_base_lessons_keeps_manual(tmp_path):
         # Правка на том же слоте, что и пара из файла — должна вытеснить её.
         await repo.base_lessons.upsert("ДП-26", PARITY_ANY, 1, 1, "Тот же слот",
                                        "Староста С.С.", source="manual")
-        lessons = [ParsedLesson("ДП-26", 1, 1, 1, "С сайта")]
+        lessons = [ParsedLesson("ДП-26", 1, 1, "С сайта")]
 
         for _ in range(2):  # повторная загрузка тоже не должна падать
             await sync_eios.replace_base_lessons(repo, lessons)
@@ -166,8 +174,8 @@ def test_replace_base_lessons_idempotent_count(tmp_path):
     """Повторная загрузка не размножает строки."""
     async def body(repo):
         lessons = [
-            ParsedLesson("ДП-26", 1, 1, 1, "Математика"),
-            ParsedLesson("ДП-26", 1, 1, 2, "Физика"),
+            ParsedLesson("ДП-26", 1, 1, "Математика"),
+            ParsedLesson("ДП-26", 1, 2, "Физика"),
         ]
         for _ in range(3):
             await sync_eios.replace_base_lessons(repo, lessons)
@@ -243,10 +251,16 @@ def test_base_plus_substitution_end_to_end(tmp_path):
         from tgbot.services.schedule_layer import get_day_slots
 
         d = _future(odd=True)  # нечётная неделя у колледжа
+        # День недели берём из самой даты. Здесь стояла жёсткая 1
+        # (понедельник), а _future возвращает другой день — тест сверял
+        # пары четверга с парами понедельника. Проходил он только
+        # потому, что заглушка ParsedLesson принимала лишний аргумент
+        # course и сдвигала day: сравнение шло не с тем, что написано.
+        weekday = d.isoweekday()
         await sync_eios.replace_base_lessons(repo, [
-            ParsedLesson("ДП-26", 1, 1, 1, "Математика", "Иванов И.И."),
-            ParsedLesson("ДП-26", 1, 1, 2, "Физика", "Петров П.П."),
-            ParsedLesson("ДП-26", 1, 1, 3, "Химия", "Сидоров С.С."),
+            ParsedLesson("ДП-26", weekday, 1, "Математика", "Иванов И.И."),
+            ParsedLesson("ДП-26", weekday, 2, "Физика", "Петров П.П."),
+            ParsedLesson("ДП-26", weekday, 3, "Химия", "Сидоров С.С."),
         ])
         await sync_eios.replace_substitutions(repo, [
             ParsedSub(d, "ДП-26", 2, "replace", "История", "Новый Н.Н.", "ауд. 7"),
@@ -278,7 +292,7 @@ def test_materialize_writes_all_days(tmp_path):
     """
     async def body(repo):
         await sync_eios.replace_base_lessons(repo, [
-            ParsedLesson("ДП-26", 1, 1, 1, "Математика", "Иванов И.И."),
+            ParsedLesson("ДП-26", 1, 1, "Математика", "Иванов И.И."),
         ])
         days = await sync_eios.materialize(repo, days=14)
         assert days == 14
@@ -309,8 +323,8 @@ def test_materialize_applies_substitutions(tmp_path):
         date = today + dt.timedelta(days=offset)
 
         await sync_eios.replace_base_lessons(repo, [
-            ParsedLesson("ДП-26", 1, 1, 1, "Математика", "Иванов И.И."),
-            ParsedLesson("ДП-26", 1, 1, 2, "Физика", "Петров П.П."),
+            ParsedLesson("ДП-26", 1, 1, "Математика", "Иванов И.И."),
+            ParsedLesson("ДП-26", 1, 2, "Физика", "Петров П.П."),
         ])
         await sync_eios.replace_substitutions(repo, [
             ParsedSub(date, "ДП-26", 2, "replace", "История", "Новый Н.Н.", "ауд. 9"),
@@ -338,7 +352,7 @@ def test_materialize_keeps_manual_edits(tmp_path):
         date = today + dt.timedelta(days=offset)
 
         await sync_eios.replace_base_lessons(repo, [
-            ParsedLesson("ДП-26", 1, 1, 1, "Математика", "Иванов И.И."),
+            ParsedLesson("ДП-26", 1, 1, "Математика", "Иванов И.И."),
         ])
         await repo.college_lessons.bulk_insert([{
             "date": date, "group": "ДП-26", "para": 1, "para_end": 1,
@@ -449,3 +463,21 @@ def test_materialize_marks_days_published(tmp_path):
                 f"{date} должен считаться опубликованным"
 
     _run(_with_repo(tmp_path, body))
+
+
+def test_parsed_lesson_stub_matches_real_class():
+    """Заглушка не должна расходиться с настоящим BaseLesson.
+
+    Уже расходилась: после плана 155 из парсера убрали поле course, а
+    заглушка его принимала. Лишний аргумент сдвигал day, teacher и
+    parity, и тесты проверяли не то, что написано.
+    """
+    import dataclasses
+
+    from parsers.eios import BaseLesson
+
+    real = [f.name for f in dataclasses.fields(BaseLesson)]
+    import inspect
+
+    stub = list(inspect.signature(ParsedLesson.__init__).parameters)[1:]
+    assert stub == real, f"заглушка {stub} vs настоящий {real}"
