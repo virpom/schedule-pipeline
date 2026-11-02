@@ -49,8 +49,17 @@ ANCHOR_KEY = "vuz_week_anchor"
 DEFAULT_ANCHOR = datetime.date(2026, 8, 31)
 
 
+# Версия разбора. Хеш по одним байтам файла не замечает правку парсера:
+# файл на сайте тот же, хеш совпал, разбор пропущен. 03.11.2026 так и
+# вышло — исправление потери четверга у АП-23 разбиралось правильно, а
+# в базе оставались старые данные.
+#
+# Меняй число при правке parsers/vuz.py.
+PARSER_VERSION = "2"
+
+
 def _sha(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+    return hashlib.sha256(data + b"\0" + PARSER_VERSION.encode()).hexdigest()
 
 
 def weeks_to_str(weeks: tuple[int, ...]) -> str:
