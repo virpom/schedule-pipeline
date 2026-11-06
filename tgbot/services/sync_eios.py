@@ -15,7 +15,7 @@ import hashlib
 import logging
 
 from aiohttp import ClientSession
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 
 from common.schedule import PARITY_ANY, PARITY_EVEN, PARITY_ODD, VUZ_GROUP
 from config import Config
@@ -138,13 +138,52 @@ async def replace_substitutions(repo: RequestsRepo, subs: list[ParsedSub]) -> in
     # конфликтовать с пришедшей с сайта (UNIQUE по date+group+para).
     manual_keys = {(r.date, r.group, r.para) for r in manual}
 
-    await repo.session.execute(
-        delete(Substitution).where(Substitution.source == SOURCE_SITE)
-    )
-
     now = datetime.datetime.now()
     today = now.date()
-    seen: set[tuple[datetime.date, str, int]] = set()
+
+    # Замены на сегодня и вчера не удаляем, если их нет в новом файле.
+    #
+    # Методист выкладывает листок замен на следующий день и убирает из
+    # него прошедший: в файле 5-го числа утром лежат замены на 5-е, а
+    # после обеда — только на 6-е. Полная замена таблицы стирала
+    # сегодняшние замены, материализация собирала день заново по
+    # базовому расписанию, и студент в разгар учебного дня видел
+    # «расписание изменилось» с ПУСТЫМИ заменами — то есть неверное
+    # расписание на сегодня (прод, 05.11.2026, 11:04).
+    #
+    # Файл — не истина на прошедшие даты: раз замену уже показали и по
+    # ней пошли на пары, она остаётся верной до конца дня.
+    keep_from = today - datetime.timedelta(days=1)
+    await repo.session.execute(
+        delete(Substitution).where(
+            Substitution.source == SOURCE_SITE,
+            or_(
+                Substitution.date < keep_from,
+                Substitution.date > today,
+            ),
+        )
+    )
+    # flush обязателен: без него удаление ещё не в базе, и следующий
+    # select вернёт удалённые строки — тогда в kept попадёт будущее, и
+    # новая версия замены на завтра не перезапишет старую.
+    await repo.session.flush()
+    # Что осталось в таблице после чистки — то есть замены на сегодня и
+    # вчера, которых в файле уже нет. Их слоты заняты: вставлять поверх
+    # нельзя (UNIQUE по date+group+para), и затирать нельзя — они верны.
+    # Только сегодня и вчера: будущее пришло в файле и уже вставлено
+    # ниже (для повторной вставки его не нужно держать в seen, иначе
+    # новая версия замены на завтра не перезапишет старую).
+    kept = {
+        (r.date, r.group, r.para)
+        for (r,) in await repo.session.execute(
+            select(Substitution).where(
+                Substitution.source == SOURCE_SITE,
+                Substitution.date >= keep_from,
+                Substitution.date <= today,
+            )
+        )
+    }
+    seen: set[tuple[datetime.date, str, int]] = set(kept)
     added = 0
     for sub in subs:
         # Прошедшие даты в листке замен не нужны: редактор показывает

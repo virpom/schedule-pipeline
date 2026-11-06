@@ -14,8 +14,11 @@ locked`` под нагрузкой, ``None`` из репозитория. Обр
 import datetime
 import logging
 
+import asyncio
+
 from aiogram import Bot
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import (TelegramBadRequest, TelegramNetworkError,
+                                TelegramRetryAfter, TelegramServerError)
 from aiogram.types import CallbackQuery, ErrorEvent, Message
 
 from config import Config
@@ -31,6 +34,24 @@ TEXT_MESSAGE = "⚠️ Не получилось обработать. Попр�
 #
 # Остальные 400-е остаются ошибками: там правда что-то не так.
 _HARMLESS = ("message is not modified",)
+
+
+# Сеть и лимиты Telegram — не поломка бота.
+#
+# ``TelegramNetworkError`` (aiohttp.py) — связь с api.telegram.org
+# оборвалась; ``TelegramRetryAfter`` (base.py) — флуд-контроль;
+# ``TimeoutError`` (impl.py) — не дождались ответа. Всё это aiogram
+# ретраит сам, и студент в итоге видит расписание. Админ получал
+# «Ошибка в боте» на каждый чих связи — три таких за один час 06.11.
+#
+# Пользователю при сетевом сбое тоже не надо писать «Что-то пошло не
+# так»: отправка этого сообщения идёт по тому же оборванному каналу.
+_TRANSIENT = (TelegramNetworkError, TelegramRetryAfter, TelegramServerError,
+              asyncio.TimeoutError, TimeoutError)
+
+
+def _is_transient(exc: BaseException) -> bool:
+    return isinstance(exc, _TRANSIENT)
 
 
 def _is_harmless(exc: BaseException) -> bool:
@@ -53,6 +74,12 @@ async def on_error(event: ErrorEvent, bot: Bot, config: Config) -> None:
     """
     exc = event.exception
     update = event.update.event
+
+    if _is_transient(exc):
+        # Молча: ни ответа пользователю (канал и так лежит), ни алерта.
+        # В лог — коротко, чтобы при разборе было видно, что связь рвало.
+        logging.warning("сбой связи с Telegram: %s", type(exc).__name__)
+        return
 
     if _is_harmless(exc):
         # Спиннер на кнопке надо снять, иначе он висит до таймаута и
