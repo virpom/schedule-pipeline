@@ -7,15 +7,17 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from common.schedule import (bells_group, format_bell, format_day, is_vuz,
                              strip_unit)
 from config import Config
+from infrastructure.database.models import User
 from infrastructure.database.repo.requests import RequestsRepo
 from tgbot.services import photos, revoke, source_state
 from tgbot.services.broadcaster import broadcast_many
@@ -249,32 +251,104 @@ async def _build_stats_unit(repo: RequestsRepo, unit: str) -> tuple[str, InlineK
     return "\n".join(lines), kb
 
 
-async def _build_stats_groups(repo: RequestsRepo) -> tuple[str, InlineKeyboardMarkup]:
-    """Список всех групп с числом студентов — нажатием открыть состав."""
+# Сколько групп на одной странице. При 129 группах список одним
+# сообщением не влезал ни в лимит кнопок Telegram (в нём 100), ни в
+# экран телефона — листать приходилось вслепую.
+GROUPS_PER_PAGE = 10
+
+
+async def _groups_index(repo: RequestsRepo) -> dict[str, list[User]]:
+    """Группа -> её студенты, без преподавателей и без пустых групп."""
     users = await repo.users.get_all()
-    per_group: dict[str, list[int]] = {}
+    index: dict[str, list[User]] = {}
     for u in users:
         if u.role == "teacher" or not u.group:
             continue
-        e = per_group.setdefault(u.group, [0, 0])
-        e[0] += 1
-        if u.subscribed:
-            e[1] += 1
+        index.setdefault(u.group, []).append(u)
+    return index
+
+
+def _group_sort_key(item: tuple[str, list[User]]) -> tuple:
+    """По размеру группы, крупные сверху; при равенстве — по алфавиту."""
+    name, members = item
+    return (-len(members), strip_unit(name))
+
+
+async def _build_stats_groups(
+    repo: RequestsRepo, page: int = 0, only: str = "",
+) -> tuple[str, InlineKeyboardMarkup]:
+    """Все группы с числом студентов: раздельно, по размеру, по страницам.
+
+    Раньше это был один плоский список вперемешку — вуз и колледж, в
+    алфавитном порядке. Найти, где больше всего людей, было нельзя.
+    """
+    index = await _groups_index(repo)
+    vuz_n = sum(1 for g in index if is_vuz(g))
+    college_n = len(index) - vuz_n
+    total_users = sum(len(v) for v in index.values())
+
+    # only пусто — все; «college»/«vuz» — один подразделение.
+    items = [(g, m) for g, m in index.items()
+             if not only or is_vuz(g) == (only == "vuz")]
+    items.sort(key=_group_sort_key)
+
+    pages = max(1, (len(items) + GROUPS_PER_PAGE - 1) // GROUPS_PER_PAGE)
+    page = max(0, min(page, pages - 1))
+    chunk = items[page * GROUPS_PER_PAGE:(page + 1) * GROUPS_PER_PAGE]
 
     rows = []
-    for g, (t, s) in sorted(per_group.items(), key=lambda x: (is_vuz(x[0]), x[0])):
+    for g, members in chunk:
         icon = "🏛" if is_vuz(g) else "🎓"
+        sub = sum(1 for u in members if u.subscribed)
         rows.append([InlineKeyboardButton(
-            text=f"{icon} {strip_unit(g)} — {t} · рассылка {s}",
+            text=f"{icon} {strip_unit(g)} — {len(members)} чел · 🔔 {sub}",
             callback_data=f"group_users:{g}")])
+
+    # Переключатель подразделения — активное состояние видно по галочке.
+    # «Без группы» в списки не попадает (группы нет), но это живые люди,
+    # которые зашли и не выбрали ничего. Без отдельной кнопки их не найти.
+    no_group = await repo.users.get_by_group(None)
+    students_no_group = [u for u in no_group if u.role != "teacher"]
+    if students_no_group:
+        rows.append([InlineKeyboardButton(
+            text=f"❓ Без группы — {len(students_no_group)}",
+            callback_data="group_users:__none__")])
+
+    rows.append([
+        InlineKeyboardButton(text=("✓ " if not only else "") + f"Все {len(index)}",
+                             callback_data="adm:stats:groups:all:0"),
+        InlineKeyboardButton(text=("✓ " if only == "college" else "") + f"🎓 {college_n}",
+                             callback_data="adm:stats:groups:college:0"),
+        InlineKeyboardButton(text=("✓ " if only == "vuz" else "") + f"🏛 {vuz_n}",
+                             callback_data="adm:stats:groups:vuz:0"),
+    ])
+
+    if pages > 1:
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton(
+                text="◀️", callback_data=f"adm:stats:groups:{only or 'all'}:{page - 1}"))
+        nav.append(InlineKeyboardButton(
+            text=f"{page + 1} / {pages}",
+            callback_data=f"adm:stats:groups:{only or 'all'}:{page}"))
+        if page < pages - 1:
+            nav.append(InlineKeyboardButton(
+                text="▶️", callback_data=f"adm:stats:groups:{only or 'all'}:{page + 1}"))
+        rows.append(nav)
+
     rows.append([InlineKeyboardButton(text="⬅️ К статистике", callback_data="adm:stats")])
 
-    vuz_n = sum(1 for g in per_group if is_vuz(g))
-    text = (f"👥 <b>Группы с подписчиками</b>\n\n"
-            f"Всего <b>{len(per_group)}</b>: "
-            f"🏛 вуз {vuz_n} · 🎓 колледж {len(per_group) - vuz_n}\n\n"
-            "Нажми на группу, чтобы посмотреть состав.")
-    return text, InlineKeyboardMarkup(inline_keyboard=rows)
+    title = {"college": "🎓 Колледж", "vuz": "🏛 Вуз"}.get(only, "Все группы")
+    lines = [
+        f"👥 <b>{title}</b>",
+        "",
+        f"Групп: <b>{len(items)}</b> · студентов: <b>{sum(len(m) for _, m in items)}</b>",
+        f"Всего по боту: {total_users} в {len(index)} группах",
+        "",
+        "Сортировка — по размеру, крупные сверху.",
+        "Нажми на группу, чтобы увидеть состав.",
+    ]
+    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 # ---- commands ----
@@ -995,11 +1069,21 @@ async def cb_adm_stats_unit(cb: CallbackQuery, repo: RequestsRepo, config: Confi
     await cb.answer()
 
 
-@admin_router.callback_query(lambda cb: cb.data == "adm:stats:groups")
+@admin_router.callback_query(lambda cb: cb.data and cb.data.startswith("adm:stats:groups"))
 async def cb_adm_stats_groups(cb: CallbackQuery, repo: RequestsRepo, config: Config):
+    """Список групп: страница и подразделение берутся из callback_data.
+
+    Формат: adm:stats:groups, adm:stats:groups:all:0,
+            adm:stats:groups:college:1, adm:stats:groups:vuz:0
+    """
     if not _is_admin_cb(cb, config):
         return
-    text, kb = await _build_stats_groups(repo)
+    parts = cb.data.split(":")
+    only, page = "", 0
+    if len(parts) >= 5:
+        only = "" if parts[3] == "all" else parts[3]
+        page = int(parts[4])
+    text, kb = await _build_stats_groups(repo, page, only)
     await cb.message.edit_text(text, reply_markup=kb)
     await cb.answer()
 
@@ -1060,9 +1144,11 @@ async def cb_group_users(cb: CallbackQuery, repo: RequestsRepo, config: Config):
     if group == "__none__":
         users = await repo.users.get_by_group(None)
         title = "Без группы"
+        kind = "all"
     else:
         users = await repo.users.get_by_group(group)
         title = group
+        kind = "vuz" if is_vuz(group) else "college"
 
     lines = [f"👥 <b>{title}</b> ({len(users)})", "🔔 рассылка · 🐱 фото · ⚡ был сегодня · ⏰ звонки\n"]
     for u in users:
@@ -1071,7 +1157,8 @@ async def cb_group_users(cb: CallbackQuery, repo: RequestsRepo, config: Config):
         lines.append("Никого нет")
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Назад к статистике", callback_data="adm:stats")],
+        [InlineKeyboardButton(text="⬅️ К списку групп",
+                              callback_data=f"adm:stats:groups:{kind}:0")],
     ])
     await cb.message.edit_text("\n".join(lines), reply_markup=kb)
     await cb.answer()
@@ -1109,16 +1196,25 @@ async def cb_adm_teachers(cb: CallbackQuery, repo: RequestsRepo, config: Config)
 
 @admin_router.my_chat_member()
 async def on_bot_left_chat(event, repo: RequestsRepo):
-    """Бота выгнали из группы — убрать запись сразу.
+    """Бота добавили в чат или выгнали — записать это.
 
-    Кнопка отвязки есть, но админ может не заметить выгон, а рассылка
-    каждый раз пыталась бы туда писать и логировала ошибку. Ограничение
-    (``restricted``) не повод удалять: бот в чате остаётся.
+    Раньше на добавление реакции не было вовсе: бот сидел в десятках
+    групп, а в базе о них ни строки, пока админ не введёт /setgroup.
+    Спросить «где меня уже добавили» было нечем.
+
+    Запись при выгоне теперь не удаляем, а помечаем: экран «Чаты»
+    должен показать «бота выгнали», иначе группа просто исчезнет из
+    списка, и никто не поймёт, куда она делась. Ограничение
+    (``restricted``) — не выгон: бот в чате остаётся.
     """
     status = getattr(event.new_chat_member, "status", None)
-    if status in ("left", "kicked"):
-        await repo.chats.remove(event.chat.id)
-        logging.info("чат %s: бота выгнали, отвязано", event.chat.id)
+    title = getattr(event.chat, "title", "") or ""
+    if status in ("member", "administrator"):
+        await repo.chats.touch(event.chat.id, title)
+        logging.info("чат %s (%s): бот добавлен", event.chat.id, title)
+    elif status in ("left", "kicked"):
+        await repo.chats.set_status(event.chat.id, status)
+        logging.info("чат %s: бота выгнали (%s)", event.chat.id, status)
 
 
 @admin_router.callback_query(lambda cb: cb.data == "adm:chats")
@@ -1130,13 +1226,52 @@ async def cb_adm_chats(cb: CallbackQuery, repo: RequestsRepo, config: Config):
     await cb.answer()
 
 
+_CHAT_STATUS = {
+    "member": "✅ бот в чате",
+    None: "❔ не проверяли",
+    "left": "🚪 вышел",
+    "kicked": "⛔ выгнали",
+    "restricted": "⚠️ ограничен",
+}
+
+
+def _chat_status(line: str) -> str:
+    return _CHAT_STATUS.get(line, line)
+
+
 async def _chats_text(repo: RequestsRepo) -> str:
+    """Список чатов: где бот есть, может ли писать, какая группа.
+
+    Раньше показывались только чаты с /setgroup — то есть те, о которых
+    админ и так помнит. Группы, куда бота добавили, но не привязали,
+    в списке не было вовсе, и понять, где он уже сидит, было нельзя.
+    """
     chats = await repo.chats.get_all()
     if not chats:
-        return "💬 <b>Чаты</b>\n\nПока нет"
-    lines = ["💬 <b>Чаты</b>\n"]
-    for c in chats:
-        lines.append(f"{c.id} · {c.title or '—'} → {c.group or '—'}")
+        return ("💬 <b>Чаты</b>\n\nПока пусто.\n\n"
+                "Добавь бота в группу — он появится здесь сам.")
+    alive = [c for c in chats if c.status in ("member", None, "restricted")]
+    dead = [c for c in chats if c.status in ("left", "kicked")]
+    bound = [c for c in alive if c.group]
+    lines = [
+        "💬 <b>Чаты</b>",
+        "",
+        f"Всего <b>{len(chats)}</b> · рабочие <b>{len(alive)}</b> · "
+        f"недоступные <b>{len(dead)}</b>",
+        f"Привязано к группе расписания: <b>{len(bound)}</b>",
+        "",
+    ]
+    for c in alive:
+        lines.append(f"{_chat_status(c.status)} · {c.title or c.id}")
+        lines.append(f"    → {strip_unit(c.group) if c.group else 'группа не задана'}"
+                     f" · {c.id}")
+    if dead:
+        lines.append("")
+        lines.append("<b>Бота нет в этих чатах</b>")
+        for c in dead:
+            grp = strip_unit(c.group) if c.group else "группа не задана"
+            lines.append(f"{_chat_status(c.status)} · {c.title or c.id} "
+                         f"({c.id}) → {grp}")
     return "\n".join(lines)
 
 
@@ -1146,11 +1281,50 @@ async def _chats_kb(repo: RequestsRepo) -> InlineKeyboardMarkup:
     Без неё запись висела вечно: бота выгнали из группы, а рассылка
     каждый раз пыталась туда писать и логировала TelegramForbiddenError.
     """
-    rows = [[InlineKeyboardButton(text=f"✖️ Отвязать {c.title or c.id}",
-                                  callback_data=f"adm:unchat:{c.id}")]
-            for c in await repo.chats.get_all()]
+    rows = [[InlineKeyboardButton(text="🔍 Проверить все чаты",
+                                  callback_data="adm:chats:check")]]
+    for c in await repo.chats.get_all():
+        icon = "✅" if c.status in ("member", None) else "⛔"
+        rows.append([InlineKeyboardButton(
+            text=f"{icon} ✖️ {c.title or c.id}",
+            callback_data=f"adm:unchat:{c.id}")])
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@admin_router.callback_query(lambda cb: cb.data == "adm:chats:check")
+async def cb_adm_chats_check(cb: CallbackQuery, repo: RequestsRepo, config: Config,
+                             bot: Bot):
+    """Спросить у Telegram, что с каждым чатом на самом деле.
+
+    Статус в базе — это последнее, что мы видели. Бота могли выгнать,
+    пока он спал, или ограничить право писать. getChatMember отвечает
+    точно, но по одному чату за раз — отсюда кнопка, а не автопроверка
+    на каждый показ экрана.
+    """
+    if not _is_admin_cb(cb, config):
+        return
+    chats = await repo.chats.get_all()
+    checked = 0
+    for c in chats:
+        try:
+            member = await bot.get_chat_member(c.id, bot.id)
+            status = str(getattr(member, "status", ""))
+            # aiogram отдаёт enum ChatMemberStatus — берём значение.
+            status = getattr(status, "value", status)
+            await repo.chats.set_status(c.id, status)
+            checked += 1
+        except TelegramBadRequest:
+            # «chat not found» — чата больше нет; «member not found» —
+            # бота там нет. Оба случая для нас одно и то же.
+            await repo.chats.set_status(c.id, "kicked")
+        except TelegramForbiddenError:
+            await repo.chats.set_status(c.id, "kicked")
+    await cb.message.edit_text(await _chats_text(repo),
+                               reply_markup=await _chats_kb(repo))
+    await cb.answer(f"Проверено: {checked} из {len(chats)}")
+    # Второй answer на тот же callback Telegram не принимает — первый
+    # уже закрыл «часики», поэтому здесь только всплывающая подсказка.
 
 
 @admin_router.callback_query(lambda cb: cb.data.startswith("adm:unchat:"))

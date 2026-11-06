@@ -145,7 +145,7 @@ def test_groups_screen_marks_unit():
                 assert any(x.startswith("🎓") for x in labels)
                 # Вуз в кнопках без служебного суффикса.
                 assert any("ЭК-26-2" in x and "@vuz" not in x for x in labels)
-                assert "Всего <b>2</b>" in text
+                assert "Групп: <b>2</b>" in text
         finally:
             await engine.dispose()
     run(scenario())

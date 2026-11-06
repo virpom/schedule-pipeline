@@ -86,16 +86,30 @@ def test_unlink_callback_registered():
     assert admin_mod.cb_adm_unchat is not None
 
 
-def test_kick_handler_removes():
-    assert "chats.remove" in inspect.getsource(admin_mod.on_bot_left_chat)
+def test_kick_handler_marks_status():
+    """Выгон не удаляет строку, а помечает: экран должен показать «выгнали»."""
+    body = inspect.getsource(admin_mod.on_bot_left_chat)
+    assert "chats.set_status" in body
 
 
 def test_kick_handler_only_left_or_kicked():
-    """Удаляем только при left/kicked: restricted значит «бот в чате»."""
+    """Помечаем «бота нет» только при left/kicked.
+
+    restricted значит «бот в чате, но с ограничениями» — его записывать
+    в выгнанные нельзя.
+    """
     body = inspect.getsource(admin_mod.on_bot_left_chat)
-    line = next(l for l in body.splitlines() if "status in" in l)
-    assert '"left"' in line and '"kicked"' in line, line
+    line = next(l for l in body.splitlines() if '"left"' in l)
+    assert '"kicked"' in line, line
     assert "restricted" not in line, line
+
+
+def test_added_handler_records_chat():
+    """На добавление в чат бот тоже реагирует — иначе он не узнает,
+    где его уже добавили."""
+    body = inspect.getsource(admin_mod.on_bot_left_chat)
+    assert "chats.touch" in body
+    assert '"administrator"' in body or '"member"' in body
 
 
 def test_middleware_registered_for_chat_member():
