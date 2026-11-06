@@ -40,3 +40,36 @@ def test_bad_request_is_not_transient():
     """400-е остаются ошибками — там правда что-то не так."""
     from aiogram.exceptions import TelegramBadRequest
     assert not _is_transient(TelegramBadRequest(method=None, message="bad"))
+
+
+# --- нет прав в чате — не «ошибка в боте» -------------------------------
+
+def test_not_enough_rights_is_harmless():
+    """06.11 20:53: «📅 Завтра» в группе, где бот не может писать."""
+    from aiogram.exceptions import TelegramBadRequest
+    from tgbot.middlewares.errors import _is_harmless
+
+    exc = TelegramBadRequest(
+        method=None,
+        message="Telegram server says - Bad Request: not enough rights "
+                "to send text messages to the chat")
+    assert _is_harmless(exc)
+
+
+def test_bot_blocked_and_kicked_are_harmless():
+    from aiogram.exceptions import TelegramBadRequest
+    from tgbot.middlewares.errors import _is_harmless
+
+    for text in ("Forbidden: bot was blocked by the user",
+                 "Forbidden: bot was kicked from the supergroup chat",
+                 "Bad Request: chat not found"):
+        assert _is_harmless(TelegramBadRequest(method=None, message=text)), text
+
+
+def test_real_bad_request_still_reported():
+    """Настоящая ошибка 400 по-прежнему тревожит админа."""
+    from aiogram.exceptions import TelegramBadRequest
+    from tgbot.middlewares.errors import _is_harmless
+
+    assert not _is_harmless(TelegramBadRequest(
+        method=None, message="Bad Request: can't parse entities"))
