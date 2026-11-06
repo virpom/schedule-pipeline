@@ -235,11 +235,14 @@ async def _build_stats_unit(repo: RequestsRepo, unit: str) -> tuple[str, InlineK
             parts = ", ".join(f"{names.get(k, k)} {v}" for k, v in sorted(by_form.items()))
             lines.append(f"Формы обучения: {parts}")
 
-    # Топ групп по числу студентов.
-    per_group: dict[str, int] = {}
-    for u in mine:
-        if u.group:
-            per_group[u.group] = per_group.get(u.group, 0) + 1
+    # Топ групп по числу студентов. Считаем тем же помощником, что и
+    # экран «Все группы»: два независимых счётчика однажды разойдутся,
+    # и будет непонятно, какой цифре верить.
+    per_group = {
+        g: len(members)
+        for g, members in (await _groups_index(repo)).items()
+        if is_vuz(g) == is_v
+    }
     if per_group:
         lines.append("")
         lines.append("<b>Крупнейшие группы</b>")
