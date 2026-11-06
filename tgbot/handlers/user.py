@@ -74,14 +74,6 @@ UNIT_KB = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
 ])
 
-COURSE_KB = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="1 курс", callback_data="course:1"),
-     InlineKeyboardButton(text="2 курс", callback_data="course:2")],
-    [InlineKeyboardButton(text="3 курс", callback_data="course:3"),
-     InlineKeyboardButton(text="4 курс", callback_data="course:4")],
-    [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
-])
-
 
 class SubjectSearch(StatesGroup):
     waiting = State()
@@ -204,14 +196,12 @@ def menu_text(user: User) -> str:
             return ("🎓 <b>Расписание ПТК</b>\n\n"
                     "Группа не выбрана.\n\nВыбери её, чтобы видеть расписание 👇")
         ident = strip_unit(user.group)
-        if is_vuz(user.group):
-            label = "Группа · вуз"
-            # У вуза курс зашит в номер группы (ГИ-23 → 3 курс), и
-            # отдельное поле course остаётся от прежней группы. Без
-            # этого ГИ-23 подписывалась «1 курс».
-            course = course_from_group(user.group)
-        else:
-            course = user.course
+        label = "Группа · вуз" if is_vuz(user.group) else "Группа"
+        # Курс зашит в номер набора (ДП-26 → 1, ГИ-23 → 3). Поле
+        # ``user.course`` для колледжа заполнялось вручную вопросом
+        # «на каком ты курсе?», и люди отвечали наугад: ДП-26 оказывался
+        # 3 курсом. Считаем из группы — ошибиться нельзя.
+        course = course_from_group(user.group)
         if course:
             ident = f"{ident} · {course} курс"
     return f"🎓 <b>Расписание ПТК</b>\n\n{label}: <b>{ident}</b>\n\nВыбери действие 👇"
@@ -482,18 +472,12 @@ def _fmt(user: User, date: datetime.date, lessons, bell, lunches, gcg=None) -> s
 async def start(message: Message, user: User, repo: RequestsRepo, state: FSMContext):
     await state.clear()
     if _has_identity(user):
-        if not _is_teacher(user) and not user.course:
-            await message.answer(
-                f"🎓 Твоя группа: <b>{user.group}</b>\n\nНа каком ты курсе? 👇",
-                reply_markup=COURSE_KB,
-            )
-        else:
-            # Сразу показываем сегодняшний день — это то, за чем открывают бота.
-            # Меню остаётся кнопкой под сообщением.
-            await message.answer(await _day_text(repo, user, datetime.date.today()),
-                                 reply_markup=BOTTOM_KB)
-            text, kb = await _render_menu(repo, user)
-            await message.answer(text, reply_markup=kb)
+        # Сразу показываем сегодняшний день — это то, за чем открывают бота.
+        # Меню остаётся кнопкой под сообщением.
+        await message.answer(await _day_text(repo, user, datetime.date.today()),
+                             reply_markup=BOTTOM_KB)
+        text, kb = await _render_menu(repo, user)
+        await message.answer(text, reply_markup=kb)
     else:
         await message.answer("🎓 Привет! Кто ты?", reply_markup=ROLE_KB)
 
@@ -522,11 +506,10 @@ async def set_group_cmd(message: Message, repo: RequestsRepo, user: User):
     await repo.users.set_group(user.id, group)
     user.role = "student"
     user.group = group
-    if user.course:
-        text, kb = await _render_menu(repo, user)
-        await message.answer(f"Твоя группа: <b>{group}</b>\n\n{text}", reply_markup=kb)
-    else:
-        await message.answer(f"Твоя группа: <b>{group}</b>\n\nНа каком ты курсе? 👇", reply_markup=COURSE_KB)
+    # Курс — из номера набора, спрашивать нечего.
+    await repo.users.set_course(user.id, course_from_group(group))
+    text, kb = await _render_menu(repo, user)
+    await message.answer(f"Твоя группа: <b>{group}</b>\n\n{text}", reply_markup=kb)
 
 
 @user_router.callback_query(F.data == "role:student")
@@ -646,15 +629,24 @@ async def cb_pick_teacher(cb: CallbackQuery, repo: RequestsRepo):
 
 @user_router.callback_query(F.data == "pick_course")
 async def cb_pick_course(cb: CallbackQuery, repo: RequestsRepo, user: User):
-    """Смена курса.
+    """Смена курса — только у вуза, и только сменой группы.
 
-    У колледжа курс — отдельное поле: он выбирает поток звонков (1 и 4
-    против 2 и 3). У вуза курс зашит в номер группы, поэтому меняется
-    выбором группы того же курса: иначе подпись разошлась бы с фактом.
+    Раньше у колледжа курс выбирался вручную кнопками 1–4. Курс и так
+    зашит в номер набора (ДП-26 → 1), поэтому ручной выбор был лишним
+    шагом, на котором ошибались: ДП-26 оказывался 3 курсом, и человек
+    получал звонки чужого потока. Теперь курс считается из группы.
     """
     info = await repo.vuz_groups.get(user.group) if is_vuz(user.group) else None
     if info is None:
-        await cb.message.edit_text("На каком ты курсе? 👇", reply_markup=COURSE_KB)
+        # Колледж и «группа не выбрана»: менять нечего, курс выводится
+        # из группы. Честно говорим это вместо кнопок 1–4.
+        await cb.message.edit_text(
+            "Курс определяется группой автоматически: ДП-26 → 1 курс.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🗓 Сменить группу",
+                                      callback_data="settings:group")],
+                [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
+            ]))
         await cb.answer()
         return
 
@@ -686,22 +678,26 @@ async def cb_group(cb: CallbackQuery, repo: RequestsRepo, user: User):
     # кодируется суффиксом @vuz в самом имени группы.
     user.role = "student"
     user.group = group
-    if user.course:
-        text, kb = await _render_menu(repo, user)
-        await cb.message.edit_text(f"Твоя группа: <b>{group}</b>\n\n{text}", reply_markup=kb)
-    else:
-        await cb.message.edit_text(f"Твоя группа: <b>{group}</b>\n\nНа каком ты курсе? 👇", reply_markup=COURSE_KB)
+    await repo.users.set_course(user.id, course_from_group(group))
+    text, kb = await _render_menu(repo, user)
+    await cb.message.edit_text(f"Твоя группа: <b>{group}</b>\n\n{text}", reply_markup=kb)
     await cb.answer(f"Группа {group}")
 
 
 @user_router.callback_query(F.data.startswith("course:"))
 async def cb_course(cb: CallbackQuery, repo: RequestsRepo, user: User):
-    course = int(cb.data.split(":", 1)[1])
-    await repo.users.set_course(user.id, course)
-    user.course = course
+    """Кнопки старого экрана «на каком ты курсе?».
+
+    Экран убран, но сообщения с ним остались в чатах у людей — тап по
+    старой кнопке не должен висеть без ответа. Курс молча приводим к
+    тому, что следует из группы.
+    """
+    if user.group:
+        await repo.users.set_course(user.id, course_from_group(user.group))
+        user.course = course_from_group(user.group)
     text, kb = await _render_menu(repo, user)
     await cb.message.edit_text(text, reply_markup=kb)
-    await cb.answer(f"{course} курс")
+    await cb.answer(f"{user.course or 1} курс")
 
 
 @user_router.callback_query(F.data.startswith("tunit:"))

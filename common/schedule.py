@@ -145,14 +145,17 @@ def teacher_matches(lesson_teacher: str, selected_name: str) -> bool:
 
 
 def course_from_group(group: str) -> int:
+    """Курс по номеру набора в имени группы: ДП-26 -> 1.
+
+    Вуз учится до 6 курса, колледж — до 4, поэтому верхнего потолка
+    нет: обрезать до 4 значило бы врать пятикурснику вуза.
+    """
     m = re.search(r"(\d{2})", group)
     if not m:
         return 1
     admission = 2000 + int(m.group(1))
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(datetime.timezone.utc)
     acad_start = now.year if now.month >= 9 else now.year - 1
-    # Потолка здесь нет: он был слепым к вузу. Колледж до 5 курса не
-    # доходит, а пятикурснику вуза подпись «4 курс» — прямая ложь.
     return max(1, acad_start - admission + 1)
 
 
