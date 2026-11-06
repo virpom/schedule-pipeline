@@ -568,6 +568,37 @@ async def materialize_weekday(repo: RequestsRepo, weekday: int,
     return written
 
 
+def _day_digest(rows: list[dict]) -> dict[str, str]:
+    """Отпечаток дня в том же виде, что digest_by_date.
+
+    digest_by_date считает sha256 от списка
+    ``(para, subject, teacher, room, changed, action)`` по каждой группе.
+    Здесь то же самое, но из ещё не записанных строк — иначе сравнить
+    «что лежит» с «что будет» нечем.
+    """
+    buckets: dict[str, list] = {}
+    for r in rows:
+        buckets.setdefault(r["group"], []).append(
+            (r["para"], r["subject"], r["teacher"], r["room"],
+             r["changed"], r["action"]))
+    return {g: hashlib.sha256(repr(v).encode()).hexdigest()
+            for g, v in buckets.items()}
+
+
+def _same_day(stored: dict[str, str], rows: list[dict]) -> bool:
+    """Совпадает ли то, что в базе, с тем, что мы собираемся записать.
+
+    Пустой ``stored`` значит «дня в базе нет», а не «день без пар».
+    Разница важна: день, где пар не бывает (суббота первокурсника),
+    всё равно надо записать — иначе не появится отметка в schedule_file,
+    и студент увидит «расписание ещё не выложено» вместо «занятий нет».
+    Поэтому отсутствующий день считаем изменившимся всегда.
+    """
+    if not stored:
+        return False
+    return stored == _day_digest(rows)
+
+
 async def materialize(repo: RequestsRepo, days: int = MATERIALIZE_DAYS) -> int:
     """Собрать итоговое расписание из слоёв и положить в ``college_lesson``.
 
@@ -577,13 +608,27 @@ async def materialize(repo: RequestsRepo, days: int = MATERIALIZE_DAYS) -> int:
     раскладываем результат на ближайшие дни. Ручные правки старосты
     (``source='manual'``) при этом сохраняются.
 
-    Возвращает число дней, которые были записаны.
+    Возвращает число дней, которые были ЗАПИСАНЫ. День, содержимое
+    которого не изменилось, в счёт не идёт: писать его заново незачем,
+    но собрать надо — иначе окно не сдвинется вперёд.
     """
     from infrastructure.database.models import CollegeLesson
 
     today = datetime.date.today()
     groups = await repo.base_lessons.get_groups()
     written = 0
+
+    # Отпечатки того, что уже лежит в базе. Нужны, чтобы не переписывать
+    # день, содержимое которого не изменилось: поллер зовёт materialize
+    # каждые 5 минут, и запись 14 дней подряд держала SQLite занятой,
+    # хотя менялись ноль строк. Считаем до цикла — один SELECT.
+    #
+    # digest_by_date видит только дни, где есть строки: день без пар в
+    # нём отсутствует. Поэтому «день уже обработан» проверяем ещё и по
+    # schedule_file — его пишет _publish_day, и он есть у любого дня,
+    # включая пустой.
+    before = await repo.college_lessons.digest_by_date()
+    published = await repo.schedule_files.get_dates(today, today + datetime.timedelta(days=days - 1))
 
     for offset in range(days):
         date = today + datetime.timedelta(days=offset)
@@ -629,6 +674,24 @@ async def materialize(repo: RequestsRepo, days: int = MATERIALIZE_DAYS) -> int:
                     "changed": slot.changed,
                     "action": slot.action or "",
                 })
+
+        # Пересобирать надо всегда: сменился якорь недель вуза — и все
+        # дни поменялись. Но ПИСАТЬ стоит только изменившееся. Сравнение
+        # по отпечатку того же вида, что считает digest_by_date, поэтому
+        # ложных «изменилось» не бывает.
+        # День уже обработан и содержимое не изменилось — не пишем.
+        #
+        # Пустой день (пар нет вовсе) в digest_by_date отсутствует, и
+        # _same_day по нему всегда False. Поэтому отдельная ветка: раз
+        # день опубликован, а строк нет ни в базе, ни в собранном — он
+        # пустой и таким остался, переписывать нечего. Без неё 12
+        # пустых дней переписывались каждый цикл, каждые 5 минут.
+        if date in published:
+            stored = before.get(date, {})
+            if _same_day(stored, rows):
+                continue
+            if not stored and not rows:
+                continue
 
         await repo.college_lessons.replace_date(date, rows)
         written += 1

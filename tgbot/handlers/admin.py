@@ -5,6 +5,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from html import escape
 from typing import Callable
 
 from aiogram import Bot, F, Router
@@ -1132,8 +1133,12 @@ def _user_marks(u) -> str:
 
 
 def _user_line(u) -> str:
-    tag = f"@{u.username}" if u.username else str(u.id)
-    return f"{tag} — {u.full_name}{_user_marks(u)}"
+    # Имя и ник приходят от Telegram и разметку не фильтруют: человек
+    # может назваться «<b>Вася</b>» или «&lt;». Без escape такое имя
+    # ломает весь экран — Telegram отвечает «can't parse entities», и
+    # состав группы не открывается вообще. В базе уже есть «7>10».
+    tag = f"@{escape(u.username)}" if u.username else str(u.id)
+    return f"{tag} — {escape(u.full_name or '')}{_user_marks(u)}"
 
 
 @admin_router.callback_query(lambda cb: cb.data and cb.data.startswith("group_users:"))
@@ -1168,8 +1173,8 @@ async def _teachers_text(repo: RequestsRepo) -> str:
     teachers = await repo.users.get_teachers_users()
     lines = [f"👨‍🏫 <b>Преподаватели</b> ({len(teachers)})\n"]
     for t in sorted(teachers, key=lambda x: (x.teacher_name or "")):
-        tag = f"@{t.username}" if t.username else str(t.id)
-        line = f"{tag} — {t.teacher_name}{_user_marks(t)}"
+        tag = f"@{escape(t.username)}" if t.username else str(t.id)
+        line = f"{tag} — {escape(t.teacher_name or '')}{_user_marks(t)}"
         lines.append(line)
     if not teachers:
         lines.append("Пока нет")

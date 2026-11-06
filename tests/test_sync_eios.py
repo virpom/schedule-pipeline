@@ -294,6 +294,7 @@ def test_materialize_writes_all_days(tmp_path):
         await sync_eios.replace_base_lessons(repo, [
             ParsedLesson("ДП-26", 1, 1, "Математика", "Иванов И.И."),
         ])
+        # Первый проход пишет всё окно: в базе пусто.
         days = await sync_eios.materialize(repo, days=14)
         assert days == 14
 
@@ -305,6 +306,12 @@ def test_materialize_writes_all_days(tmp_path):
             # Понедельник есть только раз в неделю, поэтому проверяем
             # не наличие пар, а что дата вообще обработана.
             assert date.isoweekday() != 1 or rows
+
+        # Повторный проход на тех же данных ничего не пишет: содержимое
+        # то же. Это и есть смысл сравнения — поллер зовёт materialize
+        # каждые 5 минут, и запись 14 дней держала SQLite занятой впустую.
+        again = await sync_eios.materialize(repo, days=14)
+        assert again == 0, f"переписал {again} дней без изменений"
 
         # Дальше окна данных быть не должно.
         far = today + dt.timedelta(days=20)

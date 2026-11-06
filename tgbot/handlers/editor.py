@@ -553,6 +553,12 @@ async def cb_subject_suggestion(cb: CallbackQuery, repo: RequestsRepo, state: FS
 
 @editor_router.callback_query(F.data == "ed:skip_teacher")
 async def cb_skip_teacher(cb: CallbackQuery, repo: RequestsRepo, state: FSMContext):
+    # Права проверяем и здесь: дальше по шагам данные пишутся в состояние,
+    # и обработчик без проверки — второй рубеж, который держится только
+    # на том, что кто-то другой проверил раньше.
+    if not await editor_group(repo, cb.from_user.id):
+        await cb.answer("Нет прав", show_alert=True)
+        return
     await state.update_data(teacher="")
     await cb.message.edit_text(
         f"{EDITOR_TITLE}\n\n🚪 Теперь <b>кабинет</b> или нажми «Пропустить».",
@@ -879,6 +885,9 @@ async def cb_sub_subject_suggestion(cb: CallbackQuery, repo: RequestsRepo, state
 
 @editor_router.callback_query(F.data == "ed:sub_skip_teacher")
 async def cb_sub_skip_teacher(cb: CallbackQuery, repo: RequestsRepo, state: FSMContext):
+    if not await editor_group(repo, cb.from_user.id):
+        await cb.answer("Нет прав", show_alert=True)
+        return
     await state.update_data(teacher="")
     await cb.message.edit_text(
         f"{EDITOR_TITLE}\n\n🚪 <b>Кабинет</b> или «Пропустить».",
@@ -1275,6 +1284,9 @@ def _teacher_kb(suggestions: list[str], back: str) -> InlineKeyboardMarkup:
 
 @editor_router.callback_query(F.data.startswith("ed:tsug:"))
 async def cb_teacher_suggestion(cb: CallbackQuery, repo: RequestsRepo, state: FSMContext):
+    if not await editor_group(repo, cb.from_user.id):
+        await cb.answer("Нет прав", show_alert=True)
+        return
     data = await state.get_data()
     suggestions = data.get("suggestions") or []
     idx = int(cb.data.rsplit(":", 1)[1])
@@ -1329,6 +1341,10 @@ async def on_subject(message: Message, repo: RequestsRepo, state: FSMContext):
 
 @editor_router.message(EditorState.teacher)
 async def on_teacher(message: Message, repo: RequestsRepo, state: FSMContext):
+    if not await editor_group(repo, message.from_user.id):
+        await message.answer("У тебя нет прав редактора.", reply_markup=_no_rights_kb())
+        await state.clear()
+        return
     teacher = (message.text or "").strip()
     bad = _too_long(teacher, "преподаватель")
     if bad:
@@ -1349,6 +1365,10 @@ async def on_teacher(message: Message, repo: RequestsRepo, state: FSMContext):
 
 @editor_router.message(EditorState.room)
 async def on_room(message: Message, repo: RequestsRepo, state: FSMContext):
+    if not await editor_group(repo, message.from_user.id):
+        await message.answer("У тебя нет прав редактора.", reply_markup=_no_rights_kb())
+        await state.clear()
+        return
     room = (message.text or "").strip()
     bad = _too_long(room, "кабинет")
     if bad:
