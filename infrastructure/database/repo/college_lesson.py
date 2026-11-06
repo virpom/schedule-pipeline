@@ -166,6 +166,29 @@ class CollegeLessonRepo(BaseRepo):
         )
         return list(result.scalars().all())
 
+    async def get_for_dates(
+            self, dates: list[datetime.date],
+    ) -> list[CollegeLesson]:
+        """Все пары на перечисленные даты одним запросом.
+
+        Нужно рассылке: раньше она открывала сессию и делала SELECT на
+        каждого подписчика на каждую дату — 323 человека × 14 дней =
+        4522 запроса на одну рассылку. Здесь тот же результат за один.
+
+        Порядок — по дате и номеру пары, как у get_for_group_date и
+        get_for_teacher_date: format_day печатает строки в том порядке,
+        в каком их получил, и рассылка не должна отличаться от экрана.
+        Раскладку по группам делает вызывающий.
+        """
+        if not dates:
+            return []
+        result = await self.session.execute(
+            select(CollegeLesson)
+            .where(CollegeLesson.date.in_(dates))
+            .order_by(CollegeLesson.date, CollegeLesson.para)
+        )
+        return list(result.scalars().all())
+
     async def get_all_lessons(self) -> list[CollegeLesson]:
         result = await self.session.execute(
             select(CollegeLesson).order_by(CollegeLesson.date, CollegeLesson.para)

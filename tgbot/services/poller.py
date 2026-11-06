@@ -5,7 +5,8 @@ import time
 
 from aiohttp import ClientSession
 
-from common.schedule import bells_group, format_day, format_no_lessons
+from common.schedule import (bells_group, format_day, format_no_lessons,
+                             teacher_matches)
 from config import Config
 from infrastructure.database.repo.requests import RequestsRepo
 from parsers import eios, vuz
@@ -279,12 +280,39 @@ async def poll_once(bot, session_pool, config: Config) -> list[tuple[datetime.da
 
 
 async def notify_new_schedule(bot, session_pool, changes: list[tuple[datetime.date, bool, set[str]]], rate: float, photos_path: str) -> None:
+    dates = sorted({d for d, _is_new, _groups in changes})
+
     async with session_pool() as db:
         repo = RequestsRepo(db)
         bell, lunches = await repo.bell_schedule.get_context()
         subscribers = await repo.users.get_subscribed()
         chats = await repo.chats.get_all()
         group_course_map = await repo.users.get_group_course_map()
+        # Один запрос на все даты вместо запроса на каждого получателя:
+        # было 323 подписчика × 14 дат = 4522 сессии и SELECT на одну
+        # рассылку. Пока они шли, поллер был занят и следующий опрос
+        # откладывался.
+        rows = await repo.college_lessons.get_for_dates(dates)
+
+    # (дата, группа) -> пары. Порядок внутри группы уже по para:
+    # get_for_dates сортирует по дате, группе и номеру пары.
+    by_day: dict[tuple[datetime.date, str], list] = {}
+    for row in rows:
+        by_day.setdefault((row.date, row.group), []).append(row)
+
+    # Преподавателю нужны пары по фамилии, а не по группе: раскладываем
+    # отдельно. teacher_matches — та же проверка, что в
+    # get_for_teacher_date, включая инициалы и двойные фамилии.
+    teacher_cache: dict[tuple[datetime.date, str], list] = {}
+
+    def _teacher_lessons(date: datetime.date, name: str) -> list:
+        key = (date, name)
+        if key not in teacher_cache:
+            teacher_cache[key] = [
+                row for row in rows
+                if row.date == date and teacher_matches(row.teacher, name)
+            ]
+        return teacher_cache[key]
 
     items: list[tuple[int, str, str | None]] = []
     for date, is_new, groups in sorted(changes, key=lambda x: x[0]):
@@ -309,12 +337,10 @@ async def notify_new_schedule(bot, session_pool, changes: list[tuple[datetime.da
             if groups:
                 if not is_teacher and user.group not in groups:
                     continue
-            async with session_pool() as db:
-                repo = RequestsRepo(db)
-                if is_teacher:
-                    lessons = await repo.college_lessons.get_for_teacher_date(user.teacher_name, date)
-                else:
-                    lessons = await repo.college_lessons.get_for_group_date(user.group, date)
+            if is_teacher:
+                lessons = _teacher_lessons(date, user.teacher_name)
+            else:
+                lessons = by_day.get((date, user.group), [])
             if is_teacher:
                 gcg = group_course_map or None
             else:
@@ -338,9 +364,7 @@ async def notify_new_schedule(bot, session_pool, changes: list[tuple[datetime.da
         for chat in chats:
             if not chat.group:
                 continue
-            async with session_pool() as db:
-                repo = RequestsRepo(db)
-                lessons = await repo.college_lessons.get_for_group_date(chat.group, date)
+            lessons = by_day.get((date, chat.group), [])
             if lessons:
                 text = format_day(date, lessons, bell, lunches, "brief")
             else:

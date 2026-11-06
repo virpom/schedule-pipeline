@@ -149,12 +149,18 @@ def course_from_group(group: str) -> int:
 
     Вуз учится до 6 курса, колледж — до 4, поэтому верхнего потолка
     нет: обрезать до 4 значило бы врать пятикурснику вуза.
+
+    Время берём локальное, а не UTC: весь бот живёт в поясе колледжа
+    (``TZ=Asia/Krasnoyarsk`` в контейнере). Учебный год начинается
+    1 сентября по местному, а в UTC это 31 августа 17:00 — семь часов
+    в году, когда UTC-счёт отдаёт курс на единицу меньше у ВСЕХ групп
+    сразу и уводит их в чужой поток звонков.
     """
     m = re.search(r"(\d{2})", group)
     if not m:
         return 1
     admission = 2000 + int(m.group(1))
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now()
     acad_start = now.year if now.month >= 9 else now.year - 1
     return max(1, acad_start - admission + 1)
 

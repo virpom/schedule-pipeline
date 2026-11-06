@@ -50,6 +50,18 @@ def _run(subscribers, changes, monkeypatch):
     async def for_teacher_date(name, date):
         return []
 
+    async def get_for_dates(dates):
+        """Один запрос на все даты — новый способ рассылки."""
+        out = []
+        for date in dates:
+            for u in subscribers:
+                if getattr(u, "group", None):
+                    out.append(SimpleNamespace(
+                        date=date, para=1, subject="Математика", teacher="И",
+                        room="1", changed=False, action="", comment="",
+                        group=u.group, time_note="", para_end=None))
+        return out
+
     repo = SimpleNamespace(
         bell_schedule=SimpleNamespace(get_context=get_context),
         users=SimpleNamespace(get_subscribed=get_subscribed,
@@ -57,7 +69,8 @@ def _run(subscribers, changes, monkeypatch):
         chats=SimpleNamespace(get_all=get_all),
         no_lessons=SimpleNamespace(get_note=_none),
         college_lessons=SimpleNamespace(get_for_group_date=for_group_date,
-                                        get_for_teacher_date=for_teacher_date),
+                                        get_for_teacher_date=for_teacher_date,
+                                        get_for_dates=get_for_dates),
     )
 
     class Pool:

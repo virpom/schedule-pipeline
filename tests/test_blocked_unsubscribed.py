@@ -33,7 +33,8 @@ def _bot(raise_exc):
 
 @pytest.fixture(autouse=True)
 def _clear_retry():
-    broadcaster._retry["max"] = 0.0
+    # Ожидание после 429 больше не живёт в модуле — оно локальное для
+    # пачки. Чистить надо только кэш file_id.
     broadcaster._file_ids.clear()
 
 

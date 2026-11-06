@@ -59,7 +59,6 @@ def test_send_message_returns_false_on_429():
 
 def test_queue_not_blocked_by_one_429():
     """Главное: остальные получают сообщения, не дожидаясь сна."""
-    broadcaster._retry["max"] = 0.0
     bot = _Bot(retry_after=1)
     asyncio.run(broadcaster.broadcast_many(bot, _items(5), rate=100))
     # первый проход: все пять попыток, потом один повтор адресата 1
@@ -68,7 +67,6 @@ def test_queue_not_blocked_by_one_429():
 
 
 def test_all_recipients_eventually_delivered():
-    broadcaster._retry["max"] = 0.0
     bot = _Bot(retry_after=0)
     sent = asyncio.run(broadcaster.broadcast_many(bot, _items(5), rate=100))
     assert sent == 5, "сообщение потерялось после 429"
@@ -76,7 +74,6 @@ def test_all_recipients_eventually_delivered():
 
 def test_single_sleep_for_whole_batch():
     """Спим один раз за пачку, а не на каждого неудачника."""
-    broadcaster._retry["max"] = 0.0
 
     class _TwoFails(_Bot):
         async def send_message(self, chat_id, text, **kw):
@@ -108,24 +105,29 @@ def test_single_sleep_for_whole_batch():
 
 
 def test_default_wait_when_no_retry_after():
-    broadcaster._retry["max"] = 0.0
-    assert broadcaster._take_retry() == broadcaster._DEFAULT_RETRY_WAIT
+    """429 без внятного retry_after — короткая пауза по умолчанию."""
+    assert broadcaster._take_retry(0.0) == broadcaster._DEFAULT_RETRY_WAIT
 
 
-def test_take_retry_resets():
-    broadcaster._retry["max"] = 0.0
-    broadcaster._stash_retry(12)
-    assert broadcaster._take_retry() == 12
-    assert broadcaster._take_retry() == broadcaster._DEFAULT_RETRY_WAIT
+def test_take_retry_uses_given_value():
+    """Явный retry_after важнее паузы по умолчанию."""
+    assert broadcaster._take_retry(12) == 12
 
 
-def test_stash_keeps_max():
-    broadcaster._retry["max"] = 0.0
-    broadcaster._stash_retry(3)
-    broadcaster._stash_retry(9)
-    broadcaster._stash_retry(1)
-    assert broadcaster._retry["max"] == 9
-    broadcaster._retry["max"] = 0.0
+def test_retry_state_is_local_to_batch():
+    """Ожидание живёт в пачке, а не в модуле.
+
+    Раньше был модульный ``_retry``, общий на процесс. Две рассылки
+    одновременно — автоматическая из поллера и ручная от админа —
+    мешали друг другу: первая забирала 30 секунд и обнуляла счётчик,
+    вторая видела пусто и ждала 5 вместо 30, продолжая долбить
+    Telegram. Проверяем, что общего состояния больше нет.
+    """
+    assert not hasattr(broadcaster, "_retry"), "модульный счётчик вернулся"
+    assert not hasattr(broadcaster, "_stash_retry"), "старый помощник вернулся"
+    # Ожидание — параметр функции, а не скрытое состояние.
+    sig = inspect.signature(broadcaster._take_retry)
+    assert "seconds" in sig.parameters
 
 
 def test_broadcast_reports_failures():
@@ -135,7 +137,6 @@ def test_broadcast_reports_failures():
 
 def test_broadcast_schedule_not_blocked_either():
     """Основная рассылка расписания тоже не стоит на одном 429."""
-    broadcaster._retry["max"] = 0.0
     bot = _Bot(retry_after=0)
     items = [(i, f"msg{i}", None) for i in range(5)]
     sent = asyncio.run(broadcaster.broadcast_schedule(bot, items, rate=100))

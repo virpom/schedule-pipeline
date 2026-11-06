@@ -16,21 +16,21 @@ _file_ids: dict[str, str] = {}
 _DEFAULT_RETRY_WAIT = 5.0
 
 
-# Максимальный retry_after, накопленный за проход цикла. Сон ставим
-# один раз на всю пачку: 429 от одного адресата значит, что лимитит бот
-# целиком, и ждать надо всем.
-_retry = {"max": 0.0}
-
-
-def _stash_retry(seconds: float) -> None:
-    if seconds > _retry["max"]:
-        _retry["max"] = seconds
-
-
-def _take_retry() -> float:
-    wait = _retry["max"] or _DEFAULT_RETRY_WAIT
-    _retry["max"] = 0.0
-    return wait
+# Максимальный retry_after копится НА ПАЧКУ, а не на процесс.
+#
+# Раньше это был модульный словарь ``_retry``, общий на весь процесс.
+# Две рассылки идут одновременно: автоматическая (из поллера) и ручная
+# (админ нажал «📢 Рассылка»). Если обе получили 429, первая забирала
+# 30 секунд и обнуляла счётчик, вторая видела пусто и подставляла
+# _DEFAULT_RETRY_WAIT = 5 — то есть продолжала долбить Telegram, хотя
+# он просил тридцать секунд.
+#
+# Теперь ожидание живёт в локальной переменной вызывающего. Значение
+# всё равно одно на пачку: 429 от одного адресата значит, что лимитит
+# бот целиком, и ждать надо всем получателям этой пачки.
+def _take_retry(seconds: float) -> float:
+    """Сколько ждать после пачки. Ноль 429 — короткая пауза по умолчанию."""
+    return seconds or _DEFAULT_RETRY_WAIT
 
 
 async def send_message(
@@ -171,6 +171,9 @@ async def broadcast_schedule(
         blocked = []
     delay = 1.0 / max(rate, 0.1)
     sent = 0
+    # Локальный накопитель: у каждой пачки свой, иначе параллельная
+    # рассылка забирает чужое ожидание (см. _take_retry).
+    max_retry = 0.0
     failed: list[tuple[Union[str, int], str, Union[str, None]]] = []
     for user_id, text, photo in items:
         # Второй уровень защиты: даже неожиданное исключение на одном
@@ -195,12 +198,12 @@ async def broadcast_schedule(
             sent += 1
         elif not blocked_here:
             failed.append((user_id, text, photo))
-        _stash_retry(wait[0])
+        max_retry = max(max_retry, wait[0])
         await asyncio.sleep(delay)
 
     # Один сон на всю пачку, а не на каждого получившего 429.
     if failed:
-        wait = _take_retry()
+        wait = _take_retry(max_retry)
         logging.warning("broadcast_schedule: %d не доставлено, ждём %.0f с",
                         len(failed), wait)
         if wait > 0:
@@ -238,6 +241,7 @@ async def broadcast_many(
         return 0
     delay = 1.0 / max(rate, 0.1)
     sent = 0
+    max_retry = 0.0     # своё на пачку, не общее на процесс
     failed: list[tuple[Union[str, int], str]] = []
     for user_id, text in items:
         wait = [0.0]
@@ -249,13 +253,13 @@ async def broadcast_many(
                 failed.append((user_id, text))
         except Exception:
             logging.exception("broadcast: сбой на %s, продолжаем", user_id)
-        _stash_retry(wait[0])
+        max_retry = max(max_retry, wait[0])
         await asyncio.sleep(delay)
 
     # Один сон на всю пачку: retry_after от любого адресата — сигнал,
     # что лимитит весь бот, и ждать надо всем, а не по разу на каждого.
     if failed:
-        wait = _take_retry()
+        wait = _take_retry(max_retry)
         logging.warning("broadcast_many: %d не доставлено, ждём %.0f с",
                         len(failed), wait)
         if wait > 0:

@@ -60,7 +60,6 @@ async def repo():
 
 @pytest.mark.asyncio
 async def test_broadcast_many_collects_message_ids():
-    broadcaster._retry["max"] = 0.0
     bot = _Bot()
     sent_to: list = []
     await broadcaster.broadcast_many(bot, [(1, "a"), (2, "b")], rate=100,
@@ -72,7 +71,6 @@ async def test_broadcast_many_collects_message_ids():
 
 @pytest.mark.asyncio
 async def test_broadcast_schedule_collects_message_ids():
-    broadcaster._retry["max"] = 0.0
     bot = _Bot()
     sent_to: list = []
     items = [(1, "a", None), (2, "b", "photo.png")]
@@ -83,7 +81,6 @@ async def test_broadcast_schedule_collects_message_ids():
 @pytest.mark.asyncio
 async def test_failed_recipient_stores_no_id():
     """Заблокировавший бота ничего не получил — удалять нечего."""
-    broadcaster._retry["max"] = 0.0
     bot = _Bot()
     sent_to: list = []
     await broadcaster.broadcast_many(bot, [(1, "a"), (-5, "b")], rate=100,

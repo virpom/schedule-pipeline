@@ -40,7 +40,10 @@ def _course(group: str, now: datetime.datetime | None = None) -> int:
     if not m:
         return 1
     admission = 2000 + int(m.group(1))
-    now = now or datetime.datetime.now(datetime.timezone.utc)
+    # Локальное время, не UTC: учебный год начинается 1 сентября по
+    # местному, а в UTC это 31 августа 17:00. Миграция одноразовая и
+    # пишет в базу навсегда — ошибка тут не исправляется сама.
+    now = now or datetime.datetime.now()
     acad_start = now.year if now.month >= 9 else now.year - 1
     return max(1, acad_start - admission + 1)
 
