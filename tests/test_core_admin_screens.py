@@ -8,7 +8,6 @@
   * взял 10 групп в топ вместо 8;
   * добавил кнопку «Все группы», которой не было.
 """
-from types import SimpleNamespace
 
 from core.admin import group_sort_key
 
