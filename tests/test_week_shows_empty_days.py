@@ -12,7 +12,6 @@ import datetime
 from types import SimpleNamespace
 
 from core import day as core_day
-from core import render as core_render
 from tgbot.handlers import user as user_mod
 from tgbot.services.schedule_layer import Slot
 

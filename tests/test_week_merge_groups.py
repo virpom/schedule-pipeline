@@ -9,7 +9,6 @@ import datetime
 import inspect
 
 from common.schedule import format_week
-from tgbot.handlers import user as user_mod
 from tgbot.services.schedule_layer import Slot
 
 

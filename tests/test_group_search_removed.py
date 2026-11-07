@@ -39,9 +39,15 @@ def test_working_searches_intact():
     assert hasattr(user, "SubjectSearch")
     assert hasattr(user, "TeacherSearch")
     assert hasattr(user, "teacher_answer")
-    body = open("tgbot/handlers/user.py").read()
-    assert 'callback_data="find"' in body
-    assert 'callback_data="find_teacher"' in body
+    # Кнопки меню переехали в ядро на этапе 1 (план 173): раскладка
+    # живёт в core/menu.py, обработчик только адаптирует её.
+    body = open("core/menu.py").read()
+    assert '"find"' in body
+    assert '"find_teacher"' in body
+    # А обработчики этих кнопок остались в user.py.
+    handlers = open("tgbot/handlers/user.py").read()
+    assert 'F.data == "find"' in handlers
+    assert 'F.data == "find_teacher"' in handlers
 
 
 def test_group_change_paths_still_exist():

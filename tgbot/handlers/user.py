@@ -29,7 +29,14 @@ from common.schedule import (
 )
 from core.day import (build_day, build_week, course_group_map,
                       is_teacher)
+from core.menu import (college_pick_kb, menu_kb as build_menu_kb,
+                       settings_kb as build_settings_kb,
+                       teacher_letter_kb, teacher_search_kb,
+                       teacher_unit_kb,
+                       unit_kb, vuz_course_kb, vuz_faculty_kb,
+                       vuz_form_kb, vuz_group_kb)
 from core.render import render_day, render_week
+from tgbot.adapters.keyboard import to_inline_kb
 from infrastructure.database.models import User
 from infrastructure.database.repo.requests import RequestsRepo
 
@@ -114,67 +121,13 @@ def _on_off(value: bool) -> str:
 
 
 def menu_kb(user: User, support_link: str = "", is_editor: bool = False) -> InlineKeyboardMarkup:
-    """Главное меню: только то, что нужно каждый день.
-
-    Тонкие настройки (детализация звонков, режим уведомлений) убраны
-    в «Настройки» — иначе меню разрастается до 8 рядов и в нём теряется
-    главное действие.
-    """
-    sub_icon = "🔕" if user.subscribed else "🔔"
-
-    rows = [
-        [InlineKeyboardButton(text="📅 Сегодня", callback_data="day:today"),
-         InlineKeyboardButton(text="📅 Завтра", callback_data="day:tomorrow")],
-        [InlineKeyboardButton(text="🗓 7 дней", callback_data="week"),
-         InlineKeyboardButton(text="📜 История", callback_data="hist")],
-        [InlineKeyboardButton(text="🔎 Предмет", callback_data="find")],
-        [InlineKeyboardButton(text="⏰ Звонки", callback_data="bell"),
-         InlineKeyboardButton(text=f"{sub_icon} Подписка", callback_data="sub:toggle")],
-    ]
-    # Преподавателю «👥 Группа» не нужна: у него нет своей группы, и
-    # кнопка показывала пары чужой группы, которую он никогда не выбирал.
-    # Поиск по фамилии работает для обоих подразделений.
-    if not _is_teacher(user):
-        rows[2].append(InlineKeyboardButton(text="👨‍🏫 Преподаватель",
-                                            callback_data="find_teacher"))
-    if is_editor:
-        rows.append([InlineKeyboardButton(text="✏️ Редактор расписания",
-                                          callback_data="ed:back")])
-    # Без идентичности остальные кнопки только ругаются «Сначала выбери
-    # группу». Ставим выбор первым и заметным, чтобы новичок не тыкался.
-    if not _has_identity(user):
-        rows.insert(0, [InlineKeyboardButton(
-            text="🎯 Выбрать группу" if not _is_teacher(user) else "🎯 Найти себя",
-            callback_data="pick" if not _is_teacher(user) else "pick_teacher")])
-    rows.append([InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings")])
-    if support_link:
-        rows.append([InlineKeyboardButton(text="📨 Поддержка", url=support_link)])
-
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    """Главное меню. Раскладка — в ядре, здесь только адаптер."""
+    return to_inline_kb(build_menu_kb(user, support_link, is_editor))
 
 
 def settings_kb(user: User) -> InlineKeyboardMarkup:
-    detail_label = DETAIL_LABELS.get(user.bell_detail, "кратко")
-    bell_label = BELL_LABELS.get(user.bell_mode, "выкл")
-    rows = []
-    if _is_teacher(user):
-        rows.append([InlineKeyboardButton(text="🎯 Сменить фамилию", callback_data="pick_teacher")])
-    else:
-        rows.append([InlineKeyboardButton(text="🎯 Сменить группу", callback_data="pick")])
-        # Без группы менять нечего. У вуза курс зашит в номер группы
-        # (ГИ-23 → 4 курс), поэтому кнопка ведёт к выбору другой группы
-        # того же курса, а не переписывает поле.
-        if user.group:
-            rows.append([InlineKeyboardButton(text="🎯 Сменить курс", callback_data="pick_course")])
-        rows.append([InlineKeyboardButton(text=f"🐱 Картинки: {_on_off(user.send_image)}",
-                                          callback_data="image_toggle")])
-    rows.append([InlineKeyboardButton(text=f"🕒 Детализация: {detail_label}",
-                                      callback_data="detail")])
-    rows.append([InlineKeyboardButton(text=f"🔔 Уведомления: {bell_label}",
-                                      callback_data="bell_mode")])
-    rows.append([InlineKeyboardButton(text="🎭 Сменить роль", callback_data="role_switch")])
-    rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    """Настройки. Раскладка — в ядре."""
+    return to_inline_kb(build_settings_kb(user))
 
 
 def menu_text(user: User) -> str:
@@ -209,113 +162,44 @@ async def _render_menu(repo: RequestsRepo, user: User) -> tuple[str, InlineKeybo
     return menu_text(user), menu_kb(user, s["support_link"], is_editor)
 
 
-def _unit_kb() -> InlineKeyboardMarkup:
-    """Первый шаг выбора — подразделение.
+# Преподавателей в расписании 235 (колледж) и 168 (вуз). Список кнопками
+# в чате превращался в простыню на сотни строк, в которой вузовских не
+# было вовсе. Вместо списка — подразделение и поиск по фамилии.
+TEACHER_UNIT_KB = to_inline_kb(teacher_unit_kb())
 
-    У вуза и колледжа разные наборы групп и разные звонки. Показывать
-    100+ групп одним списком значит заставить человека листать вслепую.
-    """
-    return UNIT_KB
+
+def _unit_kb() -> InlineKeyboardMarkup:
+    """Первый шаг выбора — подразделение."""
+    return to_inline_kb(unit_kb())
 
 
 async def _college_pick_kb(repo: RequestsRepo) -> InlineKeyboardMarkup:
-    # college_lesson общая для обоих подразделений: там лежат и группы
-    # вуза с суффиксом @vuz. Без фильтра в списке «Колледж» появлялись
-    # 92 чужие группы — студент колледжа видел расписание вуза.
-    groups = [g for g in await repo.college_lessons.get_groups()
-              if not is_vuz(g)]
-    buttons = [InlineKeyboardButton(text=g, callback_data=f"group:{g}") for g in groups]
-    rows = [buttons[i:i + 4] for i in range(0, len(buttons), 4)]
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="pick")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return to_inline_kb(await college_pick_kb(repo))
 
 
 async def _vuz_faculty_kb(repo: RequestsRepo) -> InlineKeyboardMarkup:
-    """Факультеты вуза. Нужны, потому что по имени группы его не узнать."""
-    groups = await repo.vuz_groups.all()
-    facs = sorted({g.faculty for g in groups})
-    rows = [[InlineKeyboardButton(text=FACULTY_NAMES.get(f, f),
-                                  callback_data=f"vu:fac:{f}")] for f in facs]
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="pick")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return to_inline_kb(await vuz_faculty_kb(repo))
 
 
 async def _vuz_form_kb(repo: RequestsRepo, faculty: str) -> InlineKeyboardMarkup:
-    """Форма обучения внутри факультета."""
-    groups = await repo.vuz_groups.all()
-    forms = sorted({g.form for g in groups if g.faculty == faculty})
-    rows = [[InlineKeyboardButton(text=FORM_NAMES.get(f, f),
-                                  callback_data=f"vu:form:{faculty}:{f}")] for f in forms]
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="unit:vuz")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return to_inline_kb(await vuz_form_kb(repo, faculty))
 
 
 async def _vuz_course_kb(repo: RequestsRepo, faculty: str, form: str) -> InlineKeyboardMarkup:
-    courses = await repo.vuz_groups.courses(faculty, form)
-    buttons = [InlineKeyboardButton(text=f"{c} курс",
-                                    callback_data=f"vu:cr:{faculty}:{form}:{c}")
-               for c in courses]
-    rows = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
-    # Экран курса рисуется и из «формы», и напрямую из факультета (когда
-    # форма одна). Назад в обоих случаях — к факультету: вернуться на
-    # экран формы, которого человек мог не видеть, хуже.
-    rows.append([InlineKeyboardButton(text="⬅️ Назад",
-                                      callback_data=f"vu:fac:{faculty}")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return to_inline_kb(await vuz_course_kb(repo, faculty, form))
 
 
 async def _vuz_group_kb(repo: RequestsRepo, faculty: str, form: str,
                         course: int) -> InlineKeyboardMarkup:
-    names = await repo.vuz_groups.by_course(faculty, form, course)
-    buttons = [InlineKeyboardButton(text=strip_unit(n),
-                                    callback_data=f"vu:g:{n}")
-               for n in names]
-    rows = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
-    rows.append([InlineKeyboardButton(
-        text="⬅️ Назад", callback_data=f"vu:form:{faculty}:{form}")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-# Преподавателей в расписании 235 (колледж) и 168 (вуз). Список кнопками
-# в чате превращался в простыню на сотни строк, в которой вузовских не
-# было вовсе. Вместо списка — подразделение и поиск по фамилии.
-TEACHER_UNIT_KB = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="🏫 Колледж", callback_data="tunit:college")],
-    [InlineKeyboardButton(text="🎓 Вуз", callback_data="tunit:vuz")],
-    [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
-])
+    return to_inline_kb(await vuz_group_kb(repo, faculty, form, course))
 
 
 async def _teacher_search_kb(repo: RequestsRepo, vuz: bool) -> InlineKeyboardMarkup:
-    """Первые буквы фамилий вместо полного списка.
-
-    Полный список не влезает в сообщение Telegram (4096 символов) и
-    нечитаем на телефоне. По буквам человек добирается до своей фамилии
-    за два нажатия.
-    """
-    names = (await repo.college_lessons.get_teachers_vuz() if vuz
-             else await repo.college_lessons.get_teachers(vuz=False))
-    letters = sorted({n[0].upper() for n in names if n})
-    buttons = [InlineKeyboardButton(text=ch, callback_data=f"tlet:{'vuz' if vuz else 'col'}:{ch}")
-               for ch in letters]
-    rows = [buttons[i:i + 6] for i in range(0, len(buttons), 6)]
-    # Назад — к выбору «колледж или вуз», а не сразу в список: иначе
-    # человек, ошибшийся подразделением, должен начинать с нуля.
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="pick_teacher")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return to_inline_kb(await teacher_search_kb(repo, vuz))
 
 
 async def _teacher_letter_kb(repo: RequestsRepo, vuz: bool, letter: str) -> InlineKeyboardMarkup:
-    names = (await repo.college_lessons.get_teachers_vuz() if vuz
-             else await repo.college_lessons.get_teachers(vuz=False))
-    picked = [n for n in names if n[:1].upper() == letter.upper()]
-    buttons = [InlineKeyboardButton(text=n, callback_data=f"teacher:{n}") for n in picked]
-    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
-    # Назад — к буквам того же подразделения. Раньше вело на выбор
-    # «колледж/вуз» и заставляло заново выбирать букву.
-    rows.append([InlineKeyboardButton(
-        text="⬅️ Назад", callback_data=f"tunit:{'vuz' if vuz else 'college'}")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return to_inline_kb(await teacher_letter_kb(repo, vuz, letter))
 
 
 async def _require_identity(cb: CallbackQuery, user: User) -> bool:
