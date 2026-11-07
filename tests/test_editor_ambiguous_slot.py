@@ -51,8 +51,12 @@ def test_picker_registered():
 
 
 def test_picker_action_buttons_carry_weeks():
-    """Кнопка действия несёт weeks — без него правится не та строка."""
-    src = inspect.getsource(editor.slot_actions_kb)
+    """Кнопка действия несёт weeks — без него правится не та строка.
+
+    С этапа 1 (план 173) раскладка живёт в core/editor.py.
+    """
+    from core import editor as core_editor
+    src = inspect.getsource(core_editor.slot_actions_kb)
     assert "weeks: str" in src
     assert "ed:edit:{weekday}:{parity}:{para}:{wk}" in src
 

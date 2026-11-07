@@ -24,7 +24,6 @@ from aiogram.types import (
 )
 
 from common.schedule import (
-    DETAIL_BRIEF,
     MAX_PARA,
     max_para,
     PARITY_ANY,
@@ -36,12 +35,13 @@ from common.schedule import (
     SUB_REPLACE,
     WEEKDAY_FULL,
     bells_group,
-    week_parity,
 )
 from infrastructure.database.models import User
 from infrastructure.database.repo.requests import RequestsRepo
 from tgbot.services.notify_edits import notify_group_about_edit
-from tgbot.services.schedule_layer import PARITY_OFFSET, Slot, get_day_slots
+from core import editor as core_editor
+from tgbot.adapters.keyboard import to_inline_kb
+from tgbot.services.schedule_layer import Slot, get_day_slots
 
 editor_router = Router()
 
@@ -63,264 +63,62 @@ async def editor_group(repo: RequestsRepo, user_id: int) -> str | None:
     return await repo.editors.get_group_for(user_id)
 
 
+# --- клавиатуры и тексты: считаются в ядре -------------------------------
+# Раскладка и разметка живут в core/editor.py, чтобы второй мессенджер
+# мог их переиспользовать. Здесь только адаптер клавиатуры.
+
 def _no_rights_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
-    ])
+    return to_inline_kb(core_editor.no_rights_kb())
 
-
-# --- клавиатуры -----------------------------------------------------------
 
 def editor_main_kb(group: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📅 Правки на дату (замены)",
-                              callback_data="ed:subs")],
-        [InlineKeyboardButton(text="🗓 Базовое расписание",
-                              callback_data="ed:base")],
-        [InlineKeyboardButton(text="📜 Журнал правок", callback_data="ed:log")],
-        [InlineKeyboardButton(text="👁 Как видят студенты",
-                              callback_data="ed:preview")],
-        [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
-    ])
+    return to_inline_kb(core_editor.editor_main_kb(group))
 
 
 def base_kb(group: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Пн", callback_data="ed:bday:1"),
-         InlineKeyboardButton(text="Вт", callback_data="ed:bday:2"),
-         InlineKeyboardButton(text="Ср", callback_data="ed:bday:3")],
-        [InlineKeyboardButton(text="Чт", callback_data="ed:bday:4"),
-         InlineKeyboardButton(text="Пт", callback_data="ed:bday:5"),
-         InlineKeyboardButton(text="Сб", callback_data="ed:bday:6")],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="ed:back")],
-    ])
+    return to_inline_kb(core_editor.base_kb(group))
 
 
 def parity_kb(weekday: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔵 Чётная неделя",
-                              callback_data=f"ed:bp:{weekday}:{PARITY_EVEN}")],
-        [InlineKeyboardButton(text="🔴 Нечётная неделя",
-                              callback_data=f"ed:bp:{weekday}:{PARITY_ODD}")],
-        [InlineKeyboardButton(text="⚪️ Каждую неделю",
-                              callback_data=f"ed:bp:{weekday}:{PARITY_ANY}")],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="ed:base")],
-    ])
+    return to_inline_kb(core_editor.parity_kb(weekday))
 
 
 def paras_kb(weekday: int, parity: str, slots: list[Slot], prefix: str = "ed:bs",
              last: int = MAX_PARA) -> InlineKeyboardMarkup:
-    """Список пар дня с текущим содержимым.
-
-    ``last`` — сколько слотов показать: 6 у колледжа, 8 у вуза.
-    """
-    by_para = {s.para: s for s in slots}
-    many = {p: sum(1 for s in slots if s.para == p) for p in by_para}
-    rows = []
-    for p in range(1, last + 1):
-        slot = by_para.get(p)
-        label = f"{p}) {slot.subject[:20]}" if slot else f"{p}) — пусто"
-        # У вуза на один слот несколько строк недель: без пометки кнопка
-        # называла только последнюю, а «Изменить» угадывала не ту.
-        if many.get(p, 0) > 1:
-            label += f" +{many[p] - 1}"
-        if slot and slot.changed:
-            label += " 🔄"
-        rows.append([InlineKeyboardButton(
-            text=label, callback_data=f"{prefix}:{weekday}:{parity}:{p}")])
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="ed:base")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return to_inline_kb(core_editor.paras_kb(weekday, parity, slots, prefix, last))
 
 
 def slot_actions_kb(weekday: int, parity: str, para: int, has_value: bool,
                     weeks: str = "") -> InlineKeyboardMarkup:
-    # weeks едет в callback: без него upsert создаёт дубль, а
-    # delete_slot не находит строку. 64 байта хватает — список недель
-    # у вуза короткий ("5,6,7,8" / "9,10,11,12,13").
-    wk = weeks or "_"
-    rows = [[InlineKeyboardButton(
-        text="✏️ Изменить", callback_data=f"ed:edit:{weekday}:{parity}:{para}:{wk}")]]
-    if has_value:
-        rows.append([InlineKeyboardButton(
-            text="🗑 Убрать пару", callback_data=f"ed:del:{weekday}:{parity}:{para}:{wk}")])
-    rows.append([InlineKeyboardButton(text="⬅️ Назад",
-                                      callback_data=f"ed:bpar:{weekday}:{parity}")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return to_inline_kb(core_editor.slot_actions_kb(
+        weekday, parity, para, has_value, weeks))
 
 
 def sub_dates_kb(group: str, today: datetime.date) -> InlineKeyboardMarkup:
-    """Даты для замен: вчера .. +6 дней (замены дают на день вперёд)."""
-    rows = []
-    for delta in range(-1, 7):
-        d = today + datetime.timedelta(days=delta)
-        label = f"{WEEKDAY_SHORT[d.weekday()]} {d.strftime('%d.%m')}"
-        if delta == -1:
-            label += " (вчера)"
-        elif delta == 0:
-            label += " (сегодня)"
-        elif delta == 1:
-            label += " (завтра)"
-        parity = "🔵" if week_parity(d, PARITY_OFFSET) == PARITY_EVEN else "🔴"
-        rows.append([InlineKeyboardButton(
-            text=f"{parity} {label}", callback_data=f"ed:sd:{d.isoformat()}")])
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="ed:back")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return to_inline_kb(core_editor.sub_dates_kb(group, today))
 
 
 def sub_slots_kb(date_iso: str, slots: list[Slot], subs_by_para: dict,
                  last: int = MAX_PARA) -> InlineKeyboardMarkup:
-    by_para = {s.para: s for s in slots}
-    rows = []
-    for p in range(1, last + 1):
-        sub = subs_by_para.get(p)
-        slot = by_para.get(p)
-        if sub and sub.action == SUB_CANCEL:
-            label = f"{p}) ❌ отменена"
-        elif sub:
-            label = f"{p}) 🔄 {sub.subject[:20]}"
-        elif slot:
-            label = f"{p}) {slot.subject[:24]}"
-        else:
-            label = f"{p}) — пусто"
-        rows.append([InlineKeyboardButton(
-            text=label, callback_data=f"ed:ss:{date_iso}:{p}")])
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="ed:subs")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return to_inline_kb(core_editor.sub_slots_kb(date_iso, slots, subs_by_para, last))
 
 
-def sub_actions_kb(date_iso: str, para: int, has_sub: bool, base_slot: Slot | None) -> InlineKeyboardMarkup:
-    rows = []
-    if base_slot or has_sub:
-        rows.append([InlineKeyboardButton(
-            text="🔄 Заменить", callback_data=f"ed:sedit:{date_iso}:{para}")])
-    rows.append([InlineKeyboardButton(
-        text="➕ Добавить пару", callback_data=f"ed:sadd:{date_iso}:{para}")])
-    if has_sub:
-        rows.append([InlineKeyboardButton(
-            text="❌ Отменить пару", callback_data=f"ed:scancel:{date_iso}:{para}")])
-        rows.append([InlineKeyboardButton(
-            text="↩️ Снять замену", callback_data=f"ed:sreset:{date_iso}:{para}")])
-    rows.append([InlineKeyboardButton(text="⬅️ Назад",
-                                      callback_data=f"ed:sdl:{date_iso}")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+def sub_actions_kb(date_iso: str, para: int, has_sub: bool,
+                   base_slot: Slot | None) -> InlineKeyboardMarkup:
+    return to_inline_kb(core_editor.sub_actions_kb(date_iso, para, has_sub, base_slot))
 
 
 def cancel_kb(back: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Отмена", callback_data=back)],
-    ])
+    return to_inline_kb(core_editor.cancel_kb(back))
 
 
-# --- тексты ---------------------------------------------------------------
-
-def _parity_mark(date: datetime.date) -> str:
-    return "🔵 чётная" if week_parity(date, PARITY_OFFSET) == PARITY_EVEN else "🔴 нечётная"
-
-
-# Поля модели объявлены String(256/128/64..512), но SQLite длину не
-# проверяет — в предмет влезало сколько угодно. Тогда экран дня пробивал
-# лимит Telegram в 4096 символов и не открывался ни у кого в группе.
-# Берём минимум из объявленных длин: subject 256, room 64.
-_MAX_FIELD = {"предмет": 256, "преподаватель": 128, "кабинет": 64}
-
-
-def _too_long(value: str, what: str) -> str | None:
-    limit = _MAX_FIELD[what]
-    if len(value) <= limit:
-        return None
-    return f"Слишком длинный {what} ({len(value)} символов, максимум {limit})."
-
-
-def _by_para(slots: list[Slot]) -> dict[int, list[Slot]]:
-    """Пары дня по номеру: у вуза на один слот несколько строк недель."""
-    out: dict[int, list[Slot]] = {}
-    for s in slots:
-        out.setdefault(s.para, []).append(s)
-    return out
-
-
-def _week_mark(weeks: str) -> str:
-    return f" <i>({escape(weeks)})</i>" if weeks else ""
-
-
-def base_day_text(group: str, weekday: int, parity: str, slots: list[Slot]) -> str:
-    lines = [
-        f"{EDITOR_TITLE}",
-        "",
-        f"🗓 <b>{WEEKDAY_FULL[weekday - 1]}</b> · "
-        f"{'🔵 чётная' if parity == PARITY_EVEN else '🔴 нечётная' if parity == PARITY_ODD else '⚪️ любая'} неделя",
-        "",
-    ]
-    if not slots:
-        lines.append("<i>Пар нет</i>")
-    else:
-        # У вуза get_day без week отдаёт по строке на каждые weeks:
-        # «7) Компьютерное моделирование» печаталось четыре раза подряд
-        # (план 153). Одна строка на пару, варианты через «·» с неделями —
-        # иначе четыре одинаковых названия неразличимы.
-        for para, group_slots in _by_para(slots).items():
-            lines.append(f"<b>{para})</b> " + " · ".join(
-                escape(s.subject) + _week_mark(s.weeks) for s in group_slots))
-            meta = " · ".join(dict.fromkeys(
-                x for s in group_slots for x in (s.teacher, s.room) if x))
-            if meta:
-                lines.append(f"      {meta}")
-    lines += ["", "Нажми на пару, чтобы изменить 👇"]
-    return "\n".join(lines)
-
-
-def sub_day_text(group: str, date: datetime.date, slots: list[Slot]) -> str:
-    lines = [
-        f"{EDITOR_TITLE}",
-        "",
-        f"📅 <b>{WEEKDAY_FULL[date.weekday()]}, {date.day} "
-        f"{'января февраля марта апреля мая июня июля августа сентября октября ноября декабря'.split()[date.month - 1]}</b>",
-        f"{_parity_mark(date)} неделя",
-        "",
-    ]
-    if not slots:
-        lines.append("<i>Пар нет</i>")
-    else:
-        for s in slots:
-            meta = " · ".join(x for x in (s.teacher, s.room) if x)
-            # action, а не только changed: get_day_slots ставит отменённой
-            # паре оба признака, и староста видел обычный 🔄 вместо
-            # «отменено» — проверить свою же правку было нельзя.
-            if getattr(s, "action", "") == SUB_CANCEL:
-                flag = " ❌ <i>отменено</i>"
-            elif s.changed:
-                flag = " 🔄"
-            else:
-                flag = ""
-            lines.append(f"<b>{s.para})</b> {escape(s.subject)}{flag}")
-            if meta:
-                lines.append(f"      {meta}")
-    lines += ["", "Нажми на пару, чтобы поставить замену 👇"]
-    return "\n".join(lines)
-
-
-def preview_text(group: str, date: datetime.date, slots: list[Slot],
-                 bell=None, lunches=None, course_group: str | None = None,
-                 detail: str = DETAIL_BRIEF) -> str:
-    """Предпросмотр ровно так, как увидят студенты.
-
-    Раньше экран собирал текст своей рукой и расходился с реальным:
-    не было времени пары (студент видит «11:10–12:45», редактор —
-    «Обществознание»), другой порядок строк и не было группы. Теперь
-    зовём format_day — тот же код, что и в экране дня.
-    """
-    from common.schedule import format_day
-
-    lessons = [Slot(s.para, s.subject, s.teacher, s.room,
-                    changed=s.changed, action=s.action, comment=s.comment,
-                    group=group) for s in slots]
-    gcg = {group: course_group} if course_group else None
-    # meta="teacher": под парой студент видит преподавателя и кабинет,
-    # а не свою же группу. Превью — взгляд студента, не преподавателя.
-    # detail был зашит в "full", а 202 из 255 студентов видят brief:
-    # староста проверял экран, которого нет ни у кого.
-    return format_day(date, lessons, bell or {}, lunches or {},
-                      detail=detail, meta="teacher", group_course_group=gcg)
+_parity_mark = core_editor._parity_mark
+_MAX_FIELD = core_editor.MAX_FIELD
+_too_long = core_editor.too_long
+_week_mark = core_editor._week_mark
+base_day_text = core_editor.base_day_text
+sub_day_text = core_editor.sub_day_text
+preview_text = core_editor.preview_text
 
 
 # --- вход -----------------------------------------------------------------
