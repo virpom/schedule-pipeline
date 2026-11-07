@@ -254,7 +254,7 @@ infrastructure/database/
 ├── repo/                  репозитории (по одному на таблицу)
 └── migrations_runner.py   alembic при старте
 migrations/versions/       0001..0011 (head — 0011_drop_bell_notify)
-tests/                     1059 тестов, без сети и без Telegram
+tests/                     1075 тестов, без сети и без Telegram
 ```
 
 ## Тесты
