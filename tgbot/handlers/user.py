@@ -18,17 +18,18 @@ from common.schedule import (
     BELL_START_END,
     DETAIL_LABELS,
     DETAIL_ORDER,
-    VUZ_SUFFIX,
-    bells_group,
     course_from_group,
     format_bell,
-    format_day,
     format_teacher_results,
     is_vuz,
     strip_unit,
 )
 from core.day import (build_day, build_week, course_group_map,
-                      is_teacher)
+                      has_identity, is_teacher, user_lessons,
+                      user_lessons_range, vuz_teacher_day)
+from core.day import (_dedupe_slots as _dedupe_slots_impl,
+                      _drop_vuz_covered as _drop_vuz_covered_impl)
+from core.render import _fmt_day
 from core.menu import (college_pick_kb, menu_kb as build_menu_kb,
                        settings_kb as build_settings_kb,
                        teacher_letter_kb, teacher_search_kb,
@@ -84,14 +85,6 @@ class SubjectSearch(StatesGroup):
 
 class TeacherSearch(StatesGroup):
     waiting = State()
-
-
-def _is_teacher(user: User) -> bool:
-    return user.role == "teacher"
-
-
-def _has_identity(user: User) -> bool:
-    return bool(user.teacher_name) if _is_teacher(user) else bool(user.group)
 
 
 def _settings_text(user: User) -> str:
@@ -203,149 +196,22 @@ async def _teacher_letter_kb(repo: RequestsRepo, vuz: bool, letter: str) -> Inli
 
 
 async def _require_identity(cb: CallbackQuery, user: User) -> bool:
-    if _has_identity(user):
+    if has_identity(user):
         return True
     await cb.answer("Сначала выбери группу или фамилию 🎯")
     return False
 
 
-async def _vuz_teacher_day(repo: RequestsRepo, user: User, date: datetime.date):
-    """Пары преподавателя вуза на дату — через итоговый слой.
-
-    Раньше читали base_lesson напрямую, и это давало две беды разом:
-    замены вуза не применялись (их 160), а одна пара дублировалась по
-    числу групп, где преподаватель ведёт, потому что ключ склейки в
-    format_day требует точного совпадения предмета.
-
-    Теперь идём по группам, где он ведёт пары в этот день, и берём
-    get_day_slots — тот же путь, что у студента: с заменами, weeks и
-    чётностью.
-    """
-    from tgbot.services.schedule_layer import get_day_slots
-    groups = await repo.base_lessons.get_teacher_groups(
-        user.teacher_name, weekday=date.isoweekday())
-    slots = []
-    for group in groups:
-        for slot in await get_day_slots(repo, group, date):
-            # Преподаватель ведёт несколько групп: в чужой группе у него
-            # могут быть только свои пары.
-            if not _slot_is_his(slot, user.teacher_name):
-                continue
-            slot.date = date
-            slots.append(slot)
-    return _dedupe_slots(slots)
-
-
-def _slot_is_his(slot, teacher_name: str) -> bool:
-    from common.schedule import teacher_matches
-    return teacher_matches(slot.teacher, teacher_name)
-
-
-def _dedupe_slots(slots: list):
-    """Одна пара — одна строка.
-
-    Преподаватель в пяти группах давал пять одинаковых строк: format_day
-    склеивает по точному совпадению предмета, а «(лек.)» и «(лек)» —
-    разные ключи. Здесь ключ нормализован, а группы собираются подпись.
-    """
-    import re
-
-    def key(s):
-        return (s.para, s.para_end, re.sub(r"[\s.()]+", "", (s.subject or "")).lower(),
-                (s.teacher or "").lower())
-
-    merged: dict[tuple, object] = {}
-    for s in slots:
-        k = key(s)
-        prev = merged.get(k)
-        if prev is None:
-            merged[k] = s
-            continue
-        groups = [g for g in (prev.group or "").split(", ") if g]
-        if s.group and s.group not in groups:
-            groups.append(s.group)
-        prev.group = ", ".join(groups)
-    return list(merged.values())
-
-
-def _subj_key(item) -> str:
-    """Предмет для сопоставления источников: «(лек.)» и «(лек)» — одно."""
-    import re
-    return re.sub(r"[\s.()]+", "", (item.subject or "")).lower()
-
-
-def _drop_vuz_covered(college: list, vuz: list) -> list:
-    """Убрать из college строки вуза, которые уже есть в vuz.
-
-    college_lesson содержит и вузовские строки: материализация берёт все
-    группы из base_lesson, включая @vuz. _vuz_teacher_day читает тот же
-    день через get_day_slots — с заменами и неделями. Складывая оба
-    списка, получали каждую пару дважды: у Кабышевой 28.10 было 7 + 4,
-    и все 4 — те же самые.
-
-    Оставляем вузовскую версию: она учитывает замены, college_lesson —
-    снимок материализации.
-    """
-    # Кабинет схлопываем до пустого: sources расходятся именно на нём —
-    # в college_lesson он заполнен, в слое пуст (или номера не читаются).
-    # Требуя точного совпадения, оставляли ту же пару дважды.
-    covered = {(v.para, _subj_key(v)) for v in vuz}
-    return [c for c in college
-            if not (str(getattr(c, "group", "") or "").endswith(VUZ_SUFFIX)
-                    and (c.para, _subj_key(c)) in covered)]
-
-
-async def _user_lessons(repo: RequestsRepo, user: User, date: datetime.date):
-    if _is_teacher(user):
-        college = await repo.college_lessons.get_for_teacher_date(user.teacher_name, date)
-        vuz = await _vuz_teacher_day(repo, user, date)
-        college = _drop_vuz_covered(college, vuz)
-        return sorted([*college, *vuz], key=lambda l: l.para)
-    return await repo.college_lessons.get_for_group_date(user.group, date)
-
-
-async def _user_lessons_range(repo: RequestsRepo, user: User, start: datetime.date, end: datetime.date):
-    if _is_teacher(user):
-        rows = list(await repo.college_lessons.get_for_teacher_range(
-            user.teacher_name, start, end))
-        # Вуз в неделю не попадал вовсе: у преподавателя только с
-        # вузовскими парами экран «Неделя» был пустым, хотя «Сегодня»
-        # показывал шесть дней с парами.
-        # Те же дубли, что и на экране дня: college_lesson для вуза и
-        # _vuz_teacher_day отдают одни и те же пары.
-        vuz_rows = []
-        day = start
-        while day <= end:
-            vuz_rows.extend(await _vuz_teacher_day(repo, user, day))
-            day += datetime.timedelta(days=1)
-        rows = _drop_vuz_covered(rows, vuz_rows)
-        return sorted([*rows, *vuz_rows], key=lambda l: (l.date, l.para))
-    return await repo.college_lessons.get_for_group_range(user.group, start, end)
-
-
-async def _course_group_map(repo: RequestsRepo, user: User) -> dict[str, str] | None:
-    if _is_teacher(user):
-        m = await repo.users.get_group_course_map()
-        return m or None
-    cg = bells_group(user.group, user.course)
-    return {user.group: cg} if cg else None
-
-
-def _fmt(user: User, date: datetime.date, lessons, bell, lunches, gcg=None) -> str:
-    """Текст дня для пользователя.
-
-    ``meta`` был перевёрнут: студент видел преподавателя, а преподаватель
-    — группу. Плюс преподавателю нужно склеивать поток: физкультура у
-    шести групп — это одна пара, а не шесть.
-    """
-    is_teacher = _is_teacher(user)
-    return format_day(
-        date, lessons, bell, lunches, user.bell_detail,
-        meta="group" if is_teacher else "teacher",
-        show_rov=not is_teacher,
-        group_course_group=gcg,
-        merge_groups=is_teacher,
-    )
+# Дубли из ядра: имена оставлены для старых вызовов и тестов.
+_drop_vuz_covered = _drop_vuz_covered_impl
+_dedupe_slots = _dedupe_slots_impl
+_vuz_teacher_day = vuz_teacher_day
+_user_lessons = user_lessons
+_user_lessons_range = user_lessons_range
+_course_group_map = course_group_map
+_is_teacher = is_teacher
+_has_identity = has_identity
+_fmt = _fmt_day
 
 
 @user_router.message(CommandStart())

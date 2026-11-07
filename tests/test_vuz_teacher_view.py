@@ -36,9 +36,13 @@ def test_day_filters_to_his_lessons():
 
 
 def test_range_includes_vuz():
-    """Неделя не может быть пустой, когда день полон."""
-    src = inspect.getsource(uh._user_lessons_range)
-    assert "_vuz_teacher_day" in src, "вуз не попал в недельный экран"
+    """Неделя не может быть пустой, когда день полон.
+
+    С этапа 1 (план 173) диапазон собирается в core.day.user_lessons_range.
+    """
+    from core import day as core_day
+    src = inspect.getsource(core_day.user_lessons_range)
+    assert "vuz_teacher_day" in src, "вуз не попал в недельный экран"
 
 
 def test_slot_has_date():
