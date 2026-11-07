@@ -11,11 +11,8 @@ from aiogram.types import (CallbackQuery, InlineKeyboardButton, InlineKeyboardMa
                            KeyboardButton, Message, ReplyKeyboardMarkup)
 
 from common.schedule import (
-    BELL_FULL,
     BELL_LABELS,
-    BELL_OFF,
     BELL_ORDER,
-    BELL_START_END,
     DETAIL_LABELS,
     DETAIL_ORDER,
     course_from_group,
@@ -24,7 +21,8 @@ from common.schedule import (
     is_vuz,
     strip_unit,
 )
-from core.day import (build_day, build_week, course_group_map,
+from core.day import (HIST_PAGE, build_day, build_week, course_group_map,
+                      history_dates,
                       has_identity, is_teacher, user_lessons,
                       user_lessons_range, vuz_teacher_day)
 from core.day import (_dedupe_slots as _dedupe_slots_impl,
@@ -36,7 +34,9 @@ from core.menu import (college_pick_kb, menu_kb as build_menu_kb,
                        teacher_unit_kb,
                        unit_kb, vuz_course_kb, vuz_faculty_kb,
                        vuz_form_kb, vuz_group_kb)
-from core.render import render_day, render_week
+from core.keyboard import btn, kb
+from core.render import (render_day, render_history_empty,
+                         render_history_pick, render_settings, render_week)
 from tgbot.adapters.keyboard import to_inline_kb
 from infrastructure.database.models import User
 from infrastructure.database.repo.requests import RequestsRepo
@@ -88,26 +88,8 @@ class TeacherSearch(StatesGroup):
 
 
 def _settings_text(user: User) -> str:
-    """Экран настроек с примером того, что придёт при текущем режиме."""
-    mode = user.bell_mode if user.bell_mode in BELL_PREVIEW else BELL_OFF
-    return (f"⚙️ <b>Настройки</b>\n\n"
-            f"Уведомления: <b>{BELL_LABELS.get(mode, 'выкл')}</b>\n"
-            f"{BELL_PREVIEW[mode]}\n\n"
-            f"Выбери действие 👇")
-
-# Что именно придёт при каждом режиме. Показать пример дешевле, чем
-# объяснять словами «звонок+конец пары» — человек не понимает разницу,
-# пока не получит уведомление.
-BELL_PREVIEW = {
-    BELL_OFF: "<i>уведомления не приходят</i>",
-    BELL_START_END: "🔔 1 пара · Математика · 204\n"
-                    "🔔 Конец пары",
-    BELL_FULL: "🔔 1 пара · Математика · 204\n"
-               "🔔 Перемена\n"
-               "🔔 Перемена закончилась\n"
-               "🔔 Конец пары",
-}
-
+    """Экран настроек. Текст — в ядре."""
+    return render_settings(user)
 
 def _on_off(value: bool) -> str:
     return "вкл" if value else "выкл"
@@ -585,8 +567,6 @@ async def cb_bell(cb: CallbackQuery, repo: RequestsRepo, user: User):
     await cb.answer()
 
 
-HIST_PAGE = 5
-
 
 async def _snapshot_lessons(repo: RequestsRepo, group: str, date: datetime.date):
     """День из архива в виде объектов, которые понимает format_day.
@@ -626,30 +606,15 @@ async def _teacher_snapshot_lessons(repo: RequestsRepo, user: User,
     return sorted(out, key=lambda l: (l.para, l.group))
 
 
-async def _hist_page(repo: RequestsRepo, user: User, before: datetime.date | None) -> tuple[str, InlineKeyboardMarkup]:
+async def _hist_page(repo: RequestsRepo, user: User,
+                     before: datetime.date | None) -> tuple[str, InlineKeyboardMarkup]:
     """Окно из пяти дат, начиная с самой свежей раньше ``before``.
 
     Курсор лежит в callback_data, а не в FSM: переживает рестарт и не
-    путается, если человек листает с двух устройств.
+    путается, если человек листает с двух устройств. Даты и текст — в
+    ядре, здесь только адаптер клавиатуры.
     """
-    if _is_teacher(user):
-        dates = await repo.college_lessons.get_dates_for_teacher(user.teacher_name)
-        # college_lesson хранит только будущее: прошедшие дни удаляются
-        # ежедневно. Без архива история преподавателя пуста у всех —
-        # проверено на проде, 0 прошедших дат у всех трёх.
-        for d in await repo.snapshots.get_dates_for_teacher(
-                (user.teacher_name or "").split()[0] if user.teacher_name else ""):
-            if d not in dates:
-                dates.append(d)
-    else:
-        dates = await repo.college_lessons.get_dates_for_group(user.group)
-        # day_snapshot — архив, который пишется каждый час. Он покрывает
-        # дни, которых в college_lesson уже нет: материализация идёт на
-        # 14 дней вперёд, а назад заполняется только по мере прошествия,
-        # и простой бота оставляет дыру навсегда. На проде 20–22.10 были
-        # в архиве и не видны в истории.
-        dates = set(dates) | set(await repo.snapshots.get_dates_for_group(user.group))
-    past = sorted((d for d in dates if d < datetime.date.today()), reverse=True)
+    past = await history_dates(repo, user)
     if before:
         past = [d for d in past if d < before]
 
@@ -657,22 +622,16 @@ async def _hist_page(repo: RequestsRepo, user: User, before: datetime.date | Non
         # У вуза история короче: college_lesson материализуется вперёд на
         # 14 дней, а назад заполняется только по мере прошествия. Поэтому
         # «Больше расписания нет» на первом заходе — норма, а не ошибка.
-        # Говорим это прямо, иначе выглядит как поломка.
-        text = ("📜 <b>История расписания</b>\n\n"
-                "Прошедших дней пока нет — они копятся по мере учёбы.")
-        return text, InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")]])
+        return render_history_empty(), to_inline_kb(kb([btn("⬅️ В меню", "menu")]))
 
     window = past[:HIST_PAGE]
-    buttons = [InlineKeyboardButton(text=f"{d.day:02d}.{d.month:02d}",
-                                    callback_data=f"hist:{d.isoformat()}")
+    buttons = [btn(f"{d.day:02d}.{d.month:02d}", f"hist:{d.isoformat()}")
                for d in window]
     rows = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
     if len(past) > HIST_PAGE:
-        rows.append([InlineKeyboardButton(
-            text="⬅️ Раньше", callback_data=f"histpage:{window[-1].isoformat()}")])
-    rows.append([InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")])
-    return "📜 История расписания\n\nВыбери дату 👇", InlineKeyboardMarkup(inline_keyboard=rows)
+        rows.append([btn("⬅️ Раньше", f"histpage:{window[-1].isoformat()}")])
+    rows.append([btn("⬅️ В меню", "menu")])
+    return render_history_pick(), to_inline_kb(kb(*rows))
 
 
 @user_router.callback_query(F.data == "hist")

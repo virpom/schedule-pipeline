@@ -14,13 +14,16 @@ from tgbot.handlers import user as user_mod
 
 
 def test_teacher_branch_uses_snapshot():
-    body = inspect.getsource(user_mod._hist_page)
+    """С этапа 1 (план 173) даты истории собирает core.day.history_dates."""
+    from core import day as core_day
+    body = inspect.getsource(core_day.history_dates)
     assert "get_dates_for_teacher" in body
     assert "snapshots" in body, "преподаватель не смотрит в архив"
 
 
 def test_student_branch_still_uses_snapshot():
-    body = inspect.getsource(user_mod._hist_page)
+    from core import day as core_day
+    body = inspect.getsource(core_day.history_dates)
     assert "get_dates_for_group" in body
 
 

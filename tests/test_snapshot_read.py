@@ -141,8 +141,9 @@ def test_snapshot_keeps_empty_days():
 def test_history_merges_archive_dates():
     import inspect
 
-    from tgbot.handlers import user as user_handler
+    # С этапа 1 (план 173) даты истории собирает core.day.history_dates.
+    from core import day as core_day
 
-    src = inspect.getsource(user_handler._hist_page)
+    src = inspect.getsource(core_day.history_dates)
     assert "get_dates_for_group" in src
     assert "snapshots.get_dates_for_group" in src

@@ -10,9 +10,10 @@
 """
 from __future__ import annotations
 
-from common.schedule import (format_day, format_no_lessons,
-                             format_not_published, format_stale_warning,
-                             format_unverified)
+from common.schedule import (BELL_FULL, BELL_LABELS, BELL_OFF,
+                             BELL_START_END, format_day,
+                             format_no_lessons, format_not_published,
+                             format_stale_warning, format_unverified)
 from core.day import DayView
 
 NO_IDENTITY = ("🎯 <b>Сначала выбери группу</b>\n\n"
@@ -91,3 +92,36 @@ def render_week(entries, *, bell, lunches, detail: str, is_teacher: bool,
         group_course_group=gcg,
         merge_groups=is_teacher,
     )
+
+
+# Что именно придёт при каждом режиме уведомлений. Показать пример дешевле,
+# чем объяснять словами «звонок+конец пары» — человек не понимает разницу,
+# пока не получит уведомление.
+BELL_PREVIEW = {
+    BELL_OFF: "<i>уведомления не приходят</i>",
+    BELL_START_END: "🔔 1 пара · Математика · 204\n"
+                    "🔔 Конец пары",
+    BELL_FULL: "🔔 1 пара · Математика · 204\n"
+               "🔔 Перемена\n"
+               "🔔 Перемена закончилась\n"
+               "🔔 Конец пары",
+}
+
+
+def render_settings(user) -> str:
+    """Экран настроек с примером того, что придёт при текущем режиме."""
+    mode = user.bell_mode if user.bell_mode in BELL_PREVIEW else BELL_OFF
+    return (f"⚙️ <b>Настройки</b>\n\n"
+            f"Уведомления: <b>{BELL_LABELS.get(mode, 'выкл')}</b>\n"
+            f"{BELL_PREVIEW[mode]}\n\n"
+            f"Выбери действие 👇")
+
+
+def render_history_empty() -> str:
+    """Прошедших дней нет — это норма, а не поломка."""
+    return ("📜 <b>История расписания</b>\n\n"
+            "Прошедших дней пока нет — они копятся по мере учёбы.")
+
+
+def render_history_pick() -> str:
+    return "📜 История расписания\n\nВыбери дату 👇"

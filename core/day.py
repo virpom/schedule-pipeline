@@ -303,3 +303,34 @@ async def build_week(repo: RequestsRepo, user: User) -> tuple[list, bool]:
                 by_date.get(start + datetime.timedelta(days=i), []))
                for i in range(7)]
     return entries, True
+
+
+# Сколько дат показывать в истории за один заход.
+HIST_PAGE = 5
+
+
+async def history_dates(repo: RequestsRepo, user: User) -> list[datetime.date]:
+    """Прошедшие даты, по которым есть что показать, свежие сверху.
+
+    college_lesson хранит только будущее: прошедшие дни удаляются
+    ежедневно. Поэтому добавляем архив day_snapshot, который пишется
+    каждый час: он покрывает дни, которых в college_lesson уже нет.
+    Без него простой бота оставляет дыру в истории навсегда.
+    """
+    if is_teacher(user):
+        dates = list(await repo.college_lessons.get_dates_for_teacher(
+            user.teacher_name))
+        # college_lesson хранит только будущее: прошедшие дни удаляются
+        # ежедневно. Без архива история преподавателя пуста у всех —
+        # проверено на проде, 0 прошедших дат у всех трёх.
+        surname = (user.teacher_name or "").split()[0] if user.teacher_name else ""
+        for d in await repo.snapshots.get_dates_for_teacher(surname):
+            if d not in dates:
+                dates.append(d)
+    else:
+        dates = set(await repo.college_lessons.get_dates_for_group(user.group))
+        # day_snapshot — архив, который пишется каждый час. Он покрывает
+        # дни, которых в college_lesson уже нет: материализация идёт на
+        # 14 дней вперёд, а назад заполняется только по мере прошествия.
+        dates |= set(await repo.snapshots.get_dates_for_group(user.group))
+    return sorted((d for d in dates if d < datetime.date.today()), reverse=True)
