@@ -14,8 +14,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from infrastructure.database.models import Base
 from infrastructure.database.repo.requests import RequestsRepo
-from tgbot.services import source_state
-from tgbot.services.source_state import _night_length, in_night
+from core import source_state
+from core.source_state import _night_length, in_night
 
 
 @pytest.fixture

@@ -74,11 +74,12 @@ def str_to_weeks(raw: str) -> tuple[int, ...]:
 def vuz_week(date: datetime.date, anchor: datetime.date | None = None) -> int:
     """Номер учебной недели вуза для даты.
 
-    Считается от якоря: неделя якоря — первая. У вуза своя нумерация,
-    она не совпадает с чётностью колледжа.
+    Само правило живёт в ``core.vuz_week``: от него зависит, какие пары
+    попадают в день, поэтому это ядро, а не деталь синхронизации.
+    Здесь — тонкая обёртка, чтобы прежние импорты работали.
     """
-    anchor = anchor or DEFAULT_ANCHOR
-    return (date - anchor).days // 7 + 1
+    from core.vuz_week import vuz_week as _impl
+    return _impl(date, anchor)
 
 
 # --- запись в базу -----------------------------------------------------------
@@ -281,18 +282,14 @@ async def replace_vuz_changes(
 # --- якорь недели ------------------------------------------------------------
 
 async def get_anchor(repo: RequestsRepo) -> datetime.date:
-    """Якорь учебной недели вуза из настроек."""
-    raw = await repo.settings.get(ANCHOR_KEY)
-    if raw:
-        try:
-            return datetime.date.fromisoformat(raw)
-        except ValueError:
-            log.warning("якорь недели вуза испорчен: %r", raw)
-    return DEFAULT_ANCHOR
+    """Якорь учебной недели вуза из настроек (правило — в core.vuz_week)."""
+    from core.vuz_week import get_anchor as _impl
+    return await _impl(repo)
 
 
 async def set_anchor(repo: RequestsRepo, value: datetime.date) -> None:
-    await repo.settings.set(ANCHOR_KEY, value.isoformat())
+    from core.vuz_week import set_anchor as _impl
+    await _impl(repo, value)
 
 
 def anchor_fit(lessons, changes, anchor: datetime.date) -> tuple[int, int]:
