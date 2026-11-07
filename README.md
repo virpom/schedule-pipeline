@@ -229,16 +229,24 @@ main.py                    точка входа: миграции, бот, дв
 config.py                  чтение .env и переменных окружения
 common/schedule.py         форматирование текста, константы, чётность недели
 parsers/eios.py            разбор xlsx очного расписания, docx замен и звонков
+core/                      логика экранов — БЕЗ импорта мессенджера
+├── schedule_layer.py      база + замены → итоговые пары дня
+├── source_state.py        когда последний раз успешно синхронизировались
+├── vuz_week.py            учебные недели вуза
+├── day.py                 что показать на экране дня (состояние + данные)
+├── render.py              как это выглядит (вся HTML-разметка)
+├── menu.py                клавиатуры меню и выбора
+├── keyboard.py            кнопка и клавиатура как данные
+└── admin.py               экраны статистики
 tgbot/
+├── adapters/keyboard.py   Keyboard → InlineKeyboardMarkup
 ├── handlers/              user.py, admin.py, editor.py — три роутера
 ├── services/
 │   ├── sync_eios.py       скачивание, дедуп по sha256, загрузка слоёв
-│   ├── schedule_layer.py  база + замены → итоговые пары дня
 │   ├── poller.py          цикл опроса, рассылка при изменениях
 │   ├── bell.py            напоминания о звонках
 │   ├── broadcaster.py     отправка с ограничением скорости
 │   ├── notify_edits.py    уведомления группе о правке, снапшоты
-│   ├── source_state.py    когда последний раз успешно синхронизировались
 │   └── photos.py          случайная картинка дня недели
 ├── middlewares/database.py  сессия БД + пользователь в каждый хендлер
 infrastructure/database/
@@ -246,7 +254,7 @@ infrastructure/database/
 ├── repo/                  репозитории (по одному на таблицу)
 └── migrations_runner.py   alembic при старте
 migrations/versions/       0001..0011 (head — 0011_drop_bell_notify)
-tests/                     510 тестов, без сети и без Telegram
+tests/                     1059 тестов, без сети и без Telegram
 ```
 
 ## Тесты
@@ -283,7 +291,7 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirement
 - **В очном файле нет кабинетов.** Аудитория приходит только в листке замен —
   у пар из базы поле `room` пустое.
 - **Чётность недели у колледжа сдвинута на 1 относительно ISO.** Учтено
-  константой `PARITY_OFFSET = 1` в `tgbot/services/schedule_layer.py`.
+  константой `PARITY_OFFSET = 1` в `core/schedule_layer.py`.
 - **Сайт может лежать неделями.** Бот продолжает отдавать последнее известное
   расписание и честно предупреждает, что замены не проверены.
 - **Замены на сайте не архивируются** — файл перезаписывается. Историю хранит
