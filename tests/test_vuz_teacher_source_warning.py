@@ -12,6 +12,8 @@ import asyncio
 import datetime
 from types import SimpleNamespace
 
+from core import day as core_day
+from core import source_state as core_state
 from tgbot.handlers import user as user_mod
 
 D = datetime.date(2026, 10, 28)
@@ -62,11 +64,11 @@ def _patch(monkeypatch, lessons, calls):
         calls.append("vuz")
         return False
 
-    monkeypatch.setattr(user_mod, "_user_lessons", fake_lessons)
-    monkeypatch.setattr(user_mod, "_course_group_map", fake_cmap)
-    monkeypatch.setattr(user_mod, "_day_text_fmt", lambda *a: "текст", raising=False)
-    monkeypatch.setattr(user_mod.source_state, "is_stale", is_stale)
-    monkeypatch.setattr(user_mod.source_state, "is_stale_vuz", is_stale_vuz)
+    monkeypatch.setattr(core_day, "user_lessons", fake_lessons)
+    monkeypatch.setattr(user_mod, "course_group_map", fake_cmap)
+    monkeypatch.setattr(core_day, "is_vuz", lambda g: str(g or "").endswith("@vuz"))
+    monkeypatch.setattr(core_state, "is_stale", is_stale)
+    monkeypatch.setattr(core_state, "is_stale_vuz", is_stale_vuz)
 
 
 def test_vuz_teacher_checks_vuz_source(monkeypatch):

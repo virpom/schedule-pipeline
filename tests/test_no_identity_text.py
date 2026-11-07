@@ -16,6 +16,8 @@ import asyncio
 import datetime
 from types import SimpleNamespace
 
+from core import day as core_day
+from core import render as core_render
 from tgbot.handlers import user as user_mod
 
 D = datetime.date(2026, 10, 28)
@@ -73,9 +75,9 @@ def test_student_with_group_unaffected(monkeypatch):
     async def fake_lessons(repo, user, date):
         return []
 
-    monkeypatch.setattr(user_mod, "_user_lessons", fake_lessons)
-    monkeypatch.setattr(user_mod, "_course_group_map", lambda r, u: _none())
-    monkeypatch.setattr(user_mod, "format_no_lessons", lambda d: "ПАР НЕТ Сегодня")
+    monkeypatch.setattr(core_day, "user_lessons", fake_lessons)
+    monkeypatch.setattr(user_mod, "course_group_map", lambda r, u: _none())
+    monkeypatch.setattr(core_render, "format_no_lessons", lambda d, note=None: "ПАР НЕТ Сегодня")
     got = asyncio.run(user_mod._day_text(_repo(), _user(group="ДП-26"), D))
     assert "ПАР НЕТ Сегодня" in got, got
 

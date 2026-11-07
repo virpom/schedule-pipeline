@@ -11,6 +11,8 @@ import asyncio
 import datetime
 from types import SimpleNamespace
 
+from core import day as core_day
+from core import render as core_render
 from tgbot.handlers import user as user_mod
 from tgbot.services.schedule_layer import Slot
 
@@ -33,10 +35,11 @@ def _run(lessons, monkeypatch):
     async def fake_range(repo, user, start, end):
         return lessons
 
-    monkeypatch.setattr(user_mod, "_user_lessons_range", fake_range)
-    monkeypatch.setattr(user_mod, "_course_group_map", fake_gcg)
-    monkeypatch.setattr(user_mod, "format_week",
-                        lambda entries, *a, **k:
+    # Логика недели переехала в ядро (этап 1, план 173) — патчим там.
+    monkeypatch.setattr(core_day, "user_lessons_range", fake_range)
+    monkeypatch.setattr(core_day, "course_group_map", fake_gcg)
+    monkeypatch.setattr(user_mod, "render_week",
+                        lambda entries, **k:
                         "ДНЕЙ:" + str(len(entries)) + "|" + ",".join(
                             f"{d.day}:{len(v)}" for d, v in entries))
     repo = SimpleNamespace(bell_schedule=SimpleNamespace(get_context=fake_context),

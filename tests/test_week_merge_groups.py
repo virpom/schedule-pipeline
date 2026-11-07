@@ -23,8 +23,14 @@ def test_week_passes_flag_to_format_day():
 
 
 def test_week_text_sets_flag_for_teacher():
-    body = inspect.getsource(user_mod._week_text)
-    assert "_is_teacher(user)" in body, "неделя не передаёт флаг"
+    """Неделя передаёт тот же флаг склейки, что и день.
+
+    С этапа 1 (план 173) решение о флаге — в core.render.render_week,
+    обработчик только передаёт is_teacher.
+    """
+    from core.render import render_week
+    body = inspect.getsource(render_week)
+    assert "merge_groups=is_teacher" in body, "неделя не передаёт флаг"
 
 
 def _entries():

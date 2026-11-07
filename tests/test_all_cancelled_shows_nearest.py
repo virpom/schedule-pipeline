@@ -17,6 +17,8 @@ import asyncio
 import datetime
 from types import SimpleNamespace
 
+from core import day as core_day
+from core import render as core_render
 from tgbot.handlers import user as user_mod
 from tgbot.services.schedule_layer import Slot
 
@@ -47,11 +49,11 @@ def _run(day_lessons, next_lessons, monkeypatch):
     async def fake_gcg(repo, user):
         return None
 
-    monkeypatch.setattr(user_mod, "_user_lessons", fake_user_lessons)
-    monkeypatch.setattr(user_mod, "_course_group_map", fake_gcg)
-    monkeypatch.setattr(user_mod, "_fmt",
-                        lambda user, date, lessons, bell, lunches, gcg:
-                        "ПАРЫ:" + ",".join(l.subject for l in lessons))
+    monkeypatch.setattr(core_day, "user_lessons", fake_user_lessons)
+    monkeypatch.setattr(user_mod, "course_group_map", fake_gcg)
+    monkeypatch.setattr(core_render, "_fmt_day",
+                        lambda view, bell, lunches, detail, is_teacher, gcg:
+                        "ПАРЫ:" + ",".join(l.subject for l in view.lessons))
 
     return asyncio.run(user_mod._day_text(_repo(fake_context), _user(), D))
 
@@ -109,11 +111,11 @@ def test_nearest_skips_fully_cancelled_day(monkeypatch):
     async def fake_gcg(repo, user):
         return None
 
-    monkeypatch.setattr(user_mod, "_user_lessons", fake_user_lessons)
-    monkeypatch.setattr(user_mod, "_course_group_map", fake_gcg)
-    monkeypatch.setattr(user_mod, "_fmt",
-                        lambda user, date, lessons, bell, lunches, gcg:
-                        "ПАРЫ:" + ",".join(l.subject for l in lessons))
+    monkeypatch.setattr(core_day, "user_lessons", fake_user_lessons)
+    monkeypatch.setattr(user_mod, "course_group_map", fake_gcg)
+    monkeypatch.setattr(core_render, "_fmt_day",
+                        lambda view, bell, lunches, detail, is_teacher, gcg:
+                        "ПАРЫ:" + ",".join(l.subject for l in view.lessons))
     got = asyncio.run(user_mod._day_text(_repo(fake_context), _user(), D))
     assert "Физика" in got, got
     assert "Химия" not in got, got

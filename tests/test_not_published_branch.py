@@ -11,6 +11,8 @@ True — и до ветки с `deadline_hour` дело не доходило н
 """
 import inspect
 
+from core import day as core_day
+from core import render as core_render
 from tgbot.handlers import admin, user
 
 
@@ -47,10 +49,12 @@ def test_empty_day_still_says_no_lessons():
     """Пустой день внутри окна — «занятий нет», как и было.
 
     Проверяем, что цепочка условий не потеряла главную ветку.
+    С этапа 1 (план 173) решение — в core.day, текст — в core.render.
     """
-    src = inspect.getsource(user)
-    assert "format_no_lessons(date)" in src
-    assert "format_not_published(date)" in src
+    assert "NO_LESSONS" in inspect.getsource(core_day)
+    src = inspect.getsource(core_render)
+    assert "format_no_lessons(view.date)" in src
+    assert "format_not_published(view.date)" in src
 
 
 def test_published_means_materialized():
@@ -58,8 +62,8 @@ def test_published_means_materialized():
 
     Без этого следующий читатель снова решит, что признак врёт.
     """
-    src = inspect.getsource(user)
-    i = src.index("format_not_published(date)")
+    src = inspect.getsource(core_day)
+    i = src.index("state = DayView.NOT_PUBLISHED")
     context = src[max(0, i - 900):i]
     assert "материализован" in context or "окна" in context, \
         "нет объяснения, что значит published"
