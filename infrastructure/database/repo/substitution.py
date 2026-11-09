@@ -44,18 +44,21 @@ class SubstitutionRepo(BaseRepo):
     async def set(self, date: datetime.date, group: str, para: int, action: str,
                   subject: str = "", teacher: str = "", room: str = "",
                   comment: str = "", source: str = "manual",
-                  created_by: int | None = None) -> None:
+                  created_by: int | None = None,
+                  time_note: str = "") -> None:
         now = datetime.datetime.now()
         await self.session.execute(
             insert(Substitution)
             .values(date=date, group=group, para=para, action=action,
                     subject=subject, teacher=teacher, room=room, comment=comment,
-                    source=source, created_by=created_by, created_at=now)
+                    source=source, created_by=created_by, created_at=now,
+                    time_note=time_note)
             .on_conflict_do_update(
                 index_elements=["date", "group", "para"],
                 set_=dict(action=action, subject=subject, teacher=teacher,
                           room=room, comment=comment, source=source,
-                          created_by=created_by, created_at=now),
+                          created_by=created_by, created_at=now,
+                          time_note=time_note),
             )
         )
         await self.session.commit()

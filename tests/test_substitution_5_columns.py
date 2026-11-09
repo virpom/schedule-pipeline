@@ -109,16 +109,36 @@ def test_self_study_with_trailing_comma():
     assert s.teacher == "Бацунов С.Н.", s.teacher
 
 
-def test_evening_time_becomes_seventh_pair():
+def test_evening_time_goes_to_time_note():
     """«с 18.00 до 21.00» — время, а не номер пары.
 
     Раньше из него выдёргивались 18 и 21, и появлялись пары 0, 1, 2, 8.
+    Потом я ставил номер 7 — и студент видел «7) пара 7 ❌ отменено»:
+    строку без времени и без смысла, потому что звонков на седьмую
+    пару нет. Теперь номер 1, а время едет в time_note.
     """
-    data = _docx(HDR, [["ДП-26", "с 18.00 до 21.00", "НЕТ", "НЕТ",
+    data = _docx(HDR, [["ДП-26", "с 18.00 до 21.00",
+                        "с 18.00 до 21.00", "НЕТ",
                         "Организация документооборота - Харькова Д.А., ауд. 406"]])
     subs = parse_substitutions(data)
     assert len(subs) == 1
-    assert subs[0].para == 7, subs[0].para
+    assert subs[0].para == 1, subs[0].para
+    assert subs[0].time_note == "с 18.00 до 21.00", subs[0].time_note
+
+
+def test_evening_row_is_replace_not_cancel():
+    """В графе «было» стоит время, а не «НЕТ» — значит это замена.
+
+    Колонки в этой строке четыре: время, время (дубль объединения),
+    «НЕТ», новый предмет. Читать по индексу 2 значило взять «НЕТ»
+    и превратить вечернюю замену в отмену.
+    """
+    data = _docx(HDR, [["ДП-26", "с 18.00 до 21.00",
+                        "с 18.00 до 21.00", "НЕТ",
+                        "Организация документооборота - Харькова Д.А., ауд. 406"]])
+    s = parse_substitutions(data)[0]
+    assert s.action == SUB_REPLACE, s.action
+    assert s.subject == "Организация документооборота", s.subject
 
 
 def test_room_without_comma():

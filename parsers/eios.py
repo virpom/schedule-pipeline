@@ -115,6 +115,10 @@ class Substitution:
     raw_now: str = ""
     weekday: str = ""
     parity: str = ""  # чётность, как её назвал колледж
+    # Время вместо номера пары: вечерние занятия колледж пишет как
+    # «с 18.00 до 21.00». Номер 7 придумывать нельзя — звонков на
+    # седьмую пару нет.
+    time_note: str = ""
 
 
 @dataclass(slots=True)
@@ -498,12 +502,17 @@ def parse_substitutions(data: bytes) -> list[Substitution]:
             # превращались в «было = стало», включая «НЕТ ПАРЫ».
             group, para_text = cells[0], cells[1]
             was, now = _was_and_now(cells[2:])
-            # «с 18.00 до 21.00» — это не номер пары, а время. Ставим
-            # вечерней паре номер 7: у колледжа шесть пар, седьмая —
-            # вечерняя. Без этого из времени выдёргивались цифры 18 и 21,
-            # и в базе появлялись пары 0, 1, 2, 8.
+            # «с 18.00 до 21.00» — это не номер пары, а ВРЕМЯ. Номер 7
+            # придумывать нельзя: звонков на седьмую пару нет, и студент
+            # видел «7) пара 7 ❌ отменено» — строку без времени и без
+            # смысла. Ставим номер 1 (у вечерней пары он всегда первый
+            # по счёту) и сохраняем время в time_note.
+            evening = None
             if not re.fullmatch(r"\s*\d+(?:\s*[,;]\s*\d+)*\s*", para_text):
-                para_text = "7" if re.search(r"\d{1,2}[.:]\d{2}", para_text) else para_text
+                m_time = re.search(r"\d{1,2}[.:]\d{2}", para_text)
+                if m_time:
+                    evening = para_text.strip()
+                    para_text = "1"
             paras = [int(d) for d in re.findall(r"\d", para_text)]
             if not paras:
                 continue
@@ -530,6 +539,7 @@ def parse_substitutions(data: bytes) -> list[Substitution]:
                         raw_now=now,
                         weekday=weekday,
                         parity=parity,
+                        time_note=evening or "",
                     )
                 )
 
@@ -559,10 +569,13 @@ def _was_and_now(rest: list[str]) -> tuple[str, str]:
     rest = [c for c in rest]
     if not rest:
         return "", ""
-    if len(rest) >= 3 and rest[0].strip() == rest[1].strip():
-        return rest[0], rest[2]
+    # «Стало» — всегда ПОСЛЕДНЯЯ колонка. Промежуточных может быть
+    # сколько угодно: в строке про вечернюю пару их две одинаковых
+    # («с 18.00 до 21.00») плюс пустая «НЕТ» посередине, и брать по
+    # индексу 2 значило читать «НЕТ» как новое содержимое — вечерняя
+    # замена превращалась в отмену.
     if len(rest) >= 2:
-        return rest[0], rest[1]
+        return rest[0], rest[-1]
     return rest[0], ""
 
 

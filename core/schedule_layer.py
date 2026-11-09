@@ -97,7 +97,11 @@ async def get_day_slots(repo: RequestsRepo, group: str, date: datetime.date,
         if sub and sub.action in ("replace", "add"):
             slots.append(Slot(lesson.para, sub.subject, sub.teacher, sub.room,
                               changed=True, action=sub.action, comment=sub.comment,
-                              group=group))
+                              group=group,
+                              # Вечерняя пара: колледж пишет время вместо
+                              # номера («с 18.00 до 21.00»). Без переноса
+                              # сюда студент видел обычные звонки 1-й пары.
+                              time_note=getattr(sub, "time_note", "") or ""))
         else:
             slots.append(Slot(lesson.para, lesson.subject, lesson.teacher, lesson.room,
                               group=group, time_note=getattr(lesson, "time_note", "") or ""))
@@ -122,7 +126,8 @@ async def get_day_slots(repo: RequestsRepo, group: str, date: datetime.date,
         if sub.action in ("add", "replace") and para not in used:
             slots.append(Slot(para, sub.subject, sub.teacher, sub.room,
                               changed=True, action=sub.action, comment=sub.comment,
-                              group=group))
+                              group=group,
+                              time_note=getattr(sub, "time_note", "") or ""))
 
     slots.sort(key=lambda s: s.para)
     return _join_paired(_collapse_same_para(slots))

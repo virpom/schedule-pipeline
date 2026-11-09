@@ -51,7 +51,7 @@ STEP_BELLS = "звонки"
 #
 # Меняй число, когда меняешь parse_ochoe/parse_zameny: одноразовая
 # перезапись базы стоит секунд и лучше, чем тихо работающий старый код.
-PARSER_VERSION = "3"
+PARSER_VERSION = "4"
 
 
 def _sha(data: bytes) -> str:

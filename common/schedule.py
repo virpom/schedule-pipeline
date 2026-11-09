@@ -45,8 +45,12 @@ PARITY_LABELS = {PARITY_ODD: "нечётная", PARITY_EVEN: "чётная", PA
 SUB_REPLACE = "replace"
 SUB_CANCEL = "cancel"
 
-# Значок пары, пришедшей из листка замен.
+# Значки пар из листка замен. Замена и добавление — разные вещи:
+# «Химия → ОБиЗР» это одно, а «пары не было → появилась» другое.
+# Раньше обе рисовались 🔄, и студент ДП-26 читал «5) Деловая культура 🔄»
+# как замену чего-то, хотя пары на этом месте не было вовсе.
 SUB_MARK = "🔄"
+SUB_MARK_ADD = "➕"
 
 # Группы вуза живут в тех же таблицах, что и колледж, и различаются
 # суффиксом. Коллизия реальна: ЭК-23/24/25 есть и там, и там, но это
@@ -355,7 +359,11 @@ def format_day(
                 lines.append(f"{p}) <s><b>{time_str}</b>  {_esc(lesson.subject)}</s>"
                              f"  ❌ <i>отменено</i>")
                 continue
-            mark = f" {SUB_MARK}" if getattr(lesson, "changed", False) else ""
+            mark = ""
+            if getattr(lesson, "changed", False):
+                mark = (f" {SUB_MARK_ADD}"
+                        if getattr(lesson, "action", "") == SUB_ADD
+                        else f" {SUB_MARK}")
             if paired:
                 if p > lesson.para:
                     continue        # строка уже напечатана на первой паре

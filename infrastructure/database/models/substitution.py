@@ -25,6 +25,9 @@ class Substitution(Base, TableNameMixin):
     teacher: Mapped[str] = mapped_column(String(128), default="")
     room: Mapped[str] = mapped_column(String(64), default="")
     comment: Mapped[str] = mapped_column(String(256), default="")
+    # Время вместо номера пары: «с 18.00 до 21.00». Пусто — обычная
+    # пара по звонкам.
+    time_note: Mapped[str] = mapped_column(String(64), default="")
     source: Mapped[str] = mapped_column(String(8), default="manual")
     created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
