@@ -70,7 +70,14 @@ _PARA_RE = re.compile(r"\d+")
 _DAY_HEADER_RE = re.compile(
     r"на\s+(\d{2})\.(\d{2})\.(\d{4}),\s*([^,]+),\s*(\S+)\s+неделя", re.IGNORECASE
 )
-_SUBJECT_TEACHER_SEP = re.compile(r"\s+[–—-]\s+")
+_SUBJECT_TEACHER_SEP = re.compile(r"\s*[–—-]\s+")
+
+# Пометка «работа дома / самостоятельная». В листке замен её пишут в
+# скобках прямо в названии пары; это часть описания, но не имени.
+_SELF_STUDY_RE = re.compile(
+    r"\(\s*(?:сам[\w\-]*\.?\s*(?:ная|ная|работа)?[\w\-]*\.?\s*"
+    r"(?:работа)?\s*(?:дома)?|см\.?\s*работа\s*дома|сам\.?\s*работа\s*дома)"
+    r"\s*\)", re.IGNORECASE)
 
 
 class EiosParseError(RuntimeError):
@@ -483,12 +490,26 @@ def parse_substitutions(data: bytes) -> list[Substitution]:
             cells = [c.text.strip() for c in row.cells]
             if len(cells) < 4 or not cells[0]:
                 continue
-            group, para_text, was, now = cells[0], cells[1], cells[2], cells[3]
+            # Колонок бывает четыре и пять. В пятиколоночном листке
+            # «Предмет по расписанию» занимает две ячейки (объединение
+            # или дубль), и «Чем заменяется» уезжает в индекс 4. Раньше
+            # брали cells[3] жёстко: из пятиколоночного листка читался
+            # старый предмет, и ВСЕ замены дня терялись молча — 86 строк
+            # превращались в «было = стало», включая «НЕТ ПАРЫ».
+            group, para_text = cells[0], cells[1]
+            was, now = _was_and_now(cells[2:])
+            # «с 18.00 до 21.00» — это не номер пары, а время. Ставим
+            # вечерней паре номер 7: у колледжа шесть пар, седьмая —
+            # вечерняя. Без этого из времени выдёргивались цифры 18 и 21,
+            # и в базе появлялись пары 0, 1, 2, 8.
+            if not re.fullmatch(r"\s*\d+(?:\s*[,;]\s*\d+)*\s*", para_text):
+                para_text = "7" if re.search(r"\d{1,2}[.:]\d{2}", para_text) else para_text
             paras = [int(d) for d in re.findall(r"\d", para_text)]
             if not paras:
                 continue
 
-            if now.upper().startswith("НЕТ ПАРЫ"):
+            # «НЕТ» и «НЕТ ПАРЫ» — одно и то же: пары не будет.
+            if now.upper().strip().startswith(("НЕТ ПАРЫ", "НЕТ")):
                 action = SUB_CANCEL
                 subject = teacher = room = ""
             else:
@@ -516,9 +537,33 @@ def parse_substitutions(data: bytes) -> list[Substitution]:
 
 
 _ROOM_RE = re.compile(
-    r",\s*(ауд\.?\s*[\w\-/]+|спортзал\w*|актовый зал|см\.?\s*р\.?|мастерск\w*)\s*$",
+    r"(?:,\s*|\s+)(ауд\.?\s*[\w\-/]+|спортзал\w*|актовый зал|см\.?\s*р\.?|мастерск\w*|дистант\w*)\s*$",
     re.IGNORECASE,
 )
+
+# «Математика – Заковряшина И.С., 221»: номер кабинета без слова «ауд.».
+# Встречается в листках, где экономили место. Берём только если после
+# запятой стоит короткий номер, а не название предмета.
+_ROOM_BARE_RE = re.compile(r",\s*(\d{2,3}[а-я]?)\s*$", re.IGNORECASE)
+
+
+def _was_and_now(rest: list[str]) -> tuple[str, str]:
+    """Разделить «было» и «стало» в хвосте строки листка замен.
+
+    Четыре колонки: ``[было, стало]``. Пять: ``[было, было(дубль), стало]``
+    — «Предмет по расписанию» в шапке занимает две ячейки.
+
+    Различаем по содержимому, а не по числу: если первая и вторая
+    совпадают, это дубль объединённой ячейки, и «стало» — последняя.
+    """
+    rest = [c for c in rest]
+    if not rest:
+        return "", ""
+    if len(rest) >= 3 and rest[0].strip() == rest[1].strip():
+        return rest[0], rest[2]
+    if len(rest) >= 2:
+        return rest[0], rest[1]
+    return rest[0], ""
 
 
 def split_substitution_text(text: str) -> tuple[str, str, str]:
@@ -535,10 +580,31 @@ def split_substitution_text(text: str) -> tuple[str, str, str]:
     if m:
         room = m.group(1).strip()
         text = text[: m.start()].strip()
+    else:
+        m = _ROOM_BARE_RE.search(text)
+        if m:
+            room = m.group(1).strip()
+            text = text[: m.start()].strip()
+
+    # «(сам-ная работа дома)» — пометка о форме занятия, а не часть
+    # имени. Без её снятия _TEACHER_RE не срабатывал, и предмет
+    # слипался с преподавателем в одну строку: студент видел
+    # «Ин.яз – Пупкова В.В. (сам-ная работа дома)» как название пары.
+    note = ""
+    m_note = _SELF_STUDY_RE.search(text)
+    if m_note:
+        note = m_note.group(0).strip()
+        text = (text[:m_note.start()] + text[m_note.end():]).strip()
+        # «Бацунов С.Н., (сам. работа дома)» — после снятия пометки
+        # остаётся висячая запятая, и имя перестаёт опознаваться.
+        text = text.rstrip(" ,;")
 
     parts = _SUBJECT_TEACHER_SEP.split(text)
     if len(parts) >= 2 and _TEACHER_RE.match(parts[-1]):
-        return " – ".join(parts[:-1]).strip(), clean_teacher(parts[-1]), room
+        subject = " – ".join(parts[:-1]).strip()
+        if note:
+            subject = f"{subject} {note}"
+        return subject, clean_teacher(parts[-1]), room
     return text, "", room
 
 
