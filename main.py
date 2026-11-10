@@ -14,6 +14,7 @@ from tgbot.middlewares.database import DatabaseMiddleware
 from tgbot.middlewares.errors import on_error
 from tgbot.services.bell import bell_loop
 from tgbot.services.poller import poller_loop
+from tgbot.session import ReconnectingSession
 
 
 def setup_logging() -> None:
@@ -50,7 +51,14 @@ async def main() -> None:
     # Схема БД ведётся миграциями alembic (см. migrations/).
     await run_migrations(engine, config)
 
-    bot = Bot(token=config.tg_bot.token, default=DefaultBotProperties(parse_mode="HTML"))
+    # Своя сессия: после сетевого сбоя она пересоздаёт соединение.
+    # Со стандартной бот висел до ручного перезапуска (прод, 10.11.2026,
+    # 14 часов и 37 попыток подряд).
+    bot = Bot(
+        token=config.tg_bot.token,
+        session=ReconnectingSession(),
+        default=DefaultBotProperties(parse_mode="HTML"),
+    )
     # config в workflow_data: обработчик ошибок висит на dp.update, выше
     # DatabaseMiddleware, поэтому получает только то, что положили здесь.
     dp = Dispatcher(storage=MemoryStorage(), config=config)
