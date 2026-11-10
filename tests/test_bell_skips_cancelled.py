@@ -79,6 +79,39 @@ async def test_cancelled_para_sends_no_bell(pool, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_evening_lesson_with_own_time_sends_no_bell(pool, monkeypatch):
+    """Пара со своим временем («с 18.00 до 21.00») звонков не даёт.
+
+    В сетке номер 7 — это 18:50–20:20, и студент ДП-26 получал
+    «Перемена» и «Конец пары» посреди своей пары, идущей 18:00–21:00.
+    """
+    await _setup(pool)
+    async with pool() as db:
+        repo = RequestsRepo(db)
+        await repo.college_lessons.bulk_insert([
+            dict(date=DATE, group=GROUP, para=7, para_end=7,
+                 subject="Организация документооборота", teacher="Харькова Д.А.",
+                 room="ауд. 406", action=SUB_REPLACE, source="manual",
+                 time_note="с 18.00 до 21.00"),
+        ])
+
+    sent: list[str] = []
+
+    async def fake_send(bot, chat_id, text):
+        sent.append(text)
+        return True
+
+    monkeypatch.setattr(bell_mod, "send_message", fake_send)
+
+    # 18:50 — начало «седьмой пары» по сетке. Студент в это время уже
+    # 50 минут на своей вечерней паре.
+    now = datetime.datetime.combine(DATE, datetime.time(18, 50))
+    await bell_mod._tick(bot=None, session_pool=pool, now=now)
+
+    assert sent == [], f"пришли звонки посреди вечерней пары: {sent}"
+
+
+@pytest.mark.asyncio
 async def test_replaced_para_still_sends_bell(pool, monkeypatch):
     """Замена звонок даёт — иначе фильтр съел бы живые пары."""
     await _setup(pool)

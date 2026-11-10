@@ -70,6 +70,12 @@ async def _tick(bot, session_pool, now: datetime.datetime) -> None:
             # занятие, которого нет (прод, 10.11.2026).
             if getattr(l, "action", "") == SUB_CANCEL:
                 continue
+            # Вечерняя пара живёт по своему времени («с 18.00 до 21.00»),
+            # а не по сетке звонков. Номер 7 в сетке — это 18:50–20:20,
+            # и студент ДП-26 получал «Перемена» и «Конец пары» посреди
+            # своей пары (прод, 10.11.2026). Время из листка сильнее.
+            if (getattr(l, "time_note", "") or "").strip():
+                continue
             cg = _cg(l.group)
             para_end = getattr(l, "para_end", None) or l.para
             # У вуза своего обеда нет: запасная ветка на I_IV присылала

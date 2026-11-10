@@ -53,9 +53,47 @@ STEP_BELLS = "звонки"
 # перезапись базы стоит секунд и лучше, чем тихо работающий старый код.
 PARSER_VERSION = "5"
 
+# Хеш СОДЕРЖИМОГО файла — без версии парсера.
+#
+# Нужен отдельно, чтобы отличить «файл на сайте правда другой» от
+# «я поменял парсер, перечитай базу». Раньше обе ситуации давали один
+# хеш, и смена PARSER_VERSION поднимала флаг changed -> поллер видел
+# «источник изменился» -> рассылка всем. 10.11.2026 так ушло 988
+# сообщений «расписание изменилось» при неизменных данных.
+_CONTENT_KEY = "eios_content_{kind}"
+
 
 def _sha(data: bytes) -> str:
+    """Хеш разбора: байты файла + версия парсера. Для «перечитать или нет»."""
     return hashlib.sha256(data + b"\0" + PARSER_VERSION.encode()).hexdigest()
+
+
+def _content_sha(data: bytes) -> str:
+    """Хеш только содержимого. Для «изменился ли источник»."""
+    return hashlib.sha256(data).hexdigest()
+
+
+async def _content_is_new(repo, kind: str, data: bytes) -> bool:
+    """Файл на сайте действительно другой — а не просто «перечитали».
+
+    Сравниваем хеш содержимого с прошлым запуском. Возвращает True и
+    запоминает новый хеш, если содержимое изменилось.
+
+    Нужна, чтобы смена PARSER_VERSION не выглядела как правка расписания:
+    перечитать базу надо, рассылать «изменилось» — нет.
+    """
+    key = _CONTENT_KEY.format(kind=kind)
+    fresh = _content_sha(data)
+    was = await repo.settings.get(key)
+    await repo.settings.set(key, fresh)
+    if was is None:
+        # Первый запуск после деплоя: сравнивать не с чем. Молчим.
+        # Если сказать «изменилось», каждый деплой этой правки давал бы
+        # ещё одну волну рассылки — ровно то, от чего уходим. Новые даты
+        # при этом всё равно объявляются: поллер смотрит на «дня не было
+        # в базе» отдельно от этого флага.
+        return False
+    return was != fresh
 
 
 def db_parity(parsed: str) -> str:
@@ -403,7 +441,11 @@ async def _sync_ochoe(session, repo, url: str, force: bool, changed: dict) -> No
         count = await replace_base_lessons(repo, lessons)
         await repo.settings.set(_HASH_KEY.format(kind="ochoe"), digest)
         log.info("базовое расписание обновлено: %d пар", count)
-        changed["ochoe"] = True
+        # changed поднимаем, только если файл на сайте правда другой.
+        # Смена PARSER_VERSION — повод перечитать базу, но не повод
+        # говорить студентам «расписание изменилось».
+        if await _content_is_new(repo, "ochoe", data):
+            changed["ochoe"] = True
 
 
 async def _sync_zameny(session, repo, url: str, force: bool, changed: dict) -> None:
@@ -416,7 +458,8 @@ async def _sync_zameny(session, repo, url: str, force: bool, changed: dict) -> N
         count = await replace_substitutions(repo, subs)
         await repo.settings.set(_HASH_KEY.format(kind="zameny"), digest)
         log.info("замены обновлены: %d записей", count)
-        changed["zameny"] = True
+        if await _content_is_new(repo, "zameny", data):
+            changed["zameny"] = True
 
 
 # --- материализация слоёв в college_lesson ----------------------------------
