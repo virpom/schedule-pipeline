@@ -9,6 +9,7 @@ from common.schedule import (
     bells_group,
     course_group_from_group,
     day_type_from_date,
+    SUB_CANCEL,
     VUZ_GROUP,
 )
 from config import Config
@@ -64,6 +65,11 @@ async def _tick(bot, session_pool, now: datetime.datetime) -> None:
 
         events: list[tuple[datetime.time, str, str]] = []
         for l in lessons:
+            # Отменённая пара звонков не даёт. Без этого студент ДП-26
+            # получал «🔔 2 пара · Систематизация…» и шёл в колледж на
+            # занятие, которого нет (прод, 10.11.2026).
+            if getattr(l, "action", "") == SUB_CANCEL:
+                continue
             cg = _cg(l.group)
             para_end = getattr(l, "para_end", None) or l.para
             # У вуза своего обеда нет: запасная ветка на I_IV присылала
