@@ -60,6 +60,13 @@ async def _env(*, lessons=(), published=False, stale_minutes=None,
         if published:
             await repo.schedule_files.set_hash(D, "x")
         if stale_minutes is not None:
+            # Ночное окно растягивает порог устаревания на свою длину
+            # (23:00–07:00 = +8 ч). Тест, запущенный вечером, видел порог
+            # 8.5 ч, и 120 «минут давности» переставали считаться
+            # устаревшими — 4 теста падали только после 23:00.
+            # Здесь ночь не нужна: проверяем логику, а не час запуска.
+            await repo.settings.set("night_start", "")
+            await repo.settings.set("night_end", "")
             when = datetime.datetime.now() - datetime.timedelta(
                 minutes=stale_minutes)
             await repo.settings.set(source_state.LAST_OK, when.isoformat())
@@ -159,6 +166,12 @@ def test_teacher_only_vuz_gets_vuz_warning():
         async with pool() as db:
             repo = RequestsRepo(db)
             # Вуз «лежит», колледж — нет.
+            #
+            # Ночное окно снимаем: порог устаревания растягивается на его
+            # длину, и вечером 5 часов «давности» перестают быть старыми
+            # (порог становится 8.5 ч). Тест падал после 23:00.
+            await repo.settings.set("night_start", "")
+            await repo.settings.set("night_end", "")
             await repo.settings.set(
                 source_state.LAST_OK, datetime.datetime.now().isoformat())
             await repo.settings.set(
