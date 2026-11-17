@@ -17,17 +17,18 @@ from common.schedule import (
     DETAIL_ORDER,
     course_from_group,
     format_bell,
+    format_day,
     format_teacher_results,
     is_vuz,
     strip_unit,
 )
-from core.day import (HIST_PAGE, build_day, build_week, course_group_map,
-                      history_dates,
+from core.day import (HIST_PAGE, build_day, build_week,
+                      course_group_map, history_dates,
                       has_identity, is_teacher, user_lessons,
                       user_lessons_range, vuz_teacher_day)
 from core.day import (_dedupe_slots as _dedupe_slots_impl,
                       _drop_vuz_covered as _drop_vuz_covered_impl)
-from core.render import _fmt_day
+
 from core.menu import (college_pick_kb, menu_kb as build_menu_kb,
                        settings_kb as build_settings_kb,
                        teacher_letter_kb, teacher_search_kb,
@@ -193,7 +194,31 @@ _user_lessons_range = user_lessons_range
 _course_group_map = course_group_map
 _is_teacher = is_teacher
 _has_identity = has_identity
-_fmt = _fmt_day
+
+
+def _fmt(user: User, date: datetime.date, lessons, bell, lunches, gcg=None) -> str:
+    """Текст одного дня для этого пользователя.
+
+    При переносе в ядро (этап 1) эту функцию заменили алиасом
+    ``_fmt = _fmt_day``, но у ядровой ``_fmt_day`` ДРУГАЯ сигнатура: она
+    принимает готовый ``DayView``, а не пользователя с датой. Алиас
+    компилировался и не падал в тестах, потому что тесты зовут ядро
+    напрямую, а обработчики истории — через ``_fmt``. На проде это дало
+    ``AttributeError: 'User' object has no attribute 'date'`` на экране
+    «История расписания» (18.11.2026).
+
+    Восстановлена ТОЧНО по прежнему телу (до этапа 1), а не через
+    ``render_day``: тот для пустого дня отдаёт «Занятий нет», тогда как
+    история должна рисовать пустой список. Проверено на данных прода.
+    """
+    is_teacher = _is_teacher(user)
+    return format_day(
+        date, lessons, bell, lunches, user.bell_detail,
+        meta="group" if is_teacher else "teacher",
+        show_rov=not is_teacher,
+        group_course_group=gcg,
+        merge_groups=is_teacher,
+    )
 
 
 @user_router.message(CommandStart())
