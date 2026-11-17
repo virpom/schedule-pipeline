@@ -125,6 +125,14 @@ async def _tick(bot, session_pool, now: datetime.datetime) -> None:
                 events.append((lunch.lunch_start, "lunch", "🍽 Обед"))
                 events.append((lunch.lunch_end, "lunch_end", "🍽 Обед закончился"))
 
+        try:
+            events = [(t, key, _with_next(text, key, lessons, bell, dt, _cg, user))
+                      for t, key, text in events]
+        except Exception:
+            # Фича косметическая: если что-то в ней сломается, звонки
+            # всё равно должны уйти как раньше.
+            logging.exception("не удалось добавить следующую пару к звонкам")
+
         for t, key, text in events:
             if t != now_min:
                 continue
@@ -151,3 +159,77 @@ async def bell_loop(bot, session_pool, config: Config) -> None:
         except Exception:
             logging.exception("bell tick failed")
         await asyncio.sleep(30)
+
+
+def _lesson_mark(lesson) -> str:
+    """Значок замены/добавления — тот же, что в экране дня."""
+    if not getattr(lesson, "changed", False):
+        return ""
+    return " ➕" if getattr(lesson, "action", "") == "add" else " 🔄"
+
+
+def _lesson_line(lesson) -> str:
+    """Строка пары для «следующая»: предмет, преподаватель, аудитория."""
+    parts = [f"{escape(lesson.subject)}{_lesson_mark(lesson)}"]
+    who = " · ".join(x for x in (escape(lesson.teacher or ""),
+                                 escape(lesson.room or "")) if x)
+    if who:
+        parts.append(who)
+    return "\n".join(parts)
+
+
+def _next_para(lessons: list, after: int):
+    """Первая неотменённая пара с номером больше `after`."""
+    for l in sorted(lessons, key=lambda x: x.para):
+        if l.para <= after:
+            continue
+        if getattr(l, "action", "") == SUB_CANCEL:
+            continue
+        return l
+    return None
+
+
+def _with_next(text: str, key: str, lessons: list, bell: dict, dt: str,
+               cg_of, user) -> str:
+    """Дописать к «Конец пары» следующую пару: во сколько и через сколько.
+
+    Студент спрашивал в чате: после звонка об окончании непонятно, что
+    дальше и когда идти. Данные уже есть — это тот же день, что и
+    звонки, поэтому лишних запросов нет.
+
+    Дописываем только к концу пары и только в режиме, где этот звонок
+    вообще приходит. Следующей пары нет — строка не появляется, но и
+    «занятий больше нет» не пишем: после последней пары это очевидно,
+    а лишняя строка в каждом звонке раздражает.
+    """
+    if not key.startswith("e:"):
+        return text
+    cur = int(key.split(":", 1)[1])
+    nxt = _next_para(lessons, cur)
+    if nxt is None:
+        return text
+
+    # Когда начнётся. Своё время из ячейки сильнее сетки звонков —
+    # та же логика, что при построении экрана дня.
+    note = (getattr(nxt, "time_note", "") or "").strip()
+    cg = cg_of(nxt.group)
+    bs = bell.get((dt, cg, nxt.para)) or bell.get((dt, "I_IV", nxt.para))
+    if note:
+        when = note
+        start = None
+    elif bs:
+        when = f"{bs.start:%H:%M}"
+        start = bs.start
+    else:
+        when = f"{nxt.para} пара"
+        start = None
+
+    head = f"следующая пара {when}"
+    if start is not None:
+        now = datetime.datetime.now()
+        mins = (datetime.datetime.combine(now.date(), start)
+                - now.replace(second=0, microsecond=0)).total_seconds() / 60
+        if 0 < mins <= 180:
+            head += f" · через {int(mins)} мин"
+
+    return f"{text}\n{head}\n{_lesson_line(nxt)}"
